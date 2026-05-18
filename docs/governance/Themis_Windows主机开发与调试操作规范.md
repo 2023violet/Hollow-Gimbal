@@ -18,7 +18,7 @@
 
 - Git 仓库根目录：`D:/study/Software/TEC_Thermostat_Water_Bath`
 - 开发板串口：`COM3`
-- 正式 OpenOCD 路径：`C:/Program Files (x86)/OpenOCD_V2.0.2/bin/openocd.exe`
+- 正式 OpenOCD 路径：`C:/Program Files (x86)/OpenOCD_V2.0.6/bin/openocd.exe`
 - 正式 OpenOCD 配置：`tools/openocd/openocd_daplink.cfg`
 - VS Code 默认调试 lane：`fw-full-diag-carrier-debug`
 - VS Code 默认调试 ELF：
@@ -88,7 +88,7 @@ D:/Git/Git/bin/bash.exe -lc "cd /d/study/Software/TEC_Thermostat_Water_Bath && .
 - `launch.json` 里使用 `fw-full-diag-carrier-debug`
 - `preLaunchTask` 是 `Themis: Build fw-full-diag-carrier-debug`
 - `serverpath` 是
-  `C:/Program Files (x86)/OpenOCD_V2.0.2/bin/openocd.exe`
+  `C:/Program Files (x86)/OpenOCD_V2.0.6/bin/openocd.exe`
 
 ### 3.4 默认用直接 OpenOCD / GDB 的场景
 

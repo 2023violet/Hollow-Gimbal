@@ -1,0 +1,3 @@
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_obs.c:16:13:_app_shell_obs_show_all	184	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_obs.c:50:12:_app_shell_obs_show_scalar	40	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_obs.c:64:5:app_shell_obs_command	80	static

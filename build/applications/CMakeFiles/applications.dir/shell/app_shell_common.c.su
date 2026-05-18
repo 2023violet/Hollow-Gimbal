@@ -1,0 +1,10 @@
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:33:13:app_shell_axis_state_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:49:13:app_shell_ctrl_mode_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:65:13:app_shell_input_mode_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:89:13:app_shell_sensor_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:105:13:app_shell_fault_bit_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:131:5:app_shell_parse_ctrl_mode	16	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:157:5:app_shell_parse_input_mode	16	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:200:5:app_shell_parse_float_arg	24	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:220:5:app_shell_format_float	40	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c:287:13:app_shell_format_float_or_dash	16	static

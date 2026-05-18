@@ -1,0 +1,14 @@
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:197:13:_state_lut_start	24	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:312:13:_state_lut_flush	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:324:13:_state_lut_end	0	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:134:13:_calib_reset_ctx	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:159:13:_state_pp_start	16	static
+D:/study/Software/Hollow-Gimbal/applications/algo/foc_math.h:155:21:foc_wrap_0_2pi	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:141:14:_calib_get_norm_mech_pos	8	static
+D:/study/Software/Hollow-Gimbal/applications/algo/foc_math.h:185:21:foc_wrap_pm_pi	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:217:13:_state_lut_cw	24	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:241:13:_state_lut_ccw	32	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:179:13:_state_pp_calc	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:272:13:_state_lut_calc	32	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:42:6:foc_calib_enc_init	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/foc_calib_enc.c:75:6:foc_calib_enc	16	static

@@ -1,0 +1,9 @@
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:14:5:deferred_action_init	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:27:6:deferred_action_clear	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:37:6:deferred_action_mark_pending	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:47:5:deferred_action_arm	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:62:6:deferred_action_has_work	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:67:6:deferred_action_is_pending	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:72:6:deferred_action_is_armed	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:77:6:deferred_action_wait	16	static
+D:/study/Software/Hollow-Gimbal/components/utils/deferred_action/deferred_action.c:91:10:deferred_action_remaining	0	static

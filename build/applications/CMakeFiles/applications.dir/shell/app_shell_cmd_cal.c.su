@@ -1,0 +1,4 @@
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c:21:20:_app_shell_cal_stage_name	0	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c:46:13:_app_shell_cal_status	48	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c:69:12:_app_shell_cal_start	16	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c:95:5:app_shell_cal_command	16	static

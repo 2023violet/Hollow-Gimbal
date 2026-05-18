@@ -1,0 +1,6 @@
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:31:13:_mempool_block_belongs	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:58:5:mempool_init	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:112:7:mempool_alloc	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:131:5:mempool_free	16	static
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:150:8:mempool_get_free_count	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/mempool/mempool.c:159:8:mempool_get_total_count	0	static

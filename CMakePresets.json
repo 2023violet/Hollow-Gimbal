@@ -1,0 +1,143 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "host-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "THEMIS_BUILD_FIRMWARE": "OFF",
+        "THEMIS_BUILD_HOST_TESTS": "ON"
+      }
+    },
+    {
+      "name": "host-debug",
+      "inherits": "host-base",
+      "displayName": "Themis Host Debug",
+      "description": "Native host-test configure with debug information.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "host-relwithdebinfo",
+      "inherits": "host-base",
+      "displayName": "Themis Host RelWithDebInfo",
+      "description": "Native host-test configure with optimized debug symbols.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "fw-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/tools/cmake/arm-gcc-toolchain.cmake",
+      "cacheVariables": {
+        "THEMIS_BUILD_FIRMWARE": "ON",
+        "THEMIS_BUILD_HOST_TESTS": "OFF",
+        "THEMIS_FIRMWARE_TARGET_NAME": "falcon-foc-at32"
+      }
+    },
+    {
+      "name": "fw-tiny-carrier-minsizerel",
+      "inherits": "fw-base",
+      "displayName": "Themis FW tiny + carrier-demo",
+      "description": "Primary tiny sentinel firmware build.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "THEMIS_DEVDRV_PROFILE": "tiny",
+        "THEMIS_PRODUCT_FLAVOR": "carrier-demo"
+      }
+    },
+    {
+      "name": "fw-tiny-headless-minsizerel",
+      "inherits": "fw-base",
+      "displayName": "Themis FW tiny + headless-tiny",
+      "description": "Minimum survivable tiny firmware build.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "THEMIS_DEVDRV_PROFILE": "tiny",
+        "THEMIS_PRODUCT_FLAVOR": "headless-tiny"
+      }
+    },
+    {
+      "name": "fw-standard-carrier-minsizerel",
+      "inherits": "fw-base",
+      "displayName": "Themis FW standard + carrier-demo",
+      "description": "Main carrier firmware baseline for CI and release evidence.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "THEMIS_DEVDRV_PROFILE": "standard",
+        "THEMIS_PRODUCT_FLAVOR": "carrier-demo"
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-debug",
+      "inherits": "fw-base",
+      "displayName": "Themis FW full-diag + carrier-demo",
+      "description": "Diagnostic-heavy firmware build for bring-up and debug.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "THEMIS_DEVDRV_PROFILE": "full-diag",
+        "THEMIS_PRODUCT_FLAVOR": "carrier-demo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-host-debug",
+      "configurePreset": "host-debug"
+    },
+    {
+      "name": "build-host-relwithdebinfo",
+      "configurePreset": "host-relwithdebinfo"
+    },
+    {
+      "name": "build-fw-tiny-carrier-minsizerel",
+      "configurePreset": "fw-tiny-carrier-minsizerel"
+    },
+    {
+      "name": "build-fw-tiny-headless-minsizerel",
+      "configurePreset": "fw-tiny-headless-minsizerel"
+    },
+    {
+      "name": "build-fw-standard-carrier-minsizerel",
+      "configurePreset": "fw-standard-carrier-minsizerel"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-debug",
+      "configurePreset": "fw-full-diag-carrier-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-host-debug",
+      "configurePreset": "host-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "test-host-relwithdebinfo",
+      "configurePreset": "host-relwithdebinfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

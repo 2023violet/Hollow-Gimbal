@@ -1,0 +1,8 @@
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:31:13:_pubsub_bus_pre_init_state_is_valid	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:41:13:_pubsub_bus_has_active_subscriptions	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:58:13:_pubsub_node_reset	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:76:5:pubsub_init	16	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:103:5:pubsub_subscribe	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:136:5:pubsub_unsubscribe	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:188:5:pubsub_publish	40	static
+D:/study/Software/Hollow-Gimbal/components/utils/pubsub/pubsub.c:222:5:pubsub_subscriber_count	0	static

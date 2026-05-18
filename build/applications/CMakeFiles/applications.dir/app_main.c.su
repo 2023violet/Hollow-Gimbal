@@ -1,0 +1,4 @@
+D:/study/Software/Hollow-Gimbal/applications/app_main.c:77:13:_app_boot_halt	0	static
+D:/study/Software/Hollow-Gimbal/applications/app_main.c:86:13:_app_boot_capture_export_failure	24	static
+D:/study/Software/Hollow-Gimbal/applications/app_main.c:102:13:_app_boot_require	16	static
+D:/study/Software/Hollow-Gimbal/applications/app_main.c:53:6:app_main_bootstrap	8	static

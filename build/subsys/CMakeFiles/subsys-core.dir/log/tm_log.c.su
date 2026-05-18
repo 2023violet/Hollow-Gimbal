@@ -1,0 +1,13 @@
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:263:20:_get_color	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:284:15:_log_format_capacity	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:293:14:_log_format_cursor	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:321:15:_log_output_len	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:355:20:_get_level_char	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:136:13:_log_mutex_init_once	8	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:302:13:_log_append	32	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:330:13:_log_output_enter	8	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:345:13:_log_output_leave	8	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:106:6:tm_log_init	8	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:117:6:tm_log_set_level	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:126:19:tm_log_get_level	0	static
+D:/study/Software/Hollow-Gimbal/subsys/log/tm_log.c:167:6:_tm_log_output	252	static

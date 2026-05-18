@@ -1,0 +1,5 @@
+D:/study/Software/Hollow-Gimbal/components/utils/mpsc_queue/mpsc_queue.c:79:13:_mpsc_queue_push_node	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/mpsc_queue/mpsc_queue.c:102:6:mpsc_queue_node_init	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/mpsc_queue/mpsc_queue.c:112:5:mpsc_queue_init	16	static
+D:/study/Software/Hollow-Gimbal/components/utils/mpsc_queue/mpsc_queue.c:124:5:mpsc_queue_push	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/mpsc_queue/mpsc_queue.c:145:5:mpsc_queue_try_pop	16	static

@@ -1,0 +1,413 @@
+# Themis host-test manifest. Role:
+# - declare only the host-side verification targets that still match the
+#   current FalconFoc codebase
+# - keep each target explicit so ownership and coverage stay readable
+# - avoid stale retired UI/resource paths that no longer exist in this product tree
+
+themis_add_host_test(
+  NAME
+  test_tm_export
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_export.c"
+  "subsys/export/tm_export.c"
+  PRIVATE_INCLUDE_DIRS
+  "include"
+  "include/config"
+  "subsys/export"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_tm_format
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_format.c"
+  "tests/host/subsys/test_tm_format_impl.c"
+  PRIVATE_INCLUDE_DIRS
+  "subsys/format"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_tm_format PRIVATE m)
+endif()
+
+themis_add_host_test(
+  NAME
+  test_tm_assert
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_assert.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/runtime/tm_runtime.c"
+  "subsys/format/tm_format.c"
+  "subsys/assert/tm_assert.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/assert"
+  "subsys/format"
+  "subsys/runtime"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_tm_assert PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_core_time_dwt
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_core_time_dwt.c"
+  "tests/host/support/host_rtos.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/time"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_tm_runtime
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_runtime.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/runtime/tm_runtime.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/runtime"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_tm_task_perf
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_task_perf.c"
+  PRIVATE_INCLUDE_DIRS
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/runtime"
+  "subsys/time"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_tm_task_perf PRIVATE TM_TASK_PERF_ENABLE=1)
+
+themis_add_host_test(
+  NAME
+  test_tm_log
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_log.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/runtime/tm_runtime.c"
+  "subsys/format/tm_format.c"
+  "subsys/log/tm_log.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support/full_diag_config"
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/assert"
+  "subsys/format"
+  "subsys/log"
+  "subsys/runtime"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_tm_log PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_tm_shell
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_shell.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/assert/tm_assert.c"
+  "subsys/runtime/tm_runtime.c"
+  "subsys/format/tm_format.c"
+  "subsys/shell/tm_shell.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/assert"
+  "subsys/format"
+  "subsys/runtime"
+  "subsys/shell"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_tm_shell_task
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_shell_task.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/assert/tm_assert.c"
+  "subsys/runtime/tm_runtime.c"
+  "subsys/runtime/tm_task_budget_probe.c"
+  "subsys/format/tm_format.c"
+  "subsys/shell/tm_shell.c"
+  "applications/tasks/app_shell_task.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/assert"
+  "subsys/export"
+  "subsys/format"
+  "subsys/runtime"
+  "subsys/shell"
+  "applications/tasks"
+  "applications/config"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(
+  test_tm_shell_task PRIVATE TM_SHELL_TASK_QUEUE_DEPTH=2 TM_SHELL_TASK_BACKLOG_DEPTH=2
+)
+
+themis_add_host_test(
+  NAME
+  test_tm_task_budget_probe_failfast
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/subsys/test_tm_task_budget_probe_failfast.c"
+  "tests/host/support/host_rtos.c"
+  "subsys/runtime/tm_task_budget_probe.c"
+  "subsys/runtime/tm_runtime.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "subsys/runtime"
+  FOLDER
+  "themis/tests"
+)
+set_tests_properties(test_tm_task_budget_probe_failfast PROPERTIES WILL_FAIL TRUE)
+
+themis_add_host_test(
+  NAME
+  test_app_runtime_budget_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_app_runtime_budget_contract.c"
+  PRIVATE_INCLUDE_DIRS
+  "include"
+  "include/config"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_motor_fsm_abort_restore
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_fsm_abort_restore.c"
+  "applications/tasks/motor_fsm.c"
+  "components/utils/fsm/fsm.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_motor_fsm_fault_clear_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_fsm_fault_clear_contract.c"
+  "applications/tasks/motor_fsm.c"
+  "components/utils/fsm/fsm.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_app_shell_state_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_app_shell_state_contract.c"
+  "applications/shell/app_shell_cmd_state.c"
+  "subsys/format/tm_format.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/full_diag_config"
+  "include"
+  "include/config"
+  "applications"
+  "applications/shell"
+  "applications/config"
+  "components/utils/fsm"
+  "subsys/format"
+  "subsys/shell"
+  "subsys/assert"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_app_shell_state_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_app_shell_store_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_app_shell_store_contract.c"
+  "applications/shell/app_shell_cmd_store.c"
+  "subsys/format/tm_format.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/full_diag_config"
+  "include"
+  "include/config"
+  "applications"
+  "applications/shell"
+  "applications/config"
+  "components/utils/fsm"
+  "subsys/format"
+  "subsys/shell"
+  "subsys/assert"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_app_shell_store_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_app_shell_cfg_cal_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_app_shell_cfg_cal_contract.c"
+  "applications/shell/app_shell_cmd_cfg.c"
+  "applications/shell/app_shell_cmd_cal.c"
+  "subsys/format/tm_format.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/full_diag_config"
+  "include"
+  "include/config"
+  "applications"
+  "applications/shell"
+  "applications/config"
+  "components/utils/fsm"
+  "subsys/format"
+  "subsys/shell"
+  "subsys/assert"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_app_shell_cfg_cal_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_app_shell_diag_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_app_shell_diag_contract.c"
+  "applications/shell/app_shell_cmd_diag.c"
+  "subsys/format/tm_format.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/full_diag_config"
+  "include"
+  "include/config"
+  "applications"
+  "applications/shell"
+  "applications/config"
+  "components/utils/fsm"
+  "subsys/format"
+  "subsys/shell"
+  "subsys/assert"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_app_shell_diag_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_foc_param_restore_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_param_restore_contract.c"
+  "applications/algo/foc_param.c"
+  "applications/algo/foc_restore.c"
+  "applications/algo/traj_trap.c"
+  "components/utils/tiny_param/tiny_param.c"
+  "components/utils/crc/crc.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support/foc_restore_contract"
+  "tests/host/support/rtos"
+  "include"
+  "include/config"
+  "applications"
+  "applications/algo"
+  "bsp"
+  "subsys/runtime"
+  "kernel/freertos/CMSIS_RTOS_V2"
+  "kernel/freertos/include"
+  "components/utils/tiny_param"
+  "components/utils/crc"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_param_restore_contract PRIVATE m)
+endif()

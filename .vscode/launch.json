@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FalconFoc DAP-LINK Debug",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/fw-full-diag-carrier-debug/output/falcon-foc-at32.elf",
+      "request": "launch",
+      "type": "cortex-debug",
+      "servertype": "openocd",
+      "configFiles": [
+        "tools/openocd/openocd_daplink.cfg"
+      ],
+      "serverpath": "C:/Program Files (x86)/OpenOCD_V2.0.6/bin/openocd.exe",
+      "searchDir": [
+        "${workspaceFolder}"
+      ],
+      "preLaunchTask": "Themis: Build fw-full-diag-carrier-debug",
+      "runToEntryPoint": "main",
+      "showDevDebugOutput": "both",
+      "svdPath": "${workspaceFolder}/platform/at/at32f415xx/AT32F415xx_v2.svd",
+      "device": "AT32F415KBU7",
+      "liveWatch": {
+        "enabled": true,
+        "samplesPerSecond": 4
+      }
+    }
+  ]
+}

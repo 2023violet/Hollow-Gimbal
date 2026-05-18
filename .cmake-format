@@ -1,0 +1,25 @@
+# Themis active CMake formatter baseline.
+# Decision:
+# - Keep the config conservative and repo-truthful.
+# - Prefer a stable 2-space / 100-column policy over aggressive wrapping rules.
+# - Let docs carry stricter alternative candidates instead of turning the
+#   formatter into a churn amplifier.
+
+with section("format"):
+    line_width = 100
+    tab_size = 2
+    max_pargs_hwrap = 4
+    separate_ctrl_name_with_space = False
+    separate_fn_name_with_space = False
+    dangle_parens = True
+    command_case = "lower"
+    keyword_case = "unchanged"
+    line_ending = "unix"
+
+with section("markup"):
+    enable_markup = False
+    first_comment_is_literal = True
+
+with section("encode"):
+    input_encoding = "utf-8"
+    output_encoding = "utf-8"

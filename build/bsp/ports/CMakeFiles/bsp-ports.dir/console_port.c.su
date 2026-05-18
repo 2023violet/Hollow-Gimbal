@@ -1,0 +1,6 @@
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:28:6:console_port_shell_rx_start	8	static
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:46:10:console_port_shell_rx_position	0	static
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:60:6:console_port_shell_irq_ack_idle	8	static
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:67:6:console_port_shell_irq_idle_pending	8	static
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:76:6:console_port_write_poll	32	static
+D:/study/Software/Hollow-Gimbal/bsp/ports/console_port.c:112:6:console_port_write_dma	16	static

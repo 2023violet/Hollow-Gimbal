@@ -1,0 +1,9 @@
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:191:37:_fsm_find_state_in_table	4	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:186:37:_fsm_find_state	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:205:37:_fsm_find_transition	8	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:218:13:_fsm_do_transition	16	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:246:12:_fsm_validate_tables	32	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:69:5:fsm_init	48	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:111:5:fsm_dispatch_event	24	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:152:10:fsm_current_state_get	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/fsm/fsm.c:161:5:fsm_force_state	16	static

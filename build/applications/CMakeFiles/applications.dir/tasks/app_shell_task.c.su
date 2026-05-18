@@ -1,0 +1,13 @@
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:82:13:_tm_shell_task_queue_reserve_locked	0	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:90:13:_tm_shell_task_queue_release_locked	0	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:97:13:_tm_shell_task_backlog_push_locked	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:114:13:_tm_shell_task_backlog_pop_locked	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:338:13:_tm_shell_task_wait_transport_ready	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:127:12:_tm_shell_task_take_next_line	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:161:12:_tm_shell_task_process_once	144	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:318:13:_tm_shell_task_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:177:5:tm_shell_task_init	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:206:5:tm_shell_task_submit_line	152	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:267:6:tm_shell_task_diag_snapshot	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:297:6:tm_shell_task_set_banner_hook	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c:304:6:tm_shell_task_notify_transport_ready	8	static

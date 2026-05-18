@@ -1,0 +1,11 @@
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:63:6:dma_reset	4	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:108:6:dma_data_number_set	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:133:10:dma_data_number_get	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:164:6:dma_interrupt_enable	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:197:6:dma_channel_enable	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:235:6:dma_flexible_config	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:295:13:dma_interrupt_flag_get	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:341:13:dma_flag_get	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:387:6:dma_flag_clear	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:405:6:dma_default_para_init	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/drivers/src/at32f415_dma.c:440:6:dma_init	0	static

@@ -1,0 +1,12 @@
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:202:20:_export_validate_item	0	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:225:19:_export_execute_item	8	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:268:20:_export_item_in_range	24	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:283:19:_export_compare_order	0	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:305:34:_export_find_ordered_item	40	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:344:20:_export_record_last_error	0	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:372:12:_export_execute_init_range	48	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:167:5:export_init_execute_range	8	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:162:5:export_init_execute	8	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:172:5:export_init_execute_from	8	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:177:6:export_init_last_error_get	0	static
+D:/study/Software/Hollow-Gimbal/subsys/export/tm_export.c:187:5:export_exit_execute	0	static

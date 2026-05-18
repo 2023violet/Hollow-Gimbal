@@ -1,0 +1,4 @@
+D:/study/Software/Hollow-Gimbal/components/utils/pct_curve/pct_curve.c:12:16:_pct_curve_clamp_percent	0	static
+D:/study/Software/Hollow-Gimbal/components/utils/pct_curve/pct_curve.c:17:13:_pct_curve_is_monotonic	32	static
+D:/study/Software/Hollow-Gimbal/components/utils/pct_curve/pct_curve.c:39:9:pct_curve_interpolate	40	static
+D:/study/Software/Hollow-Gimbal/components/utils/pct_curve/pct_curve.c:86:10:pct_curve_scale_permille	8	static

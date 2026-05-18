@@ -1,0 +1,13 @@
+{
+  "configurations": [
+    {
+      "name": "FalconFoc AT32",
+      "configurationProvider": "ms-vscode.cmake-tools",
+      "compileCommands": "${workspaceFolder}/build/fw-full-diag-carrier-debug/compile_commands.json",
+      "cStandard": "gnu17",
+      "cppStandard": "gnu++17",
+      "intelliSenseMode": "windows-gcc-arm"
+    }
+  ],
+  "version": 4
+}

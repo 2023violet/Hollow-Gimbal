@@ -1,0 +1,5 @@
+D:/study/Software/Hollow-Gimbal/bsp/board/bsp_flash.c:24:5:bsp_flash_read	8	static
+D:/study/Software/Hollow-Gimbal/bsp/board/bsp_flash.c:35:5:bsp_flash_write	24	static
+D:/study/Software/Hollow-Gimbal/bsp/board/bsp_flash.c:74:5:bsp_flash_erase	16	static
+D:/study/Software/Hollow-Gimbal/bsp/board/bsp_flash.c:112:10:bsp_flash_get_sector	0	static
+D:/study/Software/Hollow-Gimbal/bsp/board/bsp_flash.c:121:6:bsp_flash_is_empty	8	static

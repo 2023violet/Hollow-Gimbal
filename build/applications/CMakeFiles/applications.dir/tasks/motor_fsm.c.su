@@ -1,8 +1,8 @@
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:300:13:_on_calib_enter	0	static
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:317:13:_on_running_enter	0	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:371:13:_action_start	0	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:484:13:_action_calib_done	0	static
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:500:13:_action_clear_fault	0	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:484:13:_action_calib_done	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:371:13:_action_start	8	static
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:444:13:_action_calib_abort	8	static
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:392:13:_action_calib_motor	8	static
 D:/study/Software/Hollow-Gimbal/applications/tasks/motor_fsm.c:414:13:_action_calib_enc	8	static

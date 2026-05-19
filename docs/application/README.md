@@ -9,7 +9,7 @@ Current active docs:
 
 Current scope:
 - FalconFoc shell usage
-- FalconFoc shell command profile split
+- FalconFoc shell compile-time on/off policy
 - operator-facing workflow that still exists in `applications/shell/`
 
 Removed from the live application doc surface:

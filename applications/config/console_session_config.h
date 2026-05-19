@@ -24,7 +24,8 @@ extern "C" {
 
 /* Public Macros -------------------------------------------------------------------------------- */
 
-#define SHELL_ENABLE                    (1U)
+#define TM_SHELL_ENABLE                 (TM_FEATURE_SHELL)
+#define SHELL_ENABLE                    (TM_SHELL_ENABLE)
 
 #define SHELL_PRIO_MOTOR                (10U)
 #define SHELL_PRIO_MONITOR              (20U)
@@ -43,31 +44,9 @@ extern "C" {
 #define SHELL_FW_DATE                   __DATE__ " " __TIME__
 
 #define SHELL_RX_BUF_SIZE               (256U)
-#define SHELL_TX_BLOCK_SIZE             (128U)
-#define SHELL_TX_QUEUE_CAP              (32U)
-
-#define _TX_LEN_OFFSET                  (0U)
-#define _TX_STR_OFFSET                  (2U)
-#define _TX_MAX_STR                     (SHELL_TX_BLOCK_SIZE - _TX_STR_OFFSET - 1U)
+#define SHELL_TX_RING_SIZE              (1024U)
 #define FLAG_SHELL_RX                   TM_BIT(0U)
 #define FLAG_SHELL_TX                   TM_BIT(1U)
-
-#if TM_DEVDRV_PROFILE_TINY
-#define TM_APP_SHELL_PROFILE_PRODUCT (1U)
-#define TM_APP_SHELL_PROFILE_FACTORY (0U)
-#define TM_APP_SHELL_PROFILE_DIAG    (0U)
-#define TM_APP_SHELL_PROFILE_NAME    "product"
-#elif TM_DEVDRV_PROFILE_FULL_DIAG
-#define TM_APP_SHELL_PROFILE_PRODUCT (0U)
-#define TM_APP_SHELL_PROFILE_FACTORY (0U)
-#define TM_APP_SHELL_PROFILE_DIAG    (1U)
-#define TM_APP_SHELL_PROFILE_NAME    "diag"
-#else
-#define TM_APP_SHELL_PROFILE_PRODUCT (0U)
-#define TM_APP_SHELL_PROFILE_FACTORY (1U)
-#define TM_APP_SHELL_PROFILE_DIAG    (0U)
-#define TM_APP_SHELL_PROFILE_NAME    "factory"
-#endif
 
 #ifdef __cplusplus
 }

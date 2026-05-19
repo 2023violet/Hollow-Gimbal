@@ -18,12 +18,15 @@ themis_add_module(
   "tasks.c"
   "timers.c"
   "CMSIS_RTOS_V2/*.c"
+  "CMSIS_RTOS_V2/os_systick.c"
   "portable/GCC/ARM_CM3/*.c"
   "${_freertos_heap_source}"
   PUBLIC_INCLUDE_DIRS
   "include"
   "portable/GCC/ARM_CM3"
   "CMSIS_RTOS_V2"
+  PRIVATE_COMPILE_DEFINITIONS
+  "_RTE_"
   PUBLIC_DEPS
   ${THEMIS_PLATFORM_TARGET}
   FOLDER

@@ -98,7 +98,7 @@ if ($rootCMake -match 'add_subdirectory\s*\(\s*drivers/') {
 
 $realPlatformDir = Join-Path $paths.RepoRoot "platform\at\at32f415"
 $templatePlatformDir = Join-Path $paths.RepoRoot "platform\template\cortex_m4_ref"
-$forbiddenPlatformDir = Join-Path $paths.RepoRoot "platform\at\at32f415"
+$forbiddenPlatformDir = Join-Path $paths.RepoRoot "platform\at\at32f423"
 
 Assert-PathExists -Path (Join-Path $realPlatformDir "CMakeLists.txt") `
                   -Message "Missing active FalconFoc-lite platform manifest."
@@ -106,7 +106,7 @@ Assert-PathExists -Path (Join-Path $realPlatformDir "generated\src\main.c") `
                   -Message "Missing active FalconFoc-lite generated entry source."
 Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\startup_at32f415.s") `
                   -Message "Missing active FalconFoc-lite startup source."
-Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\linker\AT32F415xB_FLASH.ld") `
+Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\linker\at32f415xB_FLASH.ld") `
                   -Message "Missing active FalconFoc-lite linker script."
 
 Assert-PathExists -Path (Join-Path $templatePlatformDir "CMakeLists.txt") `
@@ -119,7 +119,7 @@ Assert-PathExists -Path (Join-Path $templatePlatformDir "vendor") `
                   -Message "Missing template platform vendor/ boundary."
 
 if (Test-Path -LiteralPath $forbiddenPlatformDir) {
-    throw "FalconFoc-lite must not keep stale active platform path platform/at/at32f415."
+    throw "FalconFoc-lite must not keep stale active platform path platform/at/at32f423."
 }
 
 Write-Host ("[platform_backend_contract] git root : " + $paths.GitRoot)

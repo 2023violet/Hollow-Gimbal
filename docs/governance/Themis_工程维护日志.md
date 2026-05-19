@@ -7,7 +7,7 @@
 - This heading is kept as the current live maintenance-log anchor for contract
   tests and tooling.
 - Current witness tokens:
-  - debugger=`J-Link`
+  - debugger=`DAP-Link`
   - serial=`COM54`
   - flash=`./run.sh flash`
   - persistence=`store save sys`
@@ -55,7 +55,7 @@
 ### Serial and board-debug witness
 
 - Current live serial witness:
-  - debugger: `J-Link`
+  - debugger: `DAP-Link`
   - console port: `COM54`
   - shell probe baud: `1000000`
   - policy: `USART1 console-first`
@@ -69,7 +69,7 @@
 ### Tooling cleanup
 
 - Updated live smoke lane defaults to the dedicated FalconFoc OpenOCD config:
-  - `tools/openocd/openocd_jlink_at32f403a.cfg`
+  - `tools/openocd/openocd_jlink.cfg`
 - Removed dead host tests and stale script/doc references that belonged to
   retired surfaces.
 
@@ -127,7 +127,7 @@
 ### P0 reboot-restore witness closure
 
 - Real board witness completed on:
-  - debugger=`J-Link`
+  - debugger=`DAP-Link`
   - serial=`COM54`
   - baud=`1000000`
 - Fixed the last P0 restore drift:
@@ -222,7 +222,7 @@
 ### P1 COM54 diag/cal board witness closure
 
 - Re-validated the real-board interactive shell on:
-  - debugger=`J-Link`
+  - debugger=`DAP-Link`
   - serial=`COM54`
   - baud=`1000000`
   - profile=`diag`
@@ -280,3 +280,61 @@
   - `tests/CMakeLists.txt`
 - Current witness:
   - `run_host_tests.ps1` passed with `18/18` tests green
+
+## 2026-05-18
+
+### FalconFoc 128K/32K shell two-state and memory slimming baseline
+
+- Added the formal memory roadmap document:
+  - `docs/architecture/Themis_FalconFoc_128K32K内存瘦身与Shell两态裁剪路线图.md`
+- Froze the shell policy to compile-time two-state only:
+  - `TM_SHELL_ENABLE=1`
+  - `TM_SHELL_ENABLE=0`
+- Removed the live `product / factory / diag` shell profile split from runtime policy.
+- Shell-enabled images now expose one complete command surface; shell-disabled images compile shell owners out of the image.
+
+### Shell transport/session memory tightening
+
+- `applications/tasks/shell_task.c`
+  - removed shell TX use of `mempool + spsc_queue`
+  - switched to `1024 B ring_buffer` TX staging
+  - overflow policy now drops new output and preserves transport continuity
+- `applications/tasks/app_shell_task.c`
+  - removed the `_tm_shell_task_backlog` shadow queue
+  - kept one static message queue only
+  - default queue depth is now `3`
+- Updated host regression coverage and transport-shell gate to match the new single-queue contract.
+
+### Feature-gate and linker-reserve convergence
+
+- Added explicit feature gates in `tm_core_config.h` and CMake:
+  - `TM_FEATURE_SHELL`
+  - `TM_FEATURE_VOFA`
+  - `TM_FEATURE_IPC`
+  - `TM_FEATURE_TASK_BUDGET`
+  - `TM_FEATURE_VERBOSE_LOG`
+- Tightened linker reserve generation through the firmware CMake flow:
+  - `shell off`: heap `0`, stack `0x400`
+  - `shell on`: heap `0x200`, stack `0x400`
+- Kept FreeRTOS heap unchanged at `10 * 1024 B` per current product constraint.
+
+### Shell two-state live docs and witness contract closure
+
+- Updated the live shell manual to the current two-state contract:
+  - shell now documents only `TM_SHELL_ENABLE=1` and `TM_SHELL_ENABLE=0`
+  - removed retired `product / factory / diag` runtime shell-profile wording
+  - removed retired backlog wording from operator guidance
+- Updated live transport and boot docs:
+  - transport doc now records the single static queue contract
+  - boot doc now records `line queue / command dispatch owner` instead of `queue / backlog`
+  - architecture readme now links the formal 128K/32K memory roadmap
+- Updated board witness and serial probe scripts to the current shell contract:
+  - `scripts/find_themis_shell_port.ps1`
+  - `scripts/flows/board/run_diag_carrier_witness.ps1`
+  - `scripts/flows/board/run_tiny_carrier_regression.ps1`
+- Serial probe and board witness no longer depend on retired `profile=diag` / `profile=tiny` shell signatures.
+- The live shell witness contract now keys on:
+  - `shell=on`
+  - `flavor=carrier-demo`
+  - `help`
+  - `sys status`

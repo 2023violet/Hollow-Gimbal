@@ -16,7 +16,7 @@
 void app_shell_banner_print(void)
 {
     TM_SHELL_SUMMARY("shell", "name=FalconFoc version=%s", TM_APP_FW_VERSION_STRING);
-    TM_SHELL_ROW("image", "build=%s %s profile=%s flavor=%s", __DATE__, __TIME__, TM_APP_SHELL_PROFILE_NAME, TM_PRODUCT_FLAVOR_NAME);
+    TM_SHELL_ROW("image", "build=%s %s shell=on flavor=%s", __DATE__, __TIME__, TM_PRODUCT_FLAVOR_NAME);
     TM_SHELL_ROW("console", "transport=uart1-dma");
     TM_SHELL_ROW("hint", "help=type 'help'");
     TM_SHELL_PROMPT();

@@ -310,11 +310,32 @@ THEMIS_ENABLE_LIBC_FLOAT_SCANF:BOOL=OFF
 //Optional firmware entry source override.
 THEMIS_ENTRY_SOURCE_OVERRIDE:FILEPATH=
 
+//Compile Themis IPC runtime and broker task.
+THEMIS_FEATURE_IPC:BOOL=OFF
+
+//Compile FalconFoc shell transport, session, and commands.
+THEMIS_FEATURE_SHELL:BOOL=OFF
+
+//Compile task-budget probe support.
+THEMIS_FEATURE_TASK_BUDGET:BOOL=ON
+
+//Compile verbose logging defaults.
+THEMIS_FEATURE_VERBOSE_LOG:BOOL=ON
+
+//Compile FalconFoc VOFA telemetry surfaces.
+THEMIS_FEATURE_VOFA:BOOL=OFF
+
 //Canonical firmware executable target and artifact basename.
 THEMIS_FIRMWARE_TARGET_NAME:STRING=falcon-foc-at32
 
 //Selected FreeRTOS heap backend implementation.
 THEMIS_FREERTOS_HEAP_IMPL:STRING=heap_4
+
+//Minimum linker-reserved heap size for the firmware image.
+THEMIS_LINKER_MIN_HEAP_SIZE:STRING=0x0
+
+//Minimum linker-reserved stack size for the firmware image.
+THEMIS_LINKER_MIN_STACK_SIZE:STRING=0x400
 
 //Optional firmware linker-script override.
 THEMIS_LINKER_SCRIPT_OVERRIDE:FILEPATH=

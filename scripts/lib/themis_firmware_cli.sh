@@ -31,7 +31,7 @@ readonly THEMIS_CLI_PLATFORM_VENDOR="${THEMIS_PLATFORM_VENDOR:-at}"
 readonly THEMIS_CLI_PLATFORM_SOC="${THEMIS_PLATFORM_SOC:-at32f415}"
 readonly THEMIS_CLI_BUILD_JOBS="${THEMIS_BUILD_JOBS:-}"
 readonly THEMIS_CLI_TOOLCHAIN_FILE="${THEMIS_TOOLCHAIN_FILE:-tools/cmake/arm-gcc-toolchain.cmake}"
-readonly THEMIS_CLI_OPENOCD_CFG="${THEMIS_OPENOCD_CFG:-tools/openocd/openocd_daplink.cfg}"
+readonly THEMIS_CLI_OPENOCD_CFG="${THEMIS_OPENOCD_CFG:-tools/openocd/openocd_jlink.cfg}"
 readonly THEMIS_CLI_OPENOCD_BIN="${THEMIS_OPENOCD_BIN:-C:/Program Files (x86)/OpenOCD_V2.0.6/bin/openocd.exe}"
 
 readonly THEMIS_CLI_ELF_FILE="${THEMIS_CLI_BUILD_DIR}/output/${THEMIS_CLI_PROJECT_NAME}.elf"
@@ -850,7 +850,7 @@ Environment overrides:
   THEMIS_ENABLE_BOARD_BENCH=ON|OFF
   THEMIS_BUILD_JOBS=4
   THEMIS_OPENOCD_BIN='C:/Program Files (x86)/OpenOCD_V2.0.6/bin/openocd.exe'
-  THEMIS_OPENOCD_CFG=tools/openocd/openocd_daplink.cfg
+  THEMIS_OPENOCD_CFG=tools/openocd/openocd_jlink.cfg
   THEMIS_CLI_LOG_DIR=build/output/cli
 EOF
 }

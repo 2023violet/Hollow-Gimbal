@@ -4,9 +4,9 @@
 
 Current owner split:
 - `subsys/shell/`: shell engine and shared output contract
-- `applications/tasks/app_shell_task.*`: shell session owner and backlog policy
+- `applications/tasks/app_shell_task.*`: shell session owner and single-queue policy
 - `applications/tasks/shell_task.*`: UART DMA transport glue
-- `applications/shell/`: FalconFoc vocabulary, profile gating, banner, and command behavior
+- `applications/shell/`: FalconFoc vocabulary, banner, and command behavior
 
 Current command surface:
 - `sys`
@@ -18,10 +18,19 @@ Current command surface:
 - `cfg`
 - `diag`
 
-Profile policy:
-- `product`: `sys state obs fault store cfg`
-- `factory`: `product + cal`, and `store/cfg` unlock controlled write paths
-- `diag`: `factory + diag`
+Build policy:
+- `TM_SHELL_ENABLE=1`: compile shell transport, session, command table, and banner
+- `TM_SHELL_ENABLE=0`: compile shell owners out of the final image
+
+When shell is enabled, FalconFoc exports one complete command surface:
+- `sys`
+- `state`
+- `obs`
+- `fault`
+- `store`
+- `cal`
+- `cfg`
+- `diag`
 
 Output contract:
 - summary line first: `[topic] key=value ...`

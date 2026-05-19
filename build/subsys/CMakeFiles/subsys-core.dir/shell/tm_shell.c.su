@@ -1,8 +1,0 @@
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:74:13:_noop_print	0	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:81:38:_find_cmd	16	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:158:6:shell_init	0	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:163:6:shell_set_print	24	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:253:6:shell_print	32	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:267:6:shell_printf	296	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:96:12:_cmd_help	152	static
-D:/study/Software/Hollow-Gimbal/subsys/shell/tm_shell.c:169:6:shell_process_line	216	static

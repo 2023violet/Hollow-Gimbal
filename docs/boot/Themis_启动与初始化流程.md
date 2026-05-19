@@ -108,7 +108,7 @@ applications/app_main.c
   - `USART1` DMA transport owner
 - `app_shell_task`
   - shell session owner
-  - line queue / backlog / command dispatch owner
+  - line queue / command dispatch owner
 
 ### 3.6 `vofa_task_init()`
 
@@ -131,7 +131,7 @@ applications/app_main.c
 
 当前文档中记录的 live board-debug witness：
 
-- debugger: `J-Link`
+- debugger: `DAP-Link`
 - serial: `COM54`
 - build entry: `./run.sh build`
 - flash entry: `./run.sh flash`

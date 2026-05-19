@@ -25,4 +25,4 @@ Current template boundaries:
 
 When a second platform is introduced, replace this directory with a build-ready
 implementation. Do not push second-platform facts back into the current live
-`platform/at/at32f403a/`.
+`platform/at/at32f415/`.

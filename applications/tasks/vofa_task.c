@@ -19,7 +19,7 @@
 #include "core_time.h"
 #include "cmsis_os2.h"
 
-#if SHELL_ENABLE && (TM_APP_FEATURE_UART_TELEMETRY != 0U)
+#if (TM_FEATURE_VOFA != 0U) || (TM_APP_FEATURE_UART_TELEMETRY != 0U)
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,6 +124,6 @@ static void _vofa_task_entry(void *argument)
 }
 #endif
 
-#endif /* SHELL_ENABLE && (TM_APP_FEATURE_UART_TELEMETRY != 0U) */
+#endif /* (TM_FEATURE_VOFA != 0U) || (TM_APP_FEATURE_UART_TELEMETRY != 0U) */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

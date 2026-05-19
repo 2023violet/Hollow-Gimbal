@@ -61,7 +61,7 @@ Formal architecture rule:
 
 The current live board-debug lane is documented around:
 
-- debugger: `J-Link`
+- debugger: `DAP-Link`
 - console policy: `USART1 console-first`
 - verified serial witness in docs: `COM54`
 - verified shell probe baud: `1000000`

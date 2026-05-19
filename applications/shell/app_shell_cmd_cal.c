@@ -14,7 +14,7 @@
 #include "motor_fsm.h"
 #include "tm_shell_output.h"
 
-#if APP_SHELL_HAS_FACTORY_CMDS
+#if APP_SHELL_HAS_CAL_CMDS
 
 /* Private Helpers ------------------------------------------------------------------------------ */
 
@@ -137,6 +137,6 @@ int app_shell_cal_command(int argc, char *argv[])
 
 SHELL_CMD_EXPORT(cal, app_shell_cal_command, 60U, "[status|enc|motor <all|rs|ls|flux|js>|abort]", "Calib");
 
-#endif /* APP_SHELL_HAS_FACTORY_CMDS */
+#endif /* APP_SHELL_HAS_CAL_CMDS */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

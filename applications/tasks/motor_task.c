@@ -23,7 +23,9 @@
 /* Includes ------------------------------------------------------------------------------------- */
 #include "motor_task.h"
 #include "motor_fsm.h"
+#if (TM_FEATURE_VOFA != 0U)
 #include "vofa.h"
+#endif
 #include "foc_core.h"
 #include "foc_math.h"
 #include "foc_ctrl.h"
@@ -429,25 +431,27 @@ void motor_restore_after_param_load(struct motor_dev *motor)
  * @brief  ADC Injected Group ISR — 20kHz, Priority 1
  *
  * @note   Execution budget: < 25μs (half PWM period).
- *         Measured typical: ~12-15μs on AT32F415KBU7 @ 150MHz.
+ *         Measured typical: ~12-15μs on AT32F415 @ 150MHz.
  */
-void ADC1_IRQHandler(void)
+void ADC1_2_IRQHandler(void)
 {
     if (adc_interrupt_flag_get(ADC1, ADC_PCCE_FLAG) == RESET) {
         return;
     }
     adc_flag_clear(ADC1, ADC_PCCE_FLAG);
 
+    /* [1] Sample phase currents and bus voltage from injected ADC group */
+    adc_read_phases(&_motor_ins);
 #if (TASK_PERF_ENABLE == 1)
     core_time_perf_start(&adc_iqr_perf);
 #endif
-
-    /* [1] Sample phase currents and bus voltage from injected ADC group */
-    adc_read_phases(&_motor_ins);
-
     /* [2] Update encoder: SPI read → LUT correction → PLL velocity estimation */
     encoder_update(&_motor_ins.enc_pri);
-
+#if (TASK_PERF_ENABLE == 1)
+    core_time_perf_stop(&adc_iqr_perf);
+    adc_time_us = (uint32_t)core_time_perf_get_us(&adc_iqr_perf);
+    (void)(adc_time_us);
+#endif
     /* [3] Dispatch to the appropriate real-time computation */
     switch (_motor_ins.axis_state) {
     case AXIS_STATE_CALIB:
@@ -464,12 +468,6 @@ void ADC1_IRQHandler(void)
         /* IDLE or FAULT: no current control needed */
         break;
     }
-
-#if (TASK_PERF_ENABLE == 1)
-    core_time_perf_stop(&adc_iqr_perf);
-    adc_time_us = (uint32_t)core_time_perf_get_us(&adc_iqr_perf);
-    (void)(adc_time_us);
-#endif
 }
 
 /**
@@ -573,7 +571,7 @@ static void _motor_task_entry(void *argument)
 static void _motor_safe_task_entry(void *argument)
 {
     /* Bind real-time data channels for Vofa+ visualization */
-#if (VOFA_PROTOCOL == VOFA_PROTO_JUSTFLOAT)
+#if (TM_FEATURE_VOFA != 0U) && (VOFA_PROTOCOL == VOFA_PROTO_JUSTFLOAT)
     vofa_bind(0, &_motor_ins.meas_data.out_vel_rpm, VOFA_FLOAT);
     vofa_bind(1, &_motor_ins.meas_data.out_pos_turns, VOFA_FLOAT);
 #endif

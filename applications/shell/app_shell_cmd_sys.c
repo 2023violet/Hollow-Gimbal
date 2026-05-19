@@ -30,9 +30,9 @@ static void _app_shell_sys_status(void)
     ready = tm_shell_task_diag_snapshot(&snapshot);
 
     TM_SHELL_SUMMARY("sys",
-                     "cmd=status result=ok version=%s profile=%s flavor=%s",
+                     "cmd=status result=ok version=%s shell=%u flavor=%s",
                      TM_APP_FW_VERSION_STRING,
-                     TM_APP_SHELL_PROFILE_NAME,
+                     TM_SHELL_ENABLE,
                      TM_PRODUCT_FLAVOR_NAME);
     TM_SHELL_ROW("runtime",
                  "tick=%lu threads=%lu heap_free=%u heap_min=%u heap_total=%u",
@@ -44,14 +44,11 @@ static void _app_shell_sys_status(void)
 
     if (ready) {
         TM_SHELL_ROW("shell",
-                     "ready=%u queue=%u/%u backlog=%u/%u ok=%lu hold=%lu fail=%lu",
+                     "ready=%u queue=%u/%u ok=%lu fail=%lu",
                      snapshot.ready ? 1U : 0U,
                      snapshot.queue_used,
                      snapshot.queue_depth,
-                     snapshot.backlog_used,
-                     snapshot.backlog_depth,
                      (unsigned long)snapshot.submit_ok_count,
-                     (unsigned long)snapshot.submit_backlog_count,
                      (unsigned long)snapshot.submit_fail_count);
     } else {
         TM_SHELL_ROW("shell", "ready=0 status=unavailable");

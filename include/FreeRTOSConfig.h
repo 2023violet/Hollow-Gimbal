@@ -31,10 +31,6 @@
 extern unsigned int system_core_clock;
 #endif
 
-#ifndef CMSIS_device_header
-#define CMSIS_device_header "at32f415.h"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif

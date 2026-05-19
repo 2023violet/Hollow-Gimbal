@@ -297,8 +297,8 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
         $portFinderScript = Join-Path $scriptsRoot "find_themis_shell_port.ps1"
         Write-Host "[diag_carrier_witness] probe: discover shell port"
         $resolvedPortName = & $portFinderScript `
-            -ExpectedProfile "diag" `
             -ExpectedFlavor "carrier-demo" `
+            -RequireShell `
             -BaudRate $BaudRate
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($resolvedPortName)) {
             throw "Failed to auto-discover diag shell port."
@@ -379,17 +379,17 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
 
             $passed = Test-ContainsAll -Text $responses["<post-reboot-banner>"] -Tokens @(
                     "[shell] name=FalconFoc version=",
-                    "profile=diag",
+                    "shell=on",
                     "flavor=carrier-demo",
                     "transport=uart1-dma"
                 )
-            Add-CheckResult -Results $checks -Name "post-reboot banner" -Passed $passed -Detail "expect diag carrier banner"
-            if (-not $passed) { $errors.Add("Missing diag carrier reboot banner.") }
+            Add-CheckResult -Results $checks -Name "post-reboot banner" -Passed $passed -Detail "expect shell-on carrier banner"
+            if (-not $passed) { $errors.Add("Missing shell-on carrier reboot banner.") }
         }
 
         $assertionSpecs = @(
-            @{ Name = "help"; Response = "help"; Tokens = @("[help] count=", "name=diag") ; Detail = "expect diag command visible" },
-            @{ Name = "sys status"; Response = "sys status"; Tokens = @("[sys] cmd=status result=ok", "profile=diag", "flavor=carrier-demo", "ready=1") ; Detail = "expect live shell status" },
+            @{ Name = "help"; Response = "help"; Tokens = @("[help] count=", "name=diag") ; Detail = "expect diag command visible in shell-on image" },
+            @{ Name = "sys status"; Response = "sys status"; Tokens = @("[sys] cmd=status result=ok", "shell=1", "flavor=carrier-demo", "ready=1") ; Detail = "expect live shell status" },
             @{ Name = "fault status"; Response = "fault status"; Tokens = @("[fault] cmd=status result=ok", "active=0", "name=none") ; Detail = "expect clean fault state" },
             @{ Name = "cfg ctrl vel"; Response = "cfg ctrl vel"; Tokens = @("[cfg] cmd=ctrl result=ok", "ctrl=vel") ; Detail = "expect idle-only config write accepted" },
             @{ Name = "state start"; Response = "state start"; Tokens = @("[state] cmd=start result=ok", "axis=running") ; Detail = "expect axis running" },

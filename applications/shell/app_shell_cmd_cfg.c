@@ -17,8 +17,7 @@
 static void _app_shell_cfg_show(void)
 {
     TM_SHELL_SUMMARY("cfg",
-                     "cmd=show result=ok profile=%s ctrl=%s input=%s",
-                     TM_APP_SHELL_PROFILE_NAME,
+                     "cmd=show result=ok shell=on ctrl=%s input=%s",
                      app_shell_ctrl_mode_name(_motor_ins.ctrl_mode),
                      app_shell_input_mode_name(_motor_ins.input_mode));
     TM_SHELL_ROW("hint", "persist=store save sys");
@@ -33,11 +32,6 @@ int app_shell_cfg_command(int argc, char *argv[])
 
     if ((argc == 1) || ((argc == 2) && (strcmp(argv[1], "show") == 0))) {
         _app_shell_cfg_show();
-        return SHELL_OK;
-    }
-
-    if (!APP_SHELL_HAS_FACTORY_CMDS) {
-        TM_SHELL_SUMMARY("cfg", "cmd=%s result=error profile=product", argv[1]);
         return SHELL_OK;
     }
 
@@ -76,10 +70,6 @@ int app_shell_cfg_command(int argc, char *argv[])
     return SHELL_ERR_ARG;
 }
 
-#if APP_SHELL_HAS_FACTORY_CMDS
 SHELL_CMD_EXPORT(cfg, app_shell_cfg_command, 70U, "[show|ctrl <mode>|input <mode>]", "Config");
-#else
-SHELL_CMD_EXPORT(cfg, app_shell_cfg_command, 70U, "[show]", "Config");
-#endif
 
 /* ---------------------------------------- end of file ----------------------------------------- */

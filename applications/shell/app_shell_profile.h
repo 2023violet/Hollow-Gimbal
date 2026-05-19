@@ -16,13 +16,9 @@ extern "C" {
 
 /* Public Macros -------------------------------------------------------------------------------- */
 
-#define APP_SHELL_PROFILE_PRODUCT (TM_APP_SHELL_PROFILE_PRODUCT != 0U)
-#define APP_SHELL_PROFILE_FACTORY (TM_APP_SHELL_PROFILE_FACTORY != 0U)
-#define APP_SHELL_PROFILE_DIAG    (TM_APP_SHELL_PROFILE_DIAG != 0U)
-
-#define APP_SHELL_HAS_FACTORY_CMDS \
-    ((TM_APP_SHELL_PROFILE_FACTORY != 0U) || (TM_APP_SHELL_PROFILE_DIAG != 0U))
-#define APP_SHELL_HAS_DIAG_CMDS (TM_APP_SHELL_PROFILE_DIAG != 0U)
+#define APP_SHELL_ENABLED      (TM_SHELL_ENABLE != 0U)
+#define APP_SHELL_HAS_CAL_CMDS APP_SHELL_ENABLED
+#define APP_SHELL_HAS_DIAG_CMDS APP_SHELL_ENABLED
 
 #ifdef __cplusplus
 }

@@ -1,9 +1,9 @@
 param(
     [string[]]$CandidatePorts = @(),
 
-    [string]$ExpectedProfile = "tiny",
-
     [string]$ExpectedFlavor = "carrier-demo",
+
+    [switch]$RequireShell,
 
     [int]$BaudRate = 1000000,
 
@@ -156,11 +156,13 @@ function Test-ThemisShellPort
         $captured = $initialText
         $result.Preview = Get-PreviewText -Text $captured
 
-        $profilePattern = "profile\s*[:=]\s*" + [regex]::Escape($ExpectedProfile)
         $flavorPattern = "flavor\s*[:=]\s*" + [regex]::Escape($ExpectedFlavor)
+        $shellEnabledPattern = "shell\s*[:=]\s*on"
         $shellPattern = "\[(shell|sys|help)\]"
 
-        if (($captured -match $profilePattern) -and ($captured -match $flavorPattern) -and
+        $shellReady = (-not $RequireShell.IsPresent) -or ($captured -match $shellEnabledPattern)
+
+        if ($shellReady -and ($captured -match $flavorPattern) -and
             ($captured -match $shellPattern)) {
             $result.Matched = $true
             $result.Reason = "matched banner signature"
@@ -177,12 +179,14 @@ function Test-ThemisShellPort
         $captured = $initialText + $helpText + $statusText
         $result.Preview = Get-PreviewText -Text $captured
 
-        if (($captured -match $profilePattern) -and ($captured -match $flavorPattern) -and
+        $shellReady = (-not $RequireShell.IsPresent) -or ($captured -match $shellEnabledPattern)
+
+        if ($shellReady -and ($captured -match $flavorPattern) -and
             ($captured -match "\[sys\]\s*cmd=status")) {
             $result.Matched = $true
             $result.Reason = "matched sys status signature"
         } elseif (($helpText -match "\[help\]") -or ($statusText -match "\[sys\]")) {
-            $result.Reason = "shell output seen, but profile/flavor mismatch"
+            $result.Reason = "shell output seen, but shell/flavor mismatch"
         } else {
             $result.Reason = "no Themis shell status signature"
         }
@@ -218,8 +222,8 @@ foreach ($portName in $ports) {
 }
 
 $failureSummary = $failures -join [Environment]::NewLine
-throw ("No Themis shell port matched expected profile='{0}' flavor='{1}'.{2}{3}" -f
-    $ExpectedProfile,
+throw ("No Themis shell port matched expected shell='{0}' flavor='{1}'.{2}{3}" -f
+    $(if ($RequireShell.IsPresent) { "on" } else { "any" }),
     $ExpectedFlavor,
     [Environment]::NewLine,
     $failureSummary)

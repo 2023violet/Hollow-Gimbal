@@ -116,6 +116,37 @@ if(NOT _themis_devdrv_profile MATCHES "^(tiny|standard|full-diag)$")
   )
 endif()
 
+set(_themis_default_feature_shell OFF)
+set(_themis_default_feature_vofa OFF)
+if(_themis_devdrv_profile STREQUAL "tiny")
+  set(_themis_default_feature_ipc OFF)
+else()
+  set(_themis_default_feature_ipc OFF)
+endif()
+if(_themis_devdrv_profile STREQUAL "full-diag")
+  set(_themis_default_feature_task_budget ON)
+  set(_themis_default_feature_verbose_log ON)
+else()
+  set(_themis_default_feature_task_budget OFF)
+  set(_themis_default_feature_verbose_log OFF)
+endif()
+
+option(THEMIS_FEATURE_SHELL "Compile FalconFoc shell transport, session, and commands."
+       ${_themis_default_feature_shell}
+)
+option(THEMIS_FEATURE_VOFA "Compile FalconFoc VOFA telemetry surfaces."
+       ${_themis_default_feature_vofa}
+)
+option(THEMIS_FEATURE_IPC "Compile Themis IPC runtime and broker task."
+       ${_themis_default_feature_ipc}
+)
+option(THEMIS_FEATURE_TASK_BUDGET "Compile task-budget probe support."
+       ${_themis_default_feature_task_budget}
+)
+option(THEMIS_FEATURE_VERBOSE_LOG "Compile verbose logging defaults."
+       ${_themis_default_feature_verbose_log}
+)
+
 string(TOLOWER "${THEMIS_PRODUCT_FLAVOR}" _themis_product_flavor)
 if(NOT _themis_product_flavor MATCHES "^(carrier-demo|headless-tiny)$")
   message(FATAL_ERROR "THEMIS_PRODUCT_FLAVOR must be one of: carrier-demo, headless-tiny. "
@@ -243,15 +274,42 @@ else()
 endif()
 
 if(_themis_linker_script_override)
-  set(THEMIS_LINKER_SCRIPT "${_themis_linker_script_override}")
+  set(_themis_linker_script_source "${_themis_linker_script_override}")
 else()
-  set(THEMIS_LINKER_SCRIPT "${_themis_linker_script_default}")
+  set(_themis_linker_script_source "${_themis_linker_script_default}")
 endif()
 
 if(THEMIS_PLATFORM_COMPILE_DEFINITIONS_OVERRIDE)
   set(THEMIS_PLATFORM_COMPILE_DEFINITIONS "${THEMIS_PLATFORM_COMPILE_DEFINITIONS_OVERRIDE}")
 else()
   set(THEMIS_PLATFORM_COMPILE_DEFINITIONS "${_themis_platform_compile_definitions_default}")
+endif()
+
+if(THEMIS_FEATURE_SHELL)
+  set(_themis_default_linker_min_heap_size "0x200")
+else()
+  set(_themis_default_linker_min_heap_size "0x0")
+endif()
+set(THEMIS_LINKER_MIN_HEAP_SIZE
+    "${_themis_default_linker_min_heap_size}"
+    CACHE STRING "Minimum linker-reserved heap size for the firmware image."
+)
+set(THEMIS_LINKER_MIN_STACK_SIZE
+    "0x400"
+    CACHE STRING "Minimum linker-reserved stack size for the firmware image."
+)
+
+if(THEMIS_BUILD_FIRMWARE)
+  set(_themis_generated_linker_dir "${CMAKE_BINARY_DIR}/generated/linker")
+  file(MAKE_DIRECTORY "${_themis_generated_linker_dir}")
+  get_filename_component(_themis_linker_script_name "${_themis_linker_script_source}" NAME)
+  set(_themis_generated_linker_script
+      "${_themis_generated_linker_dir}/${_themis_linker_script_name}"
+  )
+  configure_file("${_themis_linker_script_source}" "${_themis_generated_linker_script}" @ONLY)
+  set(THEMIS_LINKER_SCRIPT "${_themis_generated_linker_script}")
+else()
+  set(THEMIS_LINKER_SCRIPT "${_themis_linker_script_source}")
 endif()
 
 if(THEMIS_BUILD_FIRMWARE)
@@ -278,6 +336,11 @@ target_compile_definitions(
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:NDEBUG>
             ${_themis_devdrv_profile_define}
             ${_themis_product_flavor_define}
+            "TM_FEATURE_SHELL=$<IF:$<BOOL:${THEMIS_FEATURE_SHELL}>,1,0>"
+            "TM_FEATURE_VOFA=$<IF:$<BOOL:${THEMIS_FEATURE_VOFA}>,1,0>"
+            "TM_FEATURE_IPC=$<IF:$<BOOL:${THEMIS_FEATURE_IPC}>,1,0>"
+            "TM_FEATURE_TASK_BUDGET=$<IF:$<BOOL:${THEMIS_FEATURE_TASK_BUDGET}>,1,0>"
+            "TM_FEATURE_VERBOSE_LOG=$<IF:$<BOOL:${THEMIS_FEATURE_VERBOSE_LOG}>,1,0>"
             $<$<BOOL:${THEMIS_ENABLE_BOARD_BENCH}>:TM_ENABLE_BOARD_BENCH=1>
 )
 target_compile_options(
@@ -339,6 +402,11 @@ message(STATUS "Themis build firmware : ${THEMIS_BUILD_FIRMWARE}")
 message(STATUS "Themis build host tests : ${THEMIS_BUILD_HOST_TESTS}")
 message(STATUS "Themis devdrv profile : ${_themis_devdrv_profile}")
 message(STATUS "Themis product flavor : ${_themis_product_flavor}")
+message(STATUS "Themis feature shell : ${THEMIS_FEATURE_SHELL}")
+message(STATUS "Themis feature vofa : ${THEMIS_FEATURE_VOFA}")
+message(STATUS "Themis feature ipc : ${THEMIS_FEATURE_IPC}")
+message(STATUS "Themis feature task budget : ${THEMIS_FEATURE_TASK_BUDGET}")
+message(STATUS "Themis feature verbose log : ${THEMIS_FEATURE_VERBOSE_LOG}")
 message(STATUS "Themis firmware target : ${THEMIS_FIRMWARE_TARGET_NAME}")
 message(STATUS "Themis libc float printf : ${THEMIS_ENABLE_LIBC_FLOAT_PRINTF}")
 message(STATUS "Themis libc float scanf : ${THEMIS_ENABLE_LIBC_FLOAT_SCANF}")
@@ -346,6 +414,8 @@ message(STATUS "Themis board bench : ${THEMIS_ENABLE_BOARD_BENCH}")
 if(THEMIS_BUILD_FIRMWARE)
   message(STATUS "Themis platform : ${THEMIS_PLATFORM_VENDOR}/${THEMIS_PLATFORM_SOC}")
   message(STATUS "Themis linker script : ${THEMIS_LINKER_SCRIPT}")
+  message(STATUS "Themis linker min heap : ${THEMIS_LINKER_MIN_HEAP_SIZE}")
+  message(STATUS "Themis linker min stack : ${THEMIS_LINKER_MIN_STACK_SIZE}")
 endif()
 
 add_subdirectory(components/utils)

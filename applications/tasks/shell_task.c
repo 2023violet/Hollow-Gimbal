@@ -21,9 +21,8 @@
 #include "FreeRTOS.h"
 #include "console_port.h"
 #include "cmsis_os2.h"
+#include "ring_buffer.h"
 #include "core_time.h"
-#include "mempool.h"
-#include "spsc_queue.h"
 #include "tm_common.h"
 #include "tm_export.h"
 #include "tm_shell.h"
@@ -36,16 +35,17 @@
 /* Private Macros ------------------------------------------------------------------------------- */
 
 #define SHELL_TX_OVERFLOW_NOTICE "\r\n[shell] cmd=rx result=error rc=-7\r\n"
+#define SHELL_TX_FRAME_HDR_SIZE  (2U)
 
 /* Private State -------------------------------------------------------------------------------- */
 
-MEMPOOL_DEFINE(_tx_mempool, SHELL_TX_BLOCK_SIZE, SHELL_TX_QUEUE_CAP);
-SPSC_QUEUE_DEFINE(_tx_queue, SHELL_TX_QUEUE_CAP);
-
 static uint8_t           _shell_rx_dma_buf[SHELL_RX_BUF_SIZE];
+static uint8_t           _shell_tx_ring_storage[SHELL_TX_RING_SIZE];
+static struct ring_buf   _shell_tx_ring = {0};
 static volatile uint16_t _dma_prev_pos = 0U;
 static char              _line_buf[SHELL_LINE_BUF_SIZE];
 static uint16_t          _line_len = 0U;
+static volatile uint32_t _shell_tx_drop_count = 0U;
 
 static osThreadId_t _shell_task_handle = NULL;
 
@@ -67,6 +67,8 @@ static void _process_dma_rx(void);
 static void _hw_usart_tx(const char *str, uint16_t len);
 static void _shell_async_print(const char *str, uint16_t len);
 static void _drain_tx_queue(void);
+static bool _shell_try_enqueue_tx_frame(const uint8_t *data, uint16_t len);
+static bool _shell_try_take_tx_frame(uint16_t *len_out);
 
 /* Public Functions ----------------------------------------------------------------------------- */
 
@@ -74,8 +76,7 @@ void shell_task_init(void)
 {
     shell_init();
 
-    mempool_init(&_tx_mempool, __tx_mempool_buf, sizeof(__tx_mempool_buf), SHELL_TX_BLOCK_SIZE);
-    spsc_queue_init(&_tx_queue, __tx_queue_buf, SHELL_TX_QUEUE_CAP);
+    (void)ring_buf_init(&_shell_tx_ring, _shell_tx_ring_storage, sizeof(_shell_tx_ring_storage));
 
     console_port_shell_rx_start(_shell_rx_dma_buf, SHELL_RX_BUF_SIZE);
 
@@ -105,32 +106,23 @@ void USART1_IRQHandler(void)
 static void _shell_async_print(const char *str, uint16_t len)
 {
     uint32_t level;
-    uint8_t *block;
     uint16_t copy_len;
 
     if ((str == NULL) || (len == 0U) || (_shell_task_handle == NULL)) {
         return;
     }
 
+    copy_len = len;
+    if (copy_len > (uint16_t)(SHELL_TX_RING_SIZE - SHELL_TX_FRAME_HDR_SIZE)) {
+        copy_len = (uint16_t)(SHELL_TX_RING_SIZE - SHELL_TX_FRAME_HDR_SIZE);
+    }
+
     level = tm_irq_critical_enter();
-    block = (uint8_t *)mempool_alloc(&_tx_mempool);
-    if (block == NULL) {
+    if (!_shell_try_enqueue_tx_frame((const uint8_t *)str, copy_len)) {
+        _shell_tx_drop_count++;
         tm_irq_critical_exit(level);
         return;
     }
-
-    copy_len                   = (len <= (uint16_t)_TX_MAX_STR) ? len : (uint16_t)_TX_MAX_STR;
-    block[_TX_LEN_OFFSET + 0U] = (uint8_t)copy_len;
-    block[_TX_LEN_OFFSET + 1U] = (uint8_t)(copy_len >> 8U);
-    memcpy(block + _TX_STR_OFFSET, str, copy_len);
-    block[_TX_STR_OFFSET + copy_len] = '\0';
-
-    if (spsc_queue_push(&_tx_queue, block) != 0) {
-        mempool_free(&_tx_mempool, block);
-        tm_irq_critical_exit(level);
-        return;
-    }
-
     tm_irq_critical_exit(level);
     (void)osThreadFlagsSet(_shell_task_handle, FLAG_SHELL_TX);
 }
@@ -146,20 +138,80 @@ static void _hw_usart_tx(const char *str, uint16_t len)
 
 static void _drain_tx_queue(void)
 {
-    void *ptr;
+    uint16_t pay_len;
+    size_t   chunk_len;
+    uint8_t *chunk;
 
-    while (spsc_queue_pop(&_tx_queue, &ptr) == 0) {
-        uint8_t *blk = (uint8_t *)ptr;
-        uint16_t pay_len =
-            (uint16_t)(blk[_TX_LEN_OFFSET + 0U]) | (uint16_t)(blk[_TX_LEN_OFFSET + 1U] << 8U);
-        uint32_t level;
+    while (_shell_try_take_tx_frame(&pay_len)) {
+        size_t sent_total = 0U;
 
-        _hw_usart_tx((const char *)(blk + _TX_STR_OFFSET), pay_len);
+        while (sent_total < pay_len) {
+            chunk = ring_buf_get_read_ptr(&_shell_tx_ring, &chunk_len);
+            if ((chunk == NULL) || (chunk_len == 0U)) {
+                return;
+            }
 
-        level = tm_irq_critical_enter();
-        mempool_free(&_tx_mempool, ptr);
-        tm_irq_critical_exit(level);
+            if (chunk_len > (size_t)(pay_len - sent_total)) {
+                chunk_len = (size_t)(pay_len - sent_total);
+            }
+
+            _hw_usart_tx((const char *)chunk, (uint16_t)chunk_len);
+            (void)ring_buf_read_advance(&_shell_tx_ring, chunk_len);
+            sent_total += chunk_len;
+        }
     }
+}
+
+static bool _shell_try_enqueue_tx_frame(const uint8_t *data, uint16_t len)
+{
+    uint8_t header[SHELL_TX_FRAME_HDR_SIZE];
+
+    if ((data == NULL) || (len == 0U)) {
+        return false;
+    }
+
+    if (ring_buf_space_len(&_shell_tx_ring) < ((size_t)len + SHELL_TX_FRAME_HDR_SIZE)) {
+        return false;
+    }
+
+    header[0] = (uint8_t)(len & 0xFFU);
+    header[1] = (uint8_t)(len >> 8U);
+
+    if (ring_buf_put(&_shell_tx_ring, header, sizeof(header)) != (ssize_t)sizeof(header)) {
+        return false;
+    }
+
+    if (ring_buf_put(&_shell_tx_ring, data, len) != (ssize_t)len) {
+        (void)ring_buf_write_rollback(&_shell_tx_ring, sizeof(header));
+        return false;
+    }
+
+    return true;
+}
+
+static bool _shell_try_take_tx_frame(uint16_t *len_out)
+{
+    uint8_t header[SHELL_TX_FRAME_HDR_SIZE];
+
+    if (len_out == NULL) {
+        return false;
+    }
+
+    if (ring_buf_data_len(&_shell_tx_ring) < SHELL_TX_FRAME_HDR_SIZE) {
+        return false;
+    }
+
+    if (ring_buf_peek(&_shell_tx_ring, 0U, header, sizeof(header)) != (ssize_t)sizeof(header)) {
+        return false;
+    }
+
+    *len_out = (uint16_t)header[0] | (uint16_t)(header[1] << 8U);
+    if (ring_buf_data_len(&_shell_tx_ring) < ((size_t)(*len_out) + SHELL_TX_FRAME_HDR_SIZE)) {
+        return false;
+    }
+
+    (void)ring_buf_drop(&_shell_tx_ring, SHELL_TX_FRAME_HDR_SIZE);
+    return true;
 }
 
 static void _process_dma_rx(void)
@@ -241,6 +293,12 @@ static void _shell_task_entry(void *argument)
         (void)_shell_time_us;
 #endif
     }
+}
+
+#else
+
+void shell_task_init(void)
+{
 }
 
 #endif /* SHELL_ENABLE */

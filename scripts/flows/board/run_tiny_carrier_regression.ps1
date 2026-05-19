@@ -25,7 +25,7 @@
 
     [string]$OpenOcdPath = "openocd",
 
-    [string]$OpenOcdConfigPath = "tools/openocd/openocd_daplink.cfg"
+    [string]$OpenOcdConfigPath = "tools/openocd/openocd_jlink.cfg"
 )
 
 Set-StrictMode -Version Latest
@@ -213,7 +213,7 @@ function New-RegressionSummary
     $lines.Add("## 4. Manual Checkpoints")
     $lines.Add("")
     $lines.Add("- Confirm boot banner and shell prompt are visible after flash.")
-    $lines.Add('- Confirm `ver` reports `profile=tiny` and `flavor=carrier-demo`.')
+    $lines.Add('- Confirm shell banner or `sys status` reports `shell=1` and `flavor=carrier-demo`.')
     $lines.Add('- Confirm `stack / tasks / watchdog / mem` all return structured output.')
     $lines.Add('- Confirm runtime logs still show healthy `heap_min` and no unexpected reboot before the watchdog step.')
     if ($DidShellProbe -or $DidScenarioProbe -or $DidShellTrip -or $DidOpenOcdInject) {
@@ -242,8 +242,8 @@ if ($needsSerialPort -and
     $portFinderScript = Join-Path $scriptsRoot "find_themis_shell_port.ps1"
     Write-Host "[tiny_carrier_regression] probe: discover shell port"
     $resolvedPortName = & $portFinderScript `
-        -ExpectedProfile "tiny" `
-        -ExpectedFlavor "carrier-demo"
+        -ExpectedFlavor "carrier-demo" `
+        -RequireShell
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($resolvedPortName)) {
         throw "Failed to auto-discover Themis shell port."
     }

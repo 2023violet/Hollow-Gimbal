@@ -21,7 +21,7 @@ int app_shell_fault_command(int argc, char *argv[]);
 int app_shell_store_command(int argc, char *argv[]);
 int app_shell_cfg_command(int argc, char *argv[]);
 
-#if APP_SHELL_HAS_FACTORY_CMDS
+#if APP_SHELL_HAS_CAL_CMDS
 int app_shell_cal_command(int argc, char *argv[]);
 #endif
 

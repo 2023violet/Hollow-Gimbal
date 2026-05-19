@@ -42,25 +42,6 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
 endif()
 
 # _matched at cmake/ThemisBuild.cmake:63 (file)
-file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/applications/shell/*.c")
-set(OLD_GLOB
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_banner.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cfg.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_diag.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_fault.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_obs.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_state.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_sys.c"
-  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c"
-  )
-if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
-  message("-- GLOB mismatch!")
-  file(TOUCH_NOCREATE "D:/study/Software/Hollow-Gimbal/build/CMakeFiles/cmake.verify_globs")
-endif()
-
-# _matched at cmake/ThemisBuild.cmake:63 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/applications/tasks/*.c")
 set(OLD_GLOB
   "D:/study/Software/Hollow-Gimbal/applications/tasks/app_shell_task.c"
@@ -128,6 +109,17 @@ endif()
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/*.c")
 set(OLD_GLOB
   "D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/cmsis_os2.c"
+  "D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/study/Software/Hollow-Gimbal/build/CMakeFiles/cmake.verify_globs")
+endif()
+
+# _matched at cmake/ThemisBuild.cmake:63 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c")
+set(OLD_GLOB
+  "D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")

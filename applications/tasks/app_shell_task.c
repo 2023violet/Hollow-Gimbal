@@ -12,17 +12,18 @@
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "config/tm_core_config.h"
+#include "console_session_config.h"
 #include "tm_runtime.h"
 #include "tm_shell.h"
+#if (TM_FEATURE_TASK_BUDGET != 0U)
 #include "tm_task_budget_probe.h"
+#endif
 
 #if (TM_SHELL_TASK_QUEUE_DEPTH == 0U)
 #error "TM_SHELL_TASK_QUEUE_DEPTH must be greater than zero."
 #endif
 
-#if (TM_SHELL_TASK_BACKLOG_DEPTH == 0U)
-#error "TM_SHELL_TASK_BACKLOG_DEPTH must be greater than zero."
-#endif
+#if (TM_SHELL_ENABLE != 0U)
 
 /* Private Macros ------------------------------------------------------------------------------- */
 
@@ -58,17 +59,11 @@ static const osThreadAttr_t _tm_shell_task_attr = {
 static int                           _tm_shell_task_status          = TM_SHELL_TASK_STATUS_INIT;
 static tm_shell_task_banner_fn_t     _tm_shell_task_banner_hook     = NULL;
 static bool                          _tm_shell_task_transport_ready = false;
-static struct tm_shell_task_line_msg _tm_shell_task_backlog[TM_SHELL_TASK_BACKLOG_DEPTH];
 
 static struct {
     uint16_t queue_used;
     uint16_t queue_high_water;
-    uint16_t backlog_head;
-    uint16_t backlog_tail;
-    uint16_t backlog_count;
-    uint16_t backlog_high_water;
     uint32_t submit_ok_count;
-    uint32_t submit_backlog_count;
     uint32_t submit_fail_count;
 } _tm_shell_task_diag = {0};
 
@@ -94,53 +89,12 @@ static void _tm_shell_task_queue_release_locked(void)
     }
 }
 
-static bool _tm_shell_task_backlog_push_locked(const struct tm_shell_task_line_msg *msg)
-{
-    if ((msg == NULL) || (_tm_shell_task_diag.backlog_count >= TM_SHELL_TASK_BACKLOG_DEPTH)) {
-        return false;
-    }
-
-    _tm_shell_task_backlog[_tm_shell_task_diag.backlog_tail] = *msg;
-    _tm_shell_task_diag.backlog_tail =
-        (uint16_t)((_tm_shell_task_diag.backlog_tail + 1U) % TM_SHELL_TASK_BACKLOG_DEPTH);
-    _tm_shell_task_diag.backlog_count++;
-    if (_tm_shell_task_diag.backlog_count > _tm_shell_task_diag.backlog_high_water) {
-        _tm_shell_task_diag.backlog_high_water = _tm_shell_task_diag.backlog_count;
-    }
-    _tm_shell_task_diag.submit_backlog_count++;
-    return true;
-}
-
-static bool _tm_shell_task_backlog_pop_locked(struct tm_shell_task_line_msg *msg)
-{
-    if ((msg == NULL) || (_tm_shell_task_diag.backlog_count == 0U)) {
-        return false;
-    }
-
-    *msg = _tm_shell_task_backlog[_tm_shell_task_diag.backlog_head];
-    _tm_shell_task_diag.backlog_head =
-        (uint16_t)((_tm_shell_task_diag.backlog_head + 1U) % TM_SHELL_TASK_BACKLOG_DEPTH);
-    _tm_shell_task_diag.backlog_count--;
-    return true;
-}
-
 static int _tm_shell_task_take_next_line(struct tm_shell_task_line_msg *msg, uint32_t timeout)
 {
     osStatus_t status;
-    bool       use_backlog = false;
 
     if (msg == NULL) {
         return -EINVAL;
-    }
-
-    tm_task_critical_enter();
-    if ((_tm_shell_task_diag.backlog_count > 0U) && (_tm_shell_task_diag.queue_used == 0U)) {
-        use_backlog = _tm_shell_task_backlog_pop_locked(msg);
-    }
-    tm_task_critical_exit();
-
-    if (use_backlog) {
-        return 1;
     }
 
     status = osMessageQueueGet(_tm_shell_task_queue, msg, NULL, timeout);
@@ -198,7 +152,9 @@ int tm_shell_task_init(void)
         return _tm_shell_task_status;
     }
 
+#if (TM_FEATURE_TASK_BUDGET != 0U)
     tm_task_budget_probe_register("shell", _tm_shell_task_handle, TM_SHELL_TASK_STACK_BYTES);
+#endif
     _tm_shell_task_status = 0;
     return 0;
 }
@@ -228,13 +184,9 @@ int tm_shell_task_submit_line(const char *line, uint16_t len)
         return -EAGAIN;
     }
 
-    if ((_tm_shell_task_diag.backlog_count == 0U) &&
-        (_tm_shell_task_diag.queue_used < TM_SHELL_TASK_QUEUE_DEPTH)) {
+    if (_tm_shell_task_diag.queue_used < TM_SHELL_TASK_QUEUE_DEPTH) {
         _tm_shell_task_queue_reserve_locked();
         use_queue = true;
-    } else if (_tm_shell_task_backlog_push_locked(&msg)) {
-        tm_task_critical_exit();
-        return 0;
     } else {
         _tm_shell_task_diag.submit_fail_count++;
         tm_task_critical_exit();
@@ -253,10 +205,6 @@ int tm_shell_task_submit_line(const char *line, uint16_t len)
     if (use_queue) {
         tm_task_critical_enter();
         _tm_shell_task_queue_release_locked();
-        if (_tm_shell_task_backlog_push_locked(&msg)) {
-            tm_task_critical_exit();
-            return 0;
-        }
         _tm_shell_task_diag.submit_fail_count++;
         tm_task_critical_exit();
     }
@@ -283,11 +231,7 @@ bool tm_shell_task_diag_snapshot(struct tm_shell_task_diag_snapshot *snapshot)
     snapshot->queue_depth          = TM_SHELL_TASK_QUEUE_DEPTH;
     snapshot->queue_used           = _tm_shell_task_diag.queue_used;
     snapshot->queue_high_water     = _tm_shell_task_diag.queue_high_water;
-    snapshot->backlog_depth        = TM_SHELL_TASK_BACKLOG_DEPTH;
-    snapshot->backlog_used         = _tm_shell_task_diag.backlog_count;
-    snapshot->backlog_high_water   = _tm_shell_task_diag.backlog_high_water;
     snapshot->submit_ok_count      = _tm_shell_task_diag.submit_ok_count;
-    snapshot->submit_backlog_count = _tm_shell_task_diag.submit_backlog_count;
     snapshot->submit_fail_count    = _tm_shell_task_diag.submit_fail_count;
     tm_task_critical_exit();
 
@@ -350,5 +294,48 @@ static void _tm_shell_task_wait_transport_ready(void)
         osDelay(1U);
     }
 }
+
+#else
+
+int tm_shell_task_init(void)
+{
+    return 0;
+}
+
+int tm_shell_task_submit_line(const char *line, uint16_t len)
+{
+    (void)line;
+    (void)len;
+    return -ENOSYS;
+}
+
+bool tm_shell_task_diag_snapshot(struct tm_shell_task_diag_snapshot *snapshot)
+{
+    if (snapshot == NULL) {
+        return false;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->status = -ENOSYS;
+    return true;
+}
+
+void tm_shell_task_set_banner_hook(tm_shell_task_banner_fn_t fn)
+{
+    (void)fn;
+}
+
+void tm_shell_task_notify_transport_ready(void)
+{
+}
+
+#if defined(THEMIS_HOST_TEST)
+int tm_shell_task_host_process_once(void)
+{
+    return -ENOSYS;
+}
+#endif
+
+#endif /* TM_SHELL_ENABLE != 0U */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

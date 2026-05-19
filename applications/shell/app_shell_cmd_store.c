@@ -119,11 +119,6 @@ int app_shell_store_command(int argc, char *argv[])
         return SHELL_OK;
     }
 
-    if (!APP_SHELL_HAS_FACTORY_CMDS) {
-        TM_SHELL_SUMMARY("store", "cmd=%s result=error profile=product", argv[1]);
-        return SHELL_OK;
-    }
-
     if ((argc < 2) || (argc > 3)) {
         return SHELL_ERR_ARGC;
     }
@@ -216,10 +211,6 @@ int app_shell_store_command(int argc, char *argv[])
     return SHELL_ERR_ARG;
 }
 
-#if APP_SHELL_HAS_FACTORY_CMDS
 SHELL_CMD_EXPORT(store, app_shell_store_command, 50U, "[status|save <slot>|load <slot>|erase]", "Store");
-#else
-SHELL_CMD_EXPORT(store, app_shell_store_command, 50U, "[status]", "Store");
-#endif
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -58,6 +58,40 @@ extern "C" {
 #define TM_PRODUCT_FLAVOR_IS_HEADLESS_TINY (0U)
 #endif
 
+/* Feature Toggles ----------------------------------------------------------------------------- */
+
+#if !defined(TM_FEATURE_SHELL)
+#define TM_FEATURE_SHELL (1U)
+#endif
+
+#if !defined(TM_FEATURE_VOFA)
+#define TM_FEATURE_VOFA (0U)
+#endif
+
+#if !defined(TM_FEATURE_IPC)
+#if TM_DEVDRV_PROFILE_TINY
+#define TM_FEATURE_IPC (0U)
+#else
+#define TM_FEATURE_IPC (1U)
+#endif
+#endif
+
+#if !defined(TM_FEATURE_TASK_BUDGET)
+#if TM_DEVDRV_PROFILE_FULL_DIAG
+#define TM_FEATURE_TASK_BUDGET (1U)
+#else
+#define TM_FEATURE_TASK_BUDGET (0U)
+#endif
+#endif
+
+#if !defined(TM_FEATURE_VERBOSE_LOG)
+#if TM_DEVDRV_PROFILE_FULL_DIAG
+#define TM_FEATURE_VERBOSE_LOG (1U)
+#else
+#define TM_FEATURE_VERBOSE_LOG (0U)
+#endif
+#endif
+
 /* Device/Driver Profile Markers --------------------------------------------------------------- */
 
 #if !defined(TM_DEVDRV_ENABLE_TYPED_STATS)
@@ -83,8 +117,7 @@ extern "C" {
 #endif
 
 #if !defined(TM_APP_FEATURE_BUDGET_PROBE)
-#define TM_APP_FEATURE_BUDGET_PROBE \
-    (((TM_DEVDRV_PROFILE_TINY != 0U) && (TM_APP_FEATURE_UART_PASSIVE_TELEMETRY != 0U)) ? 1U : 0U)
+#define TM_APP_FEATURE_BUDGET_PROBE (TM_FEATURE_TASK_BUDGET)
 #endif
 
 #if !defined(TM_TASK_PERF_ENABLE)
@@ -126,11 +159,7 @@ extern "C" {
 #endif
 
 #if !defined(TM_FREERTOS_HEAP_SIZE_BYTES)
-#if TM_DEVDRV_PROFILE_TINY
-#define TM_FREERTOS_HEAP_SIZE_BYTES (8192U)
-#else
 #define TM_FREERTOS_HEAP_SIZE_BYTES (10U * 1024U)
-#endif
 #endif
 
 #if !defined(TM_FREERTOS_MINIMAL_STACK_WORDS)
@@ -152,19 +181,7 @@ extern "C" {
 #endif
 
 #if !defined(TM_SHELL_TASK_QUEUE_DEPTH)
-#if TM_DEVDRV_PROFILE_TINY
-#define TM_SHELL_TASK_QUEUE_DEPTH (2U)
-#else
-#define TM_SHELL_TASK_QUEUE_DEPTH (6U)
-#endif
-#endif
-
-#if !defined(TM_SHELL_TASK_BACKLOG_DEPTH)
-#if TM_DEVDRV_PROFILE_TINY
-#define TM_SHELL_TASK_BACKLOG_DEPTH (1U)
-#else
-#define TM_SHELL_TASK_BACKLOG_DEPTH (4U)
-#endif
+#define TM_SHELL_TASK_QUEUE_DEPTH (3U)
 #endif
 
 #if !defined(TM_APP_TASK_STACK_SHELL_BYTES)
@@ -173,9 +190,9 @@ extern "C" {
 
 /* Core Limits --------------------------------------------------------------------------------- */
 
-#define TM_NAME_MAX        (16U)
-#define TM_ALIGN_SIZE      (8U)
-#define TM_TICK_PER_SECOND (1000U)
+#define TM_NAME_MAX          (16U)
+#define TM_ALIGN_SIZE        (8U)
+#define TM_TICK_PER_SECOND   (1000U)
 
 /* Core Features ------------------------------------------------------------------------------- */
 
@@ -193,7 +210,7 @@ extern "C" {
 
 /* Log ----------------------------------------------------------------------------------------- */
 
-#if TM_DEVDRV_PROFILE_FULL_DIAG
+#if TM_FEATURE_VERBOSE_LOG
 #define TM_LOG_ENABLE             (1U)
 #define TM_LOG_BUFFER_SIZE        (192U)
 #define TM_LOG_LEVEL_DEFAULT      TM_LOG_LEVEL_DEBUG
@@ -212,7 +229,7 @@ extern "C" {
 
 /* IPC ----------------------------------------------------------------------------------------- */
 
-#if TM_DEVDRV_PROFILE_TINY
+#if (TM_FEATURE_IPC == 0U)
 #define TM_IPC_ENABLE          (0U)
 #define TM_IPC_SLAB_TINY_CNT   (0U)
 #define TM_IPC_SLAB_SMALL_CNT  (0U)
@@ -233,7 +250,7 @@ extern "C" {
 #endif
 
 #if !defined(TM_IPC_DEFER_DEPTH)
-#if TM_DEVDRV_PROFILE_TINY
+#if (TM_FEATURE_IPC == 0U)
 #define TM_IPC_DEFER_DEPTH (0U)
 #elif TM_DEVDRV_PROFILE_FULL_DIAG
 #define TM_IPC_DEFER_DEPTH (16U)

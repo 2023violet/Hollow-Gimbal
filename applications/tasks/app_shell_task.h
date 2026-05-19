@@ -8,8 +8,8 @@
  * ---------------
  * `app_shell_task` is the product-owned task owner for the interactive shell
  * session. It decouples transport-side line ingestion from synchronous
- * `tm_shell` command execution and hardens transient queue pressure with a
- * bounded backlog ring instead of silently dropping complete lines.
+ * `tm_shell` command execution and uses one bounded static queue so command
+ * pressure stays explicit and reviewable under tight RAM budgets.
  */
 
 #pragma once
@@ -32,11 +32,7 @@ struct tm_shell_task_diag_snapshot {
     uint16_t queue_depth;
     uint16_t queue_used;
     uint16_t queue_high_water;
-    uint16_t backlog_depth;
-    uint16_t backlog_used;
-    uint16_t backlog_high_water;
     uint32_t submit_ok_count;
-    uint32_t submit_backlog_count;
     uint32_t submit_fail_count;
 };
 

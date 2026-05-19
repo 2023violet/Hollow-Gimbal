@@ -69,7 +69,7 @@ summary line 放不下时，后续只允许 detail row：
 当一条命令要列多个对象时，优先 repeated row：
 
 ```text
-  task   : name=shell queue_used=0 backlog_used=0
+  task   : name=shell queue_used=0
   task   : name=vofa enabled=0
 ```
 
@@ -132,7 +132,7 @@ summary line 放不下时，后续只允许 detail row：
 字段名统一使用小写 snake 风格，例如：
 
 - `queue_used`
-- `backlog_high_water`
+- `queue_high_water`
 - `timeout_ms`
 - `sample_seq`
 
@@ -148,7 +148,7 @@ APP shell banner 是唯一允许在会话启动时主动输出的多行信息。
 
 ```text
 [shell] name=Themis image=falconfoc
-  image  : profile=full-diag build=debug
+  image  : shell=on build=debug
   console: uart=USART1 port=COM54 baud=1000000
   hint   : help=type 'help'
 ```

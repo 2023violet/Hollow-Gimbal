@@ -23,7 +23,7 @@ FalconFoc-lite 当前 live 拓扑如下：
   - 在完整命令行就绪后调用 `tm_shell_task_submit_line()`
 - `applications/tasks/app_shell_task.*`
   - shell session owner
-  - 负责 queue/backlog、transport-ready gate、同步命令执行
+  - 负责单静态 queue、transport-ready gate、同步命令执行
   - 通过 `tm_shell` 驱动命令分发
 - `applications/shell/*`
   - 产品命令 vocabulary、banner、help 文案与输出契约
@@ -49,7 +49,7 @@ USART1 IRQ/DMA
 
 当前正式串口策略如下：
 
-- debugger=`J-Link`
+- debugger=`DAP-Link`
 - port=`COM54`
 - uart=`USART1`
 - baud=`1000000`
@@ -79,29 +79,25 @@ USART1 IRQ/DMA
   - 不再承载产品 banner 文案
 - `app_shell_task`
   - 拥有 shell session 生命周期
-  - 统一处理 queue/backlog 和 transport-ready 状态
+  - 统一处理单静态 queue 和 transport-ready 状态
 - `applications/shell`
   - 拥有产品命令和输出 vocabulary
 
-### 4.2 queue + backlog 包线
+### 4.2 单队列包线
 
-当前 shell line handoff 使用双层包线：
+当前 shell line handoff 只使用一层静态 queue：
 
 - `TM_SHELL_TASK_QUEUE_DEPTH`
-- `TM_SHELL_TASK_BACKLOG_DEPTH`
 
 正式语义如下：
 
-- queue 有空间时优先入 queue
-- backlog 一旦启用，后续行继续入 backlog，直到 backlog 被消费
-- queue + backlog 全满时才返回失败
+- queue 有空间时允许提交
+- queue 满时直接返回失败
+- 不再保留 shadow backlog
 - 当前诊断字段至少包括：
   - `queue_used`
   - `queue_high_water`
-  - `backlog_used`
-  - `backlog_high_water`
   - `submit_ok_count`
-  - `submit_backlog_count`
   - `submit_fail_count`
 
 ### 4.3 transport-ready 与 banner hook
@@ -138,9 +134,8 @@ USART1 IRQ/DMA
 
 当前至少锁住：
 
-- queue/backlog FIFO
-- queue 满后进入 backlog
-- queue + backlog 全满时才失败
+- 单 queue FIFO
+- queue 满时返回失败
 - 诊断字段与实际行为一致
 
 ### 5.2 FalconFoc-lite contract

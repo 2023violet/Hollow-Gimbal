@@ -7,8 +7,7 @@ $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
-}
-else {
+} else {
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 }
 
@@ -180,11 +179,11 @@ foreach ($token in @(
 
 $bootDocs = @(
     Get-ChildItem -Path (Join-Path $RepoRoot "docs\boot") -Filter "*.md" |
-    Where-Object {
-        $raw = [System.IO.File]::ReadAllText($_.FullName, [System.Text.UTF8Encoding]::new($false))
-        $raw.Contains("applications/app_main.c")
-    } |
-    ForEach-Object { To-RepoRelativePath $_.FullName }
+        Where-Object {
+            $raw = [System.IO.File]::ReadAllText($_.FullName, [System.Text.UTF8Encoding]::new($false))
+            $raw.Contains("applications/app_main.c")
+        } |
+        ForEach-Object { To-RepoRelativePath $_.FullName }
 )
 
 if ($bootDocs.Count -lt 2) {
@@ -201,7 +200,7 @@ $requiredBootTokens = @(
 )
 
 $staleBootTokens = @(
-    "at32f415",
+    "at32f423",
     "watchdog_task_init",
     "buzzer_task_init",
     "display_task_init",
@@ -230,8 +229,8 @@ foreach ($relativePath in $bootDocs) {
     }
 }
 
-$maintenanceLogRaw = Read-Utf8Raw (Resolve-GovernanceDocByContent "FalconFoc at32f4152 Themis-lite platform/build alignment")
-foreach ($token in @("COM54", "DAPLink", "./run.sh flash", "store save sys")) {
+$maintenanceLogRaw = Read-Utf8Raw (Resolve-GovernanceDocByContent "FalconFoc AT32F415 Themis-lite platform/build alignment")
+foreach ($token in @("COM54", "DAP-Link", "./run.sh flash", "store save sys")) {
     if ($maintenanceLogRaw -notmatch [Regex]::Escape($token)) {
         throw "Maintenance log must record the latest FalconFoc real-board witness token '$token'."
     }

@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------
- * Copyright (c) 2013-2020 Arm Limited. All rights reserved.
+ * Copyright (c) 2013-2021 Arm Limited. All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -28,7 +28,33 @@
 
 #include "FreeRTOS.h"                   // ARM.FreeRTOS::RTOS:Core
 
+#if defined(_RTE_)
+#include "RTE_Components.h"             // Component selection
 #include CMSIS_device_header
+
+/* Configuration and component setup check */
+#if defined(RTE_Compiler_EventRecorder)
+  #if !defined(EVR_FREERTOS_DISABLE)
+    #define USE_TRACE_EVENT_RECORDER
+    /*
+      FreeRTOS provides functions and hooks to support execution tracing. This
+      functionality is only enabled if configUSE_TRACE_FACILITY == 1.
+      Set #define configUSE_TRACE_FACILITY 1 in FreeRTOSConfig.h to enable trace events.
+    */
+    #if (configUSE_TRACE_FACILITY == 0)
+      #error "Definition configUSE_TRACE_FACILITY must equal 1 to enable FreeRTOS trace events."
+    #endif
+  #endif
+#endif
+
+#if defined(RTE_RTOS_FreeRTOS_HEAP_1)
+  #define USE_FreeRTOS_HEAP_1
+#endif
+
+#if defined(RTE_RTOS_FreeRTOS_HEAP_5)
+  #define USE_FreeRTOS_HEAP_5
+#endif
+#endif /* _RTE_ */
 
 /*
   CMSIS-RTOS2 FreeRTOS image size optimization definitions.
@@ -107,13 +133,13 @@
   */
   #error "Definition INCLUDE_vTaskDelay must equal 1 to implement Generic Wait Functions API."
 #endif
-#if (INCLUDE_vTaskDelayUntil == 0)
+#if (INCLUDE_xTaskDelayUntil == 0)
   /*
-    CMSIS-RTOS2 function osDelayUntil uses FreeRTOS function vTaskDelayUntil. In case if
+    CMSIS-RTOS2 function osDelayUntil uses FreeRTOS function xTaskDelayUntil. In case if
     osDelayUntil is not used in the application image, compiler will optimize it away.
-    Set #define INCLUDE_vTaskDelayUntil 1 to fix this error.
+    Set #define INCLUDE_xTaskDelayUntil 1 to fix this error.
   */
-  #error "Definition INCLUDE_vTaskDelayUntil must equal 1 to implement Generic Wait Functions API."
+  #error "Definition INCLUDE_xTaskDelayUntil must equal 1 to implement Generic Wait Functions API."
 #endif
 #if (INCLUDE_vTaskDelete == 0)
   /*

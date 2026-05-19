@@ -202,9 +202,7 @@ themis_add_host_test(
   FOLDER
   "themis/tests"
 )
-target_compile_definitions(
-  test_tm_shell_task PRIVATE TM_SHELL_TASK_QUEUE_DEPTH=2 TM_SHELL_TASK_BACKLOG_DEPTH=2
-)
+target_compile_definitions(test_tm_shell_task PRIVATE TM_SHELL_TASK_QUEUE_DEPTH=2)
 
 themis_add_host_test(
   NAME

@@ -38,7 +38,7 @@ In this repository:
 - `app_main.c` owns the staged bridge
 - `motor_task_init()` is the current APP bring-up owner
 - `shell_task_init()` is called explicitly from `motor_task_init()`
-- `vofa_task_init()` remains an independent APP export owner
+- `vofa_task_init()` is a feature-gated APP export owner and must not appear in lean product images unless `TM_FEATURE_VOFA=1`
 
 Do not move these responsibilities back into:
 

@@ -212,8 +212,7 @@ Assert-Contains -Root $repoRoot `
                 -Markers @(
                     "tm_shell_task_diag_snapshot",
                     "tm_shell_task_set_banner_hook",
-                    "tm_shell_task_notify_transport_ready",
-                    "submit_backlog_count"
+                    "tm_shell_task_notify_transport_ready"
                 ) `
                 -Errors $errors
 
@@ -221,7 +220,6 @@ Assert-Contains -Root $repoRoot `
                 -RelativePath "applications\tasks\app_shell_task.c" `
                 -Markers @(
                     "TM_SHELL_TASK_QUEUE_DEPTH",
-                    "TM_SHELL_TASK_BACKLOG_DEPTH",
                     "tm_shell_task_host_process_once",
                     "_tm_shell_task_wait_transport_ready",
                     'tm_task_budget_probe_register("shell"'
@@ -234,8 +232,7 @@ Assert-Contains -Root $repoRoot `
                     "tm_shell_task_init()",
                     "tm_shell_task_notify_transport_ready()",
                     "tm_shell_task_submit_line(",
-                    "tm_shell_task_host_process_once()",
-                    "submit_backlog_count"
+                    "tm_shell_task_host_process_once()"
                 ) `
                 -Errors $errors
 

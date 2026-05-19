@@ -27,6 +27,8 @@
 #include "tm_format.h"
 #include "tm_runtime.h"
 
+#if (TM_FEATURE_SHELL != 0U)
+
 #if TM_ASSERT_ENABLE
 static const char *TAG = "shell";
 #endif
@@ -289,5 +291,34 @@ void shell_printf(const char *fmt, ...)
         print_fn(buffer, out_len);
     }
 }
+
+#else
+
+void shell_init(void)
+{
+}
+
+void shell_set_print(shell_print_fn_t fn)
+{
+    (void)fn;
+}
+
+void shell_process_line(const char *line, uint16_t len)
+{
+    (void)line;
+    (void)len;
+}
+
+void shell_print(const char *str)
+{
+    (void)str;
+}
+
+void shell_printf(const char *fmt, ...)
+{
+    (void)fmt;
+}
+
+#endif /* TM_FEATURE_SHELL != 0U */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

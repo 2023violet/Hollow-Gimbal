@@ -49,7 +49,7 @@ USART1 IRQ/DMA
 
 当前正式串口策略如下：
 
-- debugger=`DAP-Link`
+- debugger=`J-Link`
 - port=`COM54`
 - uart=`USART1`
 - baud=`1000000`
@@ -186,3 +186,8 @@ FalconFoc-lite 当前 shell 路径已经正式收口为：
 - `app_shell_task` = shell session owner
 - `USART1` = `console-first`
 - VOFA/telemetry = `debug-only`
+- 双 owner 是当前 live contract，本轮不做单 task 合并
+- FalconFoc-lite contract 还会检查：
+  - shell-off 最终镜像不保留 live `tm_shell` / `shell_task` / `app_shell_task` / `_shell_cmd_*`
+  - 默认镜像不保留 `tm_ipc_export_init`、IPC slab storage、broker runtime
+  - shell-on 最终镜像不保留 `_strtod_l`、`__gethex`、`_scanf_float`

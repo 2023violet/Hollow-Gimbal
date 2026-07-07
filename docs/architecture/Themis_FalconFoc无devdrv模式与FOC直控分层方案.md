@@ -42,7 +42,7 @@ FalconFoc 当前正式采用：
 
 - live platform owner: `platform/at/at32f403a`
 - live board owner: `bsp/board`
-- live control-plane port owner: `bsp/ports`
+- live control-plane module owner: `bsp/ports`
 - live product owner: `applications/`
 - FalconFoc 当前不装配 `device/` / `drivers/` runtime
 
@@ -60,8 +60,11 @@ FalconFoc 当前正式采用：
 applications/algo + applications/periph
     -> FOC core path
 
+applications/runtime
+    -> product meaning / restore / save / fault policy / motion command / calib glue
+
 applications/tasks + applications/shell
-    -> runtime orchestration / state machine / shell / diagnostics
+    -> cadence owner / state machine / shell vocabulary / diagnostics
 
 bsp/board + bsp/ports
     -> board fact / board glue / thin functional ports
@@ -122,7 +125,23 @@ platform/at/at32f403a
 - 直接调 vendor API
 - 必要时直接调寄存器
 
-### 5.5 `applications/tasks` 与 `applications/shell`
+### 5.5 `applications/runtime`
+
+职责：
+
+- 产品默认值
+- restore / deferred save glue
+- motion command 运行时语义
+- software fault policy
+- calibration lifecycle glue
+
+禁止：
+
+- 演化成 generic manager / bus / registry
+- 反向吞掉 FOC ISR 热路径
+- 用“更像架构”的名义拉长实时控制链
+
+### 5.6 `applications/tasks` 与 `applications/shell`
 
 职责：
 
@@ -183,21 +202,21 @@ platform/at/at32f403a
 
 推荐命名：
 
-- `console_port`
-- `system_port`
-- `param_flash_port`
-- `ui_oled_port`
-- `led_port`
-- `buzzer_port`
-- `key_scan_port`
-- `battery_sense_port`
-- `charge_detect_port`
+- `bsp_console`
+- `bsp_system`
+- `bsp_param_flash`
+- `bsp_ui_oled`
+- `bsp_led`
+- `bsp_buzzer`
+- `bsp_key_scan`
+- `bsp_battery_sense`
+- `bsp_charge_detect`
 
 文件形态：
 
 1. `bsp/bsp_config.h`
-2. `bsp/ports/<name>_port.h`
-3. `bsp/ports/<name>_port.c`
+2. `bsp/ports/bsp_<name>.h`
+3. `bsp/ports/bsp_<name>.c`
 4. host stub
 
 规则：
@@ -209,32 +228,32 @@ platform/at/at32f403a
 
 ### 7.1 完整落地模板
 
-示例：`led_port`
+示例：`bsp_led`
 
-`bsp/ports/led_port.h`
+`bsp/ports/bsp_led.h`
 
 ```c
 #pragma once
 
 #include <stdint.h>
 
-void led_port_init(void);
-void led_port_set(uint8_t on);
+void bsp_led_init(void);
+void bsp_led_set(uint8_t on);
 ```
 
-`bsp/ports/led_port.c`
+`bsp/ports/bsp_led.c`
 
 ```c
-#include "led_port.h"
+#include "bsp_led.h"
 #include "bsp_config.h"
 #include "at32f403a_407.h"
 
-void led_port_init(void)
+void bsp_led_init(void)
 {
     /* vendor init or generated binding */
 }
 
-void led_port_set(uint8_t on)
+void bsp_led_set(uint8_t on)
 {
     if (on != 0U) {
         /* set pin */
@@ -247,16 +266,16 @@ void led_port_set(uint8_t on)
 host stub：
 
 ```c
-#include "led_port.h"
+#include "bsp_led.h"
 
 static uint8_t g_led_state;
 
-void led_port_init(void)
+void bsp_led_init(void)
 {
     g_led_state = 0U;
 }
 
-void led_port_set(uint8_t on)
+void bsp_led_set(uint8_t on)
 {
     g_led_state = (on != 0U) ? 1U : 0U;
 }
@@ -274,7 +293,7 @@ void led_port_set(uint8_t on)
 
 参数系统应拆成：
 
-- flash 读写和扇区动作：`bsp/board` 或参数 flash port owner
+- flash 读写和扇区动作：`bsp/board` 或参数 flash BSP module owner
 - 参数默认值、版本升级、恢复策略：`applications/algo/foc_param.*`
 - 保存触发时机：task / state machine owner
 
@@ -388,21 +407,34 @@ FalconFoc 的 MCU 迁移能力来自：
 ## 12. 当前仓库目标目录
 
 ```text
+applications/
+├─ algo/
+├─ periph/
+├─ runtime/
+│  ├─ motor_runtime.h/.c
+│  ├─ motor_store.h/.c
+│  ├─ foc_restore.h/.c
+│  ├─ foc_motion_runtime.h/.c
+│  ├─ motor_fault_runtime.h/.c
+│  └─ motor_calibration_runtime.h/.c
+├─ shell/
+└─ tasks/
+
 bsp/
 ├─ bsp_config.h
 ├─ board/
 │  ├─ bsp_init.h/.c
 │  └─ bsp_flash.h/.c
 └─ ports/
-   ├─ console_port.h/.c
-   ├─ system_port.h/.c
-   ├─ param_flash_port.h/.c
-   ├─ ui_oled_port.h/.c
-   ├─ led_port.h/.c
-   ├─ buzzer_port.h/.c
-   ├─ key_scan_port.h/.c
-   ├─ battery_sense_port.h/.c
-   └─ charge_detect_port.h/.c
+   ├─ bsp_console.h/.c
+   ├─ bsp_system.h/.c
+   ├─ bsp_param_flash.h/.c
+   ├─ bsp_ui_oled.h/.c
+   ├─ bsp_led.h/.c
+   ├─ bsp_buzzer.h/.c
+   ├─ bsp_key_scan.h/.c
+   ├─ bsp_battery_sense.h/.c
+   └─ bsp_charge_detect.h/.c
 ```
 
 命名规则：
@@ -415,15 +447,17 @@ bsp/
 当前仓库必须满足：
 
 1. FOC 核心快路径不被强行塞进 `port`
-2. `applications/tasks` 与 `applications/shell` 不再散落无关 vendor include
-3. 新增软任务外围只按功能级 `port` 接入
-4. 参数保存不在 ISR 中执行
-5. live 文档、脚本、测试、配置只描述 FalconFoc 自己
+2. `applications/runtime` 成为 FalconFoc 产品语义唯一薄层 owner
+3. `applications/tasks` 与 `applications/shell` 不再散落无关 vendor include
+4. 新增软任务外围只按功能级 `port` 接入
+5. 参数保存不在 ISR 中执行
+6. live 文档、脚本、测试、配置只描述 FalconFoc 自己
 
 ## 14. 最终口径
 
 1. FOC 核心路径直控
-2. 软任务外围按功能级 `port` 收口
-3. 共享只在真实共享时成立
-4. `ISR / task / state machine` 通过 `event bits + command latch + snapshot` 协作
-5. `platform` 是芯片真相层，`bsp` 是板级 glue 层，`applications` 是产品 owner 层
+2. 产品语义收口到 `applications/runtime`
+3. 软任务外围按功能级 `port` 收口
+4. 共享只在真实共享时成立
+5. `ISR / task / state machine` 通过 `event bits + command latch + snapshot` 协作
+6. `platform` 是芯片真相层，`bsp` 是板级 glue 层，`applications` 是产品 owner 层

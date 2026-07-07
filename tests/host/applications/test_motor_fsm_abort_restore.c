@@ -100,6 +100,11 @@ int foc_param_load_enc(struct motor_dev *motor)
     return PARAM_OK;
 }
 
+int motor_calibration_runtime_restore_encoder_after_abort(struct motor_dev *motor)
+{
+    return foc_param_load_enc(motor);
+}
+
 const char *foc_param_status_str(int st)
 {
     switch (st) {

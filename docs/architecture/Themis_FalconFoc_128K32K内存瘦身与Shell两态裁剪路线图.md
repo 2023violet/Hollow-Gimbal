@@ -286,3 +286,25 @@ Top 30 BSS 符号中，不得出现：
 - `./run.sh memory` 输出的模块级明细
 - `arm-none-eabi-size -A` 的完整输出
 - Top BSS symbols 清单
+
+## 10. 2026-05-19 Live Update
+
+- FalconFoc 产品 feature owner 已收回到 `include/config/tm_core_config.h`
+  - `TM_FEATURE_IPC=0`
+  - `TM_FEATURE_VOFA=0`
+  - `TM_FEATURE_TASK_BUDGET=0`
+  - `TM_FEATURE_VERBOSE_LOG=0`
+  - `TM_FEATURE_SHELL` 由 profile 派生
+- shared manifest 回归 TEC 基线
+  - `subsys/CMakeLists.txt` 常规纳入 `tm_ipc.c`、`tm_shell.c`、`tm_task_budget_probe.c`
+  - `applications/CMakeLists.txt` 常规纳入 `shell/*.c`、`tasks/*.c`
+- shell-off 改为源码级自裁，不再依赖 CMake 排除源码
+  - 不生成 `SHELL_CMD_EXPORT(...)`
+  - 不保留 `_shell_cmd_*`
+- IPC 默认镜像依赖 `TM_IPC_ENABLE=0` 自裁，不再通过 shared CMake 排除
+- linker reserve owner 改回平台脚本固定预算
+  - `_Min_Heap_Size = 0`
+  - `_Min_Stack_Size = 0x400`
+- shell decimal parser 已替换 `strtof()` 路径
+  - 只接受十进制格式
+  - 拒绝 `1e3`、`nan`、`inf`、hex-float 和尾随垃圾字符

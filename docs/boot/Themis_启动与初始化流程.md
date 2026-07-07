@@ -58,6 +58,11 @@ applications/app_main.c
     -> osKernelStart()
 ```
 
+当前 live 补充规则：
+
+- `tm_ipc_export_init()` 默认不在 FalconFoc 默认镜像里出现，只有 `TM_IPC_ENABLE=1` 时才进入启动链
+- `vofa_task_init()` 是 feature-gated APP export，不属于默认产品镜像常驻路径
+
 ## 3. Owner 收口
 
 ### 3.1 `platform/at/at32f403a/generated/src/main.c`
@@ -131,7 +136,7 @@ applications/app_main.c
 
 当前文档中记录的 live board-debug witness：
 
-- debugger: `DAP-Link`
+- debugger: `J-Link`
 - serial: `COM54`
 - build entry: `./run.sh build`
 - flash entry: `./run.sh flash`

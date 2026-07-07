@@ -8,65 +8,79 @@
 /* Includes ------------------------------------------------------------------------------------- */
 #include "app_shell_commands.h"
 #include "app_shell_common.h"
+#include "app_shell_output_helpers.h"
 #include <string.h>
 #include "motor_fsm.h"
+#include "motor_runtime.h"
 #include "tm_shell_output.h"
 
 /* Private Helpers ------------------------------------------------------------------------------ */
 
+#if APP_SHELL_ENABLED
+
 static void _app_shell_state_show(void)
 {
+    struct motor_runtime_snapshot snapshot;
     char vbus[16];
     char iq[16];
     char id[16];
-    char vel[16];
-    char pos[16];
-    char motor_temp[16];
-    char driver_temp[16];
+
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("state", "cmd=show result=error reason=snapshot_unavailable");
+        return;
+    }
 
     TM_SHELL_SUMMARY("state",
-                     "cmd=status result=ok axis=%s ctrl=%s input=%s fault=0x%08x",
-                     app_shell_axis_state_name(_motor_ins.axis_state),
-                     app_shell_ctrl_mode_name(_motor_ins.ctrl_mode),
-                     app_shell_input_mode_name(_motor_ins.input_mode),
-                     (unsigned)_motor_ins.fault_code);
+                     "cmd=show result=ok axis=%s ctrl=%s input=%s fault=0x%08x",
+                     app_shell_axis_state_name(snapshot.axis_state),
+                     app_shell_ctrl_mode_name(snapshot.ctrl_mode),
+                     app_shell_input_mode_name(snapshot.input_mode),
+                     (unsigned)snapshot.fault_code);
     TM_SHELL_ROW("motor",
                  "sensor=%s enc_valid=%u",
-                 app_shell_sensor_name(_motor_ins.sensor_type),
-                 _motor_ins.enc_pri.state.calib_valid ? 1U : 0U);
+                 app_shell_sensor_name(snapshot.sensor_type),
+                 snapshot.enc_valid ? 1U : 0U);
     TM_SHELL_ROW("meas",
                  "vbus=%s iq=%s id=%s",
-                 app_shell_format_float_or_dash(vbus, sizeof(vbus), _motor_ins.meas_data.v_bus, 2U),
-                 app_shell_format_float_or_dash(iq, sizeof(iq), _motor_ins.foc_calc.i_q, 3U),
-                 app_shell_format_float_or_dash(id, sizeof(id), _motor_ins.foc_calc.i_d, 3U));
-    TM_SHELL_ROW("out",
-                 "vel_rpm=%s pos_turn=%s",
-                 app_shell_format_float_or_dash(vel, sizeof(vel), _motor_ins.meas_data.out_vel_rpm, 2U),
-                 app_shell_format_float_or_dash(pos, sizeof(pos), _motor_ins.meas_data.out_pos_turns, 3U));
-    TM_SHELL_ROW("temp",
-                 "motor=%s driver=%s",
-                 app_shell_format_float_or_dash(motor_temp, sizeof(motor_temp), _motor_ins.meas_data.motor_temp, 1U),
-                 app_shell_format_float_or_dash(driver_temp, sizeof(driver_temp), _motor_ins.meas_data.driver_temp, 1U));
+                 app_shell_format_float_or_dash(vbus, sizeof(vbus), snapshot.v_bus, 2U),
+                 app_shell_format_float_or_dash(iq, sizeof(iq), snapshot.i_q, 3U),
+                 app_shell_format_float_or_dash(id, sizeof(id), snapshot.i_d, 3U));
+    app_shell_emit_motion_row("out", snapshot.out_vel_rpm, snapshot.out_pos_turns);
+    app_shell_emit_temp_row("temp", snapshot.motor_temp, snapshot.driver_temp);
 }
 
 static int _app_shell_state_dispatch(const char *cmd_name, enum motor_fsm_event event)
 {
-    int rc;
+    enum motor_runtime_axis_action action;
+    struct motor_runtime_snapshot  snapshot;
+    bool                           ok;
 
-    rc = motor_fsm_dispatch(&_motor_ins, event);
-    if (rc < 0) {
-        TM_SHELL_SUMMARY("state",
-                         "cmd=%s result=error axis=%s rc=%d",
-                         cmd_name,
-                         app_shell_axis_state_name(_motor_ins.axis_state),
-                         rc);
+    switch (event) {
+    case EV_CMD_START:
+        action = TM_MOTOR_RUNTIME_AXIS_START;
+        break;
+    case EV_CMD_STOP:
+        action = TM_MOTOR_RUNTIME_AXIS_STOP;
+        break;
+    case EV_CMD_DISABLE:
+        action = TM_MOTOR_RUNTIME_AXIS_DISABLE;
+        break;
+    default:
+        return SHELL_ERR_ARG;
+    }
+
+    ok = motor_runtime_request_axis_action(action);
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("state", "cmd=%s result=error reason=snapshot_unavailable", cmd_name);
         return SHELL_OK;
     }
 
-    TM_SHELL_SUMMARY("state",
-                     "cmd=%s result=ok axis=%s",
-                     cmd_name,
-                     app_shell_axis_state_name(_motor_ins.axis_state));
+    if (!ok) {
+        TM_SHELL_SUMMARY("state", "cmd=%s result=error axis=%s rc=-1", cmd_name, app_shell_axis_state_name(snapshot.axis_state));
+        return SHELL_OK;
+    }
+
+    TM_SHELL_SUMMARY("state", "cmd=%s result=ok axis=%s", cmd_name, app_shell_axis_state_name(snapshot.axis_state));
     return SHELL_OK;
 }
 
@@ -93,7 +107,8 @@ int app_shell_state_command(int argc, char *argv[])
         return _app_shell_state_dispatch("disable", EV_CMD_DISABLE);
     }
     if ((argc == 3) && (strcmp(argv[1], "mode") == 0)) {
-        TM_SHELL_SUMMARY("state", "cmd=mode result=error owner=cfg");
+        TM_SHELL_SUMMARY("state", "cmd=mode result=error reason=redirect target=cfg");
+        TM_SHELL_ROW("hint", "next='cfg ctrl <mode>'");
         return SHELL_OK;
     }
 
@@ -101,5 +116,7 @@ int app_shell_state_command(int argc, char *argv[])
 }
 
 SHELL_CMD_EXPORT(state, app_shell_state_command, 20U, "[show|start|stop|disable]", "Runtime");
+
+#endif
 
 /* ---------------------------------------- end of file ----------------------------------------- */

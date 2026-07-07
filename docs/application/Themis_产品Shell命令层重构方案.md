@@ -395,7 +395,7 @@ Themis 产品 shell 命令层正式推荐使用短一级命令集合：
 每条命令正式输出必须以：
 
 ```text
-[topic] key=value key=value ...
+[topic] cmd=<subcommand> result=<ok|error> key=value ...
 ```
 
 开头。
@@ -432,8 +432,8 @@ Themis 产品 shell 命令层正式推荐使用短一级命令集合：
 多个对象统一使用 repeated row：
 
 ```text
-  slot   : name=motor status=valid ver=1 size=64B
-  slot   : name=enc status=empty ver=- size=-
+  slot   : name=motor status=valid version=1 data=64B
+  slot   : name=enc status=empty version=- data=-
 ```
 
 正式禁止：
@@ -450,9 +450,9 @@ APP shell banner 是唯一允许主动多行输出的内容。
 
 ```text
 [shell] name=<product> version=<ver>
-  image  : build=<date> profile=<profile> flavor=<flavor>
-  console: transport=<name>
-  hint   : help=type 'help'
+  image  : build_date=<date> build_time=<time> shell=on flavor=<flavor>
+  console: uart=<name> baud=<baud> transport=<mode>
+  hint   : next='help'
 ```
 
 正式禁止：

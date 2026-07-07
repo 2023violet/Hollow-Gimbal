@@ -49,16 +49,10 @@ void wk_gpio_config(void)
 
   /* add user code end gpio_config 1 */
 
-  /* gpio input config */
-  gpio_init_struct.gpio_mode = GPIO_MODE_INPUT;
-  gpio_init_struct.gpio_pins = ID_PAD_PIN;
-  gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
-  gpio_init(ID_PAD_GPIO_PORT, &gpio_init_struct);
-
   /* gpio output config */
-  gpio_bits_reset(SPI1_CS_GPIO_PORT, SPI1_CS_PIN);
+  gpio_bits_set(SPI1_CS_GPIO_PORT, SPI1_CS_PIN);
 
-  gpio_init_struct.gpio_drive_strength = GPIO_DRIVE_STRENGTH_MODERATE;
+  gpio_init_struct.gpio_drive_strength = GPIO_DRIVE_STRENGTH_STRONGER;
   gpio_init_struct.gpio_out_type = GPIO_OUTPUT_PUSH_PULL;
   gpio_init_struct.gpio_mode = GPIO_MODE_OUTPUT;
   gpio_init_struct.gpio_pins = SPI1_CS_PIN;

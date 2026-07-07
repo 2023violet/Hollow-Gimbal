@@ -27,7 +27,7 @@ If touching these areas, read the matching local entry too:
   - `docs/application/README.md`
 - `bsp/`
   - `docs/architecture/Themis_BSP层定位、边界与优化路线图.md`
-- `platform/at/at32f415/`
+- `platform/at/at32f403a/`
   - `docs/boot/Themis_启动与初始化流程.md`
 - `scripts/` or `tests/`
   - `scripts/README.md`
@@ -43,8 +43,8 @@ boundary.
 
 Current live product facts:
 
-- MCU line: `at32f415`
-- live platform owner: `platform/at/at32f415`
+- MCU line: `AT32F403A`
+- live platform owner: `platform/at/at32f403a`
 - live board owner: `bsp/board`
 - live thin control-plane port owner: `bsp/ports`
 - live product owner: `applications/`
@@ -61,7 +61,7 @@ Current hard boundary:
 
 ## 3. Layer Rules
 
-### `platform/at/at32f415`
+### `platform/at/at32f403a`
 
 Owns:
 
@@ -175,7 +175,7 @@ For real code changes, verify with the current live lanes when applicable:
 
 Board facts currently documented in live docs:
 
-- debugger: `DAPLink`
+- debugger: `J-Link`
 - console policy: `USART1 console-first`
 - verified serial port witness in docs: `COM54`
 

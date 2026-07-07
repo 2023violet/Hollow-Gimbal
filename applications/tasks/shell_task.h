@@ -11,7 +11,7 @@
  * - bounded async TX staging
  * - line submission into `app_shell_task`
  *
- * Command registration, banner policy, help text, and synchronous shell
+ * Command vocabulary, banner policy, help text, and synchronous shell
  * execution are owned by `applications/shell/` and `app_shell_task`.
  */
 
@@ -21,13 +21,13 @@
 #include <stdint.h>
 #include "shell_config.h"
 
-#if SHELL_ENABLE
+#if TM_SHELL_ENABLE
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Public functions ----------------------------------------------------------------------------- */
+/* Public Functions ----------------------------------------------------------------------------- */
 
 /**
  * @brief  Initialize the shell UART transport owner.
@@ -42,6 +42,6 @@ void shell_task_init(void);
 }
 #endif
 
-#endif /* SHELL_ENABLE */
+#endif /* TM_SHELL_ENABLE */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -3,6 +3,11 @@
  * @brief   FalconFoc shell profile gates
  * @version v1.0.0
  * @date    2026.05.12
+ *
+ * Design overview
+ * ---------------
+ * This header maps the product shell policy to simple compile-time gates used
+ * by command owners.
  */
 
 #pragma once

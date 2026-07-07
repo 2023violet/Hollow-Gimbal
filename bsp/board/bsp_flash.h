@@ -1,23 +1,44 @@
 /**
  * @file    bsp_flash.h
- * @brief   Falcon FOC board-owned on-chip Flash access contract
- * @version v1.0.0
- * @date    2026.05.13
+ * @brief   FalconFoc board-owned on-chip Flash backend contract
+ * @version v1.1.0
+ * @date    2026.06.02
  *
  * Design overview
  * ---------------
- * This header exposes the minimum Flash service surface that FalconFoc keeps
- * inside the BSP layer. It is intentionally a thin board-owned contract for
- * the application-private `tiny_param` backend and is not a generic device or
- * driver abstraction.
+ * This module exposes the minimum Flash backend that FalconFoc keeps inside
+ * `bsp/board`. It is intentionally a thin board-owned contract used by the
+ * application-private `tiny_param` storage path and is not a generic device,
+ * HAL, or reusable Flash utility layer.
+ *
+ * Usage example
+ * -------------
+ * struct tp_flash_ops flash_ops = {
+ *     .read  = bsp_flash_read,
+ *     .write = bsp_flash_write,
+ *     .erase = bsp_flash_erase,
+ * };
+ *
+ * Ownership / lifecycle / context
+ * --------------------------------
+ * - Board-visible Flash geometry remains platform-owned and is consumed here
+ *   through compile definitions.
+ * - `bsp_flash_read()` is a readonly memory-mapped access helper and may be
+ *   used in any CPU context when the caller only needs a bounded copy.
+ * - `bsp_flash_write()` and `bsp_flash_erase()` are task-context storage
+ *   operations. ISR callers and pre-scheduler callers are rejected.
+ *
+ * Failure / recovery
+ * ------------------
+ * - Success returns `0`.
+ * - Contract violations and backend failures return negative `-errno`.
+ * - The caller owns higher-level retry, slot fallback, and recovery policy.
  */
 
 #pragma once
 
 /* Includes ------------------------------------------------------------------------------------- */
-#include <stdbool.h>
 #include <stdint.h>
-#include "at32f415_flash.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,25 +46,74 @@ extern "C" {
 
 /* Public Constants ----------------------------------------------------------------------------- */
 
-#define BSP_FLASH_BASE_ADDR    0x08000000U    /* Main Flash start address */
-#define BSP_FLASH_SIZE         (128U * 1024U) /* 128 KB */
-#define BSP_FLASH_SECTOR_SIZE  (1U * 1024U)   /* 2 KB per sector */
-#define BSP_FLASH_SECTOR_COUNT (128U)         /* Total sectors */
+#ifndef THEMIS_PLATFORM_FLASH_BASE_ADDR
+#error "bsp_flash.h requires THEMIS_PLATFORM_FLASH_BASE_ADDR from platform compile definitions."
+#endif
 
-/* Public Error Codes --------------------------------------------------------------------------- */
+#ifndef THEMIS_PLATFORM_FLASH_SIZE_BYTES
+#error "bsp_flash.h requires THEMIS_PLATFORM_FLASH_SIZE_BYTES from platform compile definitions."
+#endif
 
-#define BSP_FLASH_OK           (0)
-#define BSP_FLASH_ERR_RANGE    (-1)
-#define BSP_FLASH_ERR_ALIGN    (-2)
-#define BSP_FLASH_ERR_OP       (-3)
+#ifndef THEMIS_PLATFORM_FLASH_SECTOR_SIZE_BYTES
+#error "bsp_flash.h requires THEMIS_PLATFORM_FLASH_SECTOR_SIZE_BYTES from platform compile definitions."
+#endif
+
+#ifndef THEMIS_PLATFORM_FLASH_SECTOR_COUNT
+#error "bsp_flash.h requires THEMIS_PLATFORM_FLASH_SECTOR_COUNT from platform compile definitions."
+#endif
+
+#define BSP_FLASH_BASE_ADDR    THEMIS_PLATFORM_FLASH_BASE_ADDR
+#define BSP_FLASH_SIZE         THEMIS_PLATFORM_FLASH_SIZE_BYTES
+#define BSP_FLASH_SECTOR_SIZE  THEMIS_PLATFORM_FLASH_SECTOR_SIZE_BYTES
+#define BSP_FLASH_SECTOR_COUNT THEMIS_PLATFORM_FLASH_SECTOR_COUNT
 
 /* Public Functions ----------------------------------------------------------------------------- */
 
-int      bsp_flash_read(uint32_t addr, uint8_t *buf, uint32_t size);
-int      bsp_flash_write(uint32_t addr, const uint8_t *buf, uint32_t size);
-int      bsp_flash_erase(uint32_t addr, uint32_t size);
-uint32_t bsp_flash_get_sector(uint32_t addr);
-bool     bsp_flash_is_empty(uint32_t addr, uint32_t size);
+/* Readonly access ------------------------------------------------------------------------------ */
+
+/**
+ * @brief  Copy one Flash window into caller memory.
+ *
+ * @param  addr  Flash start address.
+ * @param  buf   Destination buffer.
+ * @param  size  Requested byte count.
+ *
+ * @return `0` on success, or negative `-errno` on failure.
+ */
+int bsp_flash_read(uint32_t addr, uint8_t *buf, uint32_t size);
+
+/* Task-context storage operations -------------------------------------------------------------- */
+
+/**
+ * @brief  Program one aligned Flash window from caller memory.
+ *
+ * Contract:
+ * - task context only
+ * - scheduler must already be running
+ * - `addr` and `size` must both be 4-byte aligned
+ *
+ * @param  addr  Flash start address.
+ * @param  buf   Source buffer.
+ * @param  size  Requested byte count.
+ *
+ * @return `0` on success, or negative `-errno` on failure.
+ */
+int bsp_flash_write(uint32_t addr, const uint8_t *buf, uint32_t size);
+
+/**
+ * @brief  Erase the sectors that cover one Flash window.
+ *
+ * Contract:
+ * - task context only
+ * - scheduler must already be running
+ * - hardware sector expansion is handled inside this backend
+ *
+ * @param  addr  Flash start address.
+ * @param  size  Requested byte count.
+ *
+ * @return `0` on success, or negative `-errno` on failure.
+ */
+int bsp_flash_erase(uint32_t addr, uint32_t size);
 
 #ifdef __cplusplus
 }

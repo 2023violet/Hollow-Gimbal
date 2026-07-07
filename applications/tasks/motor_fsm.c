@@ -1,6 +1,6 @@
 /**
  * @file    motor_fsm.c
- * @brief   Motor Axis Finite State Machine ‚Äî Implementation
+ * @brief   Motor Axis Finite State Machine °™ Implementation
  * @version v1.2.0
  * @date    2026.03.03
  *
@@ -12,14 +12,14 @@
  *    Because current_state is committed inside _fsm_do_transition() *before*
  *    enter_cb fires, any re-entrant read of axis_state (e.g. inside the
  *    callback itself) already sees the new value.  The 20 kHz ADC ISR reads
- *    motor->axis_state without any lock ‚Äî it must always find a consistent,
+ *    motor->axis_state without any lock °™ it must always find a consistent,
  *    up-to-date value.
  *
  * B. DISABLE routes to FAULT, not IDLE  (the v1.0 critical bug fix)
  *    _on_idle_enter calls pwm_out_enable() unconditionally (industry-standard
  *    brake/clamp idle).  If EV_CMD_DISABLE targeted IDLE the sequence would be:
- *       action ‚Üí pwm_out_disable()   ‚Üê correct
- *       enter  ‚Üí pwm_out_enable()    ‚Üê silently cancels the disable!
+ *       action °˙ pwm_out_disable()   °˚ correct
+ *       enter  °˙ pwm_out_enable()    °˚ silently cancels the disable!
  *    Routing to FAULT inverts this: _on_fault_enter calls pwm_out_disable()
  *    and there is nothing to re-enable it afterwards.
  *
@@ -34,7 +34,7 @@
  * D. _pending_calib_type
  *    A file-static variable.  motor_fsm_dispatch_calib() writes it immediately
  *    before calling motor_fsm_dispatch().  The action_cb reads it in the same
- *    RTOS task tick ‚Äî no concurrent access is possible in a single-motor
+ *    RTOS task tick °™ no concurrent access is possible in a single-motor
  *    system, so no mutex is required.
  *
  * Copyright (c) 2026 Zhang Jiaming <164293474@qq.com>. All rights reserved.
@@ -46,6 +46,7 @@
 #include "../../tests/host/support/motor_task.h"
 #include "../../tests/host/support/foc_calib.h"
 #include "../../tests/host/support/foc_calib_enc.h"
+#include "../../tests/host/support/motor_calibration_runtime.h"
 #include "../../tests/host/support/foc_param.h"
 #include "../../tests/host/support/motor_drv.h"
 #include "../../tests/host/support/tm_shell.h"
@@ -55,6 +56,7 @@
 #include "motor_task.h"
 #include "foc_calib.h"
 #include "foc_calib_enc.h"
+#include "motor_calibration_runtime.h"
 #include "foc_param.h"
 #include "motor_drv.h"
 #include "tm_shell.h"
@@ -78,7 +80,7 @@
 extern "C" {
 #endif
 
-/* Private constants ‚Äî state ID aliases --------------------------------------------------------- */
+/* Private constants °™ state ID aliases --------------------------------------------------------- */
 /*
  * Defined in the header but also repeated here for local readability.
  * #define AXIS_ST_IDLE    ((uint16_t)AXIS_STATE_IDLE)
@@ -119,13 +121,13 @@ static bool _action_clear_fault(void *user_data);
 /**
  * @brief  State node table.
  *
- * One entry per logical state.  Exit callbacks are NULL ‚Äî cleanup is the
+ * One entry per logical state.  Exit callbacks are NULL °™ cleanup is the
  * responsibility of the *entering* state's enter_cb (or action_cb for CALIB).
  *
  * IMPORTANT: AXIS_ST_CALIB uses a dedicated enter_cb (_on_calib_enter) that
  * writes motor->axis_state = AXIS_STATE_CALIB.  The two calib action_cbs
  * (_action_calib_motor / _action_calib_enc) still run first and may perform
- * additional sub-state setup ‚Äî they also write axis_state themselves so the
+ * additional sub-state setup °™ they also write axis_state themselves so the
  * ISR is never caught with a stale value between action and enter_cb.
  */
 static const struct fsm_state_node _motor_fsm_states[] = {
@@ -145,9 +147,9 @@ static const struct fsm_state_node _motor_fsm_states[] = {
  * Layout rationale:
  *  - Normal control rows first (readability).
  *  - Calibration rows grouped together.
- *  - DISABLE rows after calibration ‚Äî four rows cover all four states so
+ *  - DISABLE rows after calibration °™ four rows cover all four states so
  *    an emergency stop is never silently dropped.
- *  - FAULT_TRIP rows last ‚Äî three rows (no FAULT->FAULT: a double-trip
+ *  - FAULT_TRIP rows last °™ three rows (no FAULT->FAULT: a double-trip
  *    while already faulted is harmlessly dropped by -ENOENT).
  *
  * EV_CMD_DISABLE -> AXIS_ST_FAULT (NOT AXIS_ST_IDLE).
@@ -155,22 +157,22 @@ static const struct fsm_state_node _motor_fsm_states[] = {
  * pwm_out_enable(), silently cancelling the disable command.
  */
 static const struct fsm_transition _motor_fsm_trans[] = {
-    /* ‚îÄ‚îÄ Normal axis control ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+    /* ©§©§ Normal axis control ©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§ */
     {AXIS_ST_IDLE, EV_CMD_START, AXIS_ST_RUNNING, _action_start},
     {AXIS_ST_RUNNING, EV_CMD_STOP, AXIS_ST_IDLE, NULL},
     {AXIS_ST_FAULT, EV_CMD_CLR_FAULT, AXIS_ST_IDLE, _action_clear_fault},
 
-    /* ‚îÄ‚îÄ Calibration ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ */
+    /* ©§©§ Calibration ©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§ */
     {AXIS_ST_IDLE, EV_CMD_CALIB_MOTOR, AXIS_ST_CALIB, _action_calib_motor},
     {AXIS_ST_IDLE, EV_CMD_CALIB_ENC, AXIS_ST_CALIB, _action_calib_enc},
     {AXIS_ST_CALIB, EV_CMD_CALIB_ABORT, AXIS_ST_IDLE, _action_calib_abort},
     {AXIS_ST_CALIB, EV_CALIB_DONE, AXIS_ST_IDLE, _action_calib_done},
 
-    /* ‚îÄ‚îÄ Emergency disable (ALL states -> FAULT) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+    /* ©§©§ Emergency disable (ALL states -> FAULT) ©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§
      * Four rows: IDLE, CALIB, RUNNING, FAULT.
      * Including FAULT->FAULT (self-transition) is intentional: a second
      * EV_CMD_DISABLE while already faulted re-fires _on_fault_enter which
-     * safely re-disables PWM and re-zeroes FOC variables ‚Äî idempotent and
+     * safely re-disables PWM and re-zeroes FOC variables °™ idempotent and
      * harmless.  Omitting the row would cause -ENOENT to be returned from
      * the FSM; keeping it makes the API contract cleaner for callers.      */
     {AXIS_ST_IDLE, EV_CMD_DISABLE, AXIS_ST_FAULT, NULL},
@@ -178,8 +180,8 @@ static const struct fsm_transition _motor_fsm_trans[] = {
     {AXIS_ST_RUNNING, EV_CMD_DISABLE, AXIS_ST_FAULT, NULL},
     {AXIS_ST_FAULT, EV_CMD_DISABLE, AXIS_ST_FAULT, NULL},
 
-    /* ‚îÄ‚îÄ Fault trip (ALL non-FAULT states -> FAULT) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-     * Three rows: no FAULT->FAULT for EV_FAULT_TRIP ‚Äî a second trip while
+    /* ©§©§ Fault trip (ALL non-FAULT states -> FAULT) ©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§©§
+     * Three rows: no FAULT->FAULT for EV_FAULT_TRIP °™ a second trip while
      * already in FAULT returns -ENOENT and is silently discarded, which is
      * the desired behaviour (no spurious re-entry of _on_fault_enter).     */
     {AXIS_ST_IDLE, EV_FAULT_TRIP, AXIS_ST_FAULT, NULL},
@@ -229,7 +231,7 @@ int motor_fsm_dispatch(struct motor_dev *motor, enum motor_fsm_event event)
 
     /*
      * fsm_dispatch_event() returns -ENOENT when no transition matches.
-     * This is intentional "safety gate" behaviour ‚Äî unhandled events in
+     * This is intentional "safety gate" behaviour °™ unhandled events in
      * certain states are simply ignored (e.g. EV_CMD_START in FAULT).
      * No error log here to avoid spamming the shell on normal operation.
      */
@@ -246,7 +248,7 @@ void motor_fsm_dispatch_calib(struct motor_dev *motor, enum foc_calib_state cali
         return;
     }
 
-    /* Stash the type BEFORE dispatch ‚Äî action_cb reads it synchronously */
+    /* Stash the type BEFORE dispatch °™ action_cb reads it synchronously */
     _pending_calib_type = calib_type;
 
     enum motor_fsm_event ev = (calib_type == CALIB_ENC) ? EV_CMD_CALIB_ENC : EV_CMD_CALIB_MOTOR;
@@ -254,13 +256,13 @@ void motor_fsm_dispatch_calib(struct motor_dev *motor, enum foc_calib_state cali
     motor_fsm_dispatch(motor, ev);
 }
 
-/* Private callback implementations ‚Äî enter callbacks ------------------------------------------- */
+/* Private callback implementations °™ enter callbacks ------------------------------------------- */
 
 /**
  * @brief  IDLE state enter callback.
  *
  * Resets all PID integrators and setpoints via motor_calib_prepare_entry(),
- * then enables PWM at 0 % duty cycle (low-impedance brake / clamp idle ‚Äî
+ * then enables PWM at 0 % duty cycle (low-impedance brake / clamp idle °™
  * industry standard for safe axis hold).
  *
  * @note   pwm_out_enable() with 0 % duty is NOT the same as pwm_out_disable().
@@ -273,7 +275,7 @@ static void _on_idle_enter(void *user_data)
     struct motor_dev *motor = (struct motor_dev *)user_data;
     bool              preserve_restored_modes;
 
-    /* Sync axis_state FIRST ‚Äî ADC ISR may read on the very next tick */
+    /* Sync axis_state FIRST °™ ADC ISR may read on the very next tick */
     preserve_restored_modes = (motor->axis_state == AXIS_STATE_IDLE);
     motor->axis_state       = AXIS_STATE_IDLE;
 
@@ -283,7 +285,7 @@ static void _on_idle_enter(void *user_data)
         motor_calib_prepare_entry(motor);
     }
 
-    /* Enable PWM at 0% ‚Äî active low-side clamp (safe idle) */
+    /* Enable PWM at 0% °™ active low-side clamp (safe idle) */
     pwm_out_enable();
 }
 
@@ -330,11 +332,11 @@ static void _on_running_enter(void *user_data)
  * @brief  FAULT state enter callback.
  *
  * Hard sequence (order matters):
- *  1. Write axis_state ‚Äî ADC ISR must see FAULT on the next tick to stop
+ *  1. Write axis_state °™ ADC ISR must see FAULT on the next tick to stop
  *     updating FOC loops.
- *  2. Disable PWM ‚Äî kill gate drive immediately.
- *  3. Reset PIDs / zero setpoints ‚Äî no integrator windup while halted.
- *  4. Zero foc_calc ‚Äî prevent stale SVPWM duty cycles from being output
+ *  2. Disable PWM °™ kill gate drive immediately.
+ *  3. Reset PIDs / zero setpoints °™ no integrator windup while halted.
+ *  4. Zero foc_calc °™ prevent stale SVPWM duty cycles from being output
  *     if the ISR fires between step 1 and step 2.
  *
  * @note   This callback also handles EV_CMD_DISABLE.  Routing DISABLE here
@@ -346,7 +348,7 @@ static void _on_fault_enter(void *user_data)
 {
     struct motor_dev *motor = (struct motor_dev *)user_data;
 
-    /* Step 1: sync axis_state ‚Äî ISR sees FAULT immediately */
+    /* Step 1: sync axis_state °™ ISR sees FAULT immediately */
     motor->axis_state = AXIS_STATE_FAULT;
 
     /* Step 2: hard-kill PWM outputs */
@@ -355,17 +357,17 @@ static void _on_fault_enter(void *user_data)
     /* Step 3: reset PIDs and zero all setpoints */
     motor_calib_prepare_entry(motor);
 
-    /* Step 4: zero all live FOC variables ‚Äî no stale duty cycle output */
+    /* Step 4: zero all live FOC variables °™ no stale duty cycle output */
     memset(&motor->foc_calc, 0, sizeof(struct foc_vars));
 }
 
-/* Private callback implementations ‚Äî action callbacks ------------------------------------------ */
+/* Private callback implementations °™ action callbacks ------------------------------------------ */
 
 /**
  * @brief  Guard for IDLE + EV_CMD_START -> RUNNING.
  *
- * Warns if the encoder has not been calibrated ‚Äî closed-loop control will be
- * unreliable ‚Äî but does NOT veto the transition.  The operator may intentionally
+ * Warns if the encoder has not been calibrated °™ closed-loop control will be
+ * unreliable °™ but does NOT veto the transition.  The operator may intentionally
  * run open-loop voltage mode without a valid LUT.
  */
 static bool _action_start(void *user_data)
@@ -377,7 +379,7 @@ static bool _action_start(void *user_data)
                         "Closed-loop modes may be unreliable.\r\n");
     }
 
-    return true; /* Never veto ‚Äî caller decides the risk */
+    return true; /* Never veto °™ caller decides the risk */
 }
 
 /**
@@ -397,7 +399,7 @@ static bool _action_calib_motor(void *user_data)
 
     motor->calib_state.state = _pending_calib_type;
 
-    /* Write axis_state eagerly ‚Äî _on_calib_enter will write it again, which
+    /* Write axis_state eagerly °™ _on_calib_enter will write it again, which
      * is harmless, but this ensures no ISR tick sees a stale IDLE value. */
     motor->axis_state = AXIS_STATE_CALIB;
 
@@ -421,6 +423,12 @@ static bool _action_calib_enc(void *user_data)
 
     /* Reset encoder context: clear LUT, calib_valid flag, Vofa bindings */
     foc_calib_enc_init(motor);
+
+    /* Eagerly arm the encoder sub-state machine so the next ADC ISR tick
+     * starts from the pole-pair detection state.  Without this, a repeated
+     * 'cal enc' could inherit the previous run's ENC_LUT_END state and
+     * complete without performing the actual calibration sweep. */
+    motor->calib_state.enc_state = ENC_PP_START;
 
     /* Eager axis_state sync (see note in _action_calib_motor) */
     motor->axis_state = AXIS_STATE_CALIB;
@@ -456,14 +464,8 @@ static bool _action_calib_abort(void *user_data)
      */
     motor->axis_state = AXIS_STATE_IDLE;
 
-    motor->calib_state.rs_state   = RS_IDLE;
-    motor->calib_state.ls_state   = LS_IDLE;
-    motor->calib_state.flux_state = FX_IDLE;
-    motor->calib_state.js_state   = JS_IDLE;
-    motor->calib_state.enc_state  = ENC_IDLE;
-
     if (restore_last_committed_enc) {
-        int st = foc_param_load_enc(motor);
+        int st = motor_calibration_runtime_restore_encoder_after_abort(motor);
 
         if (st == PARAM_OK) {
             FSM_DEBUG_PRINT("[OK] motor_fsm: encoder calibration abort restored last committed payload.\r\n");

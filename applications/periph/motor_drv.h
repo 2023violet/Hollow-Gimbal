@@ -59,7 +59,16 @@ void pwm_out_set_duty(struct motor_dev *motor);
 uint16_t adc_read_channel_blocking(adc_channel_select_type channel);
 
 /**
+ * @brief  Read VBUS and NTC voltages using DMA
+ * 
+ * @param  motor  Pointer to motor instance structure
+ */
+void adc_read_ordinary_dma(struct motor_dev *motor);
+
+/**
  * @brief  Read VBUS and NTC voltages
+ * 
+ * Wrapper that uses the DMA-based implementation by default.
  * 
  * @param  motor  Pointer to motor instance structure
  */

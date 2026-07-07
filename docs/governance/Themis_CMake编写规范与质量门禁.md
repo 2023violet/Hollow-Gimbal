@@ -408,6 +408,35 @@ pwsh ./scripts/check_themis_quality_gate.ps1 -RepoRoot <git-root> -Scope cmake -
 - 本地开发环境允许在未安装 formatter 时给出显式 warn
 - CI / 发布门禁必须把 formatter 升格为硬失败
 
+### 11.4 第二阶段 root helper 边界
+
+第二阶段之后，root `CMakeLists.txt` 的质量门禁还要额外检查：
+
+- 是否按顺序加载：
+  - `ThemisBuild`
+  - `ThemisPlatformMetadata`
+  - `ThemisBuildAxes`
+  - `ThemisFirmwareAssembly`
+  - `ThemisContracts`
+  - `ThemisStatusReport`
+- 是否按顺序调用：
+  - build-axis cache 声明
+  - platform selection / override cache 声明
+  - build-axis 校验
+  - firmware assembly
+  - contract target 装配
+  - status report 输出
+- root 是否重新出现本应下沉的实现细节：
+  - metadata load
+  - contract target 创建
+  - 直接 `message(STATUS "Themis ...")`
+
+正式要求不是“root 行数越少越好”，而是：
+
+- root 只保留装配叙事
+- helper 保持单一职责
+- gate 能阻止 helper 回流到 root
+
 ## 12. Review 清单
 
 以后 review CMake，至少检查以下项目：

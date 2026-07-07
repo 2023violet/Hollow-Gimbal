@@ -294,6 +294,6 @@ void DebugMon_Handler(void)
 //   /* add user code end TMR5_GLOBAL_IRQ 1 */
 // }
 
-/* add user code begin 1 */
+// /* add user code begin 1 */
 
-/* add user code end 1 */
+// /* add user code end 1 */

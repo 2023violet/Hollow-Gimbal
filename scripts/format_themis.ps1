@@ -167,7 +167,7 @@ function Get-ThemisCMakeFiles
         "components/protocol/CMakeLists.txt",
         "components/utils/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
-        "platform/at/at32f415/CMakeLists.txt",
+        "platform/at/at32f403a/CMakeLists.txt",
         "platform/template/cortex_m4_ref/CMakeLists.txt",
         "subsys/CMakeLists.txt",
         "tests/CMakeLists.txt",

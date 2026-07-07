@@ -74,12 +74,14 @@ foreach ($token in @(
         "THEMIS_PRODUCT_FLAVOR=carrier-demo",
         "find_themis_shell_port.ps1",
         "sys reboot",
-        "state start",
-        "diag pid vel kp 0.1000",
-        "diag param rs 0.2300",
-        "cal enc",
-        "cal status",
-        "cal abort",
+        "help",
+        "sys status",
+        "state show",
+        "obs all",
+        "diag pid all show",
+        "diag param show",
+        "store save sys",
+        "store status",
         "board_witness"
     )) {
     if ($diagWitnessRaw -notmatch [regex]::Escape($token)) {
@@ -371,6 +373,15 @@ printf 'openocd:%s\n' "$*" >> "${THEMIS_MOCK_LOG}"
     }
     if ($firstConfigureLine -notmatch '-DTHEMIS_ENABLE_BOARD_BENCH=ON') {
         throw "First ./run.sh all must forward -DTHEMIS_ENABLE_BOARD_BENCH=ON into configure."
+    }
+    if ($firstConfigureLine -notmatch '-DTHEMIS_PLATFORM_VENDOR=at') {
+        throw "First ./run.sh all must keep the live platform vendor default at 'at'."
+    }
+    if ($firstConfigureLine -notmatch '-DTHEMIS_PLATFORM_SOC=at32f403a') {
+        throw "First ./run.sh all must keep the live platform SoC default at 'at32f403a'."
+    }
+    if ($firstConfigureLine -notmatch '-DTHEMIS_FIRMWARE_TARGET_NAME=falcon-foc-at32') {
+        throw "First ./run.sh all must keep the canonical firmware target name aligned with the live preset baseline."
     }
     $firstOpenOcdCount = Get-MockInvocationCount -LogPath $mockBuildLog -Prefix "openocd:"
     if ($firstOpenOcdCount -ne 1) {

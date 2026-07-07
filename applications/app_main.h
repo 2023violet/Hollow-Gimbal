@@ -12,7 +12,7 @@
  *
  * Ownership / lifecycle / context
  * --------------------------------
- * - Single caller: `platform/at/at32f415/generated/src/main.c`
+ * - Single caller: `platform/at/at32f23/generated/src/main.c`
  * - Called exactly once after generated low-level bring-up
  * - Runs before the scheduler starts
  * - Never returns on failure

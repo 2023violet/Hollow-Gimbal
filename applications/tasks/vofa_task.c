@@ -8,16 +8,16 @@
  */
 
 /* Includes ------------------------------------------------------------------------------------- */
-#include "tm_common.h"
-#include "shell_config.h"
-#include "console_port.h"
-#include "foc_common.h"
-#include "tm_export.h"
-#include "vofa.h"
-#include "foc_param.h"
-#include "traj_trap.h"
-#include "core_time.h"
+#include "bsp_console.h"
 #include "cmsis_os2.h"
+#include "core_time.h"
+#include "foc_common.h"
+#include "foc_param.h"
+#include "shell_config.h"
+#include "tm_common.h"
+#include "tm_export.h"
+#include "traj_trap.h"
+#include "vofa.h"
 
 #if (TM_FEATURE_VOFA != 0U) || (TM_APP_FEATURE_UART_TELEMETRY != 0U)
 
@@ -31,15 +31,15 @@ static osThreadId_t vofa_task_handle;
 
 /* Task Attributes */
 static const osThreadAttr_t vofa_task_attr = {
-    .name       = "vofa_task",
+    .name = "vofa_task",
     .stack_size = 128 * 4,
-    .priority   = (osPriority_t)osPriorityBelowNormal,
+    .priority = (osPriority_t)osPriorityBelowNormal,
 };
 
 /* Task performance statistics */
 #if (TASK_PERF_ENABLE == 1)
 static struct core_time_perf vofa_task_perf;
-static uint32_t              vofa_time_us = 0;
+static uint32_t vofa_time_us = 0;
 #endif
 
 /* Private function prototypes ------------------------------------------------------------------ */
@@ -71,7 +71,7 @@ INIT_EXPORT(vofa_task_init, EXPORT_LEVEL_APP);
  */
 void _usart_dma_send_data(uint8_t *p_data, uint16_t len)
 {
-    console_port_write_dma(p_data, len);
+    (void)bsp_console_write_dma(p_data, len);
 }
 
 // static void _usart_poll_send_data(const char *data, uint16_t len)

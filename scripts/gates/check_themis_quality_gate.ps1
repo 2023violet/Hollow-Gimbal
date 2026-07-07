@@ -156,6 +156,14 @@ function Invoke-FirmwareCliContract
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedRepoRoot }
 }
 
+function Invoke-CMakeSmoke
+{
+    param([string]$ResolvedRepoRoot)
+
+    $scriptPath = Join-Path $ResolvedRepoRoot "scripts\\gates\\check_cmake_smoke.ps1"
+    Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedRepoRoot }
+}
+
 function Invoke-TransportShellHardeningContract
 {
     param([string]$ResolvedGitRoot)
@@ -223,6 +231,7 @@ try {
     Invoke-CMakeQuality -ResolvedGitRoot $paths.GitRoot -FormatterRequired $requireFormatter
     Invoke-CMakePresetContract -ResolvedGitRoot $paths.GitRoot
     Invoke-PlatformBackendContract -ResolvedGitRoot $paths.GitRoot
+    Invoke-CMakeSmoke -ResolvedRepoRoot $paths.RepoRoot
     Invoke-FirmwareCliContract -ResolvedRepoRoot $paths.RepoRoot
     Invoke-HostCacheGuardRegression -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot
     Invoke-TransportShellHardeningContract -ResolvedGitRoot $paths.GitRoot

@@ -11,6 +11,8 @@
 #include "FreeRTOS.h"
 #include "tm_runtime.h"
 
+#if (TM_FEATURE_TASK_BUDGET != 0U)
+
 size_t xPortGetMinimumEverFreeHeapSize(void);
 
 struct tm_task_budget_entry {
@@ -88,5 +90,7 @@ bool tm_task_budget_probe_snapshot(struct tm_task_budget_snapshot *snapshot)
 
     return true;
 }
+
+#endif /* TM_FEATURE_TASK_BUDGET != 0U */
 
 /* ---------------------------------------- end of file ----------------------------------------- */

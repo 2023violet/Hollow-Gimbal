@@ -14,7 +14,6 @@
 #include "pll_enc.h"
 #include "foc_config.h"
 #include "wk_gpio.h"
-#include "wk_spi.h"
 #if ENCODER_SPI_DMA_ENABLE
 #include "wk_dma.h"
 #endif

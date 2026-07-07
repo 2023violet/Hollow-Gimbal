@@ -1,12 +1,5 @@
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:380:13:_motor_clear_setpoints	0	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:317:13:_motor_handle_deferred_save	16	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:571:13:_motor_safe_task_entry	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:517:13:_motor_task_entry	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:409:13:_motor_restore_finalize	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:244:13:_motor_task_load_params	16	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:199:13:_motor_init	32	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:167:6:motor_task_init	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:415:6:motor_restore_after_param_load	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:436:6:ADC1_2_IRQHandler	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:480:6:TMR5_GLOBAL_IRQHandler	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:614:6:motor_calib_prepare_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:90:6:motor_task_init	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:200:13:_motor_safe_task_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:160:13:_motor_task_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:106:6:ADC1_IRQHandler	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:136:6:TMR5_GLOBAL_IRQHandler	8	static

@@ -16,7 +16,7 @@
  * --------------------------------
  * - Board facts belong here instead of being scattered through APP/task code.
  * - Runtime object creation, ISR wiring, and peripheral register setup remain
- *   owned by `bsp/board/` and `platform/at/at32f415/`.
+ *   owned by `bsp/board/` and `platform/at/at32f403a/`.
  * - If the board routing changes, update these facts in the same change rather
  *   than introducing a second source of truth.
  */
@@ -29,19 +29,19 @@
 /* Board Identity ------------------------------------------------------------------------------- */
 
 /** Human-readable board identifier used by diagnostics and build metadata. */
-#define BOARD_NAME                "falcon-foc-at32"
+#define BOARD_NAME                  "falcon-foc-at32"
 
 /* Board Default Resource Names ----------------------------------------------------------------- */
 
 /** Default UART resource name used by the console-first shell transport path. */
-#define BOARD_CONSOLE_UART_NAME   "uart1"
+#define BOARD_CONSOLE_UART_NAME     "uart1"
 /** Default telemetry UART resource name when diagnostics explicitly opt in. */
-#define BOARD_TELEMETRY_UART_NAME BOARD_CONSOLE_UART_NAME
+#define BOARD_TELEMETRY_UART_NAME   BOARD_CONSOLE_UART_NAME
 /** Default ADC resource name used by the current motor-sense path. */
-#define BOARD_MAIN_ADC_NAME       "adc1"
+#define BOARD_MAIN_ADC_NAME         "adc1"
 /** Default SPI resource name used by the current driver-side gate path. */
-#define BOARD_MAIN_SPI_NAME       "spi1"
+#define BOARD_MAIN_SPI_NAME         "spi1"
 /** Default auxiliary SPI resource name used by the current encoder-side path. */
-#define BOARD_AUX_SPI_NAME        "spi3"
+#define BOARD_AUX_SPI_NAME          "spi3"
 
 /* ---------------------------------------- end of file ----------------------------------------- */

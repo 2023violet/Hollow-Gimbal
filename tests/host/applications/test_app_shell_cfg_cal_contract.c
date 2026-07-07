@@ -13,7 +13,7 @@
 
 #include "app_shell_commands.h"
 #include "foc_common.h"
-#include "motor_fsm.h"
+#include "motor_runtime.h"
 #include "tm_shell.h"
 
 #define TEST_ASSERT(expr)                                                                  \
@@ -32,23 +32,30 @@ struct motor_dev _motor_ins;
 
 static char   g_output[1024];
 static size_t g_output_len;
-static int    g_dispatch_calls;
-static int    g_dispatch_calib_calls;
-static int    g_last_dispatch_event;
+static int    g_request_ctrl_calls;
+static int    g_request_input_calls;
+static int    g_request_calib_calls;
+static int    g_request_calib_abort_calls;
+static int    g_last_ctrl_mode;
+static int    g_last_input_mode;
 static int    g_last_calib_type;
-static int    g_dispatch_rc;
+static int    g_abort_rc;
 static int    g_calib_enter_axis_state;
 
 static void test_env_reset(void)
 {
     memset(&_motor_ins, 0, sizeof(_motor_ins));
+    motor_runtime_attach(&_motor_ins);
     memset(g_output, 0, sizeof(g_output));
-    g_output_len          = 0U;
-    g_dispatch_calls      = 0;
-    g_dispatch_calib_calls = 0;
-    g_last_dispatch_event  = -1;
+    g_output_len           = 0U;
+    g_request_ctrl_calls   = 0;
+    g_request_input_calls  = 0;
+    g_request_calib_calls  = 0;
+    g_request_calib_abort_calls = 0;
+    g_last_ctrl_mode       = -1;
+    g_last_input_mode      = -1;
     g_last_calib_type      = -1;
-    g_dispatch_rc          = 0;
+    g_abort_rc             = 0;
     g_calib_enter_axis_state = 0;
 }
 
@@ -188,22 +195,73 @@ const char *app_shell_format_float_or_dash(char *buffer, size_t buffer_size, flo
     return buffer;
 }
 
-int motor_fsm_dispatch(struct motor_dev *motor, enum motor_fsm_event event)
+bool motor_runtime_request_ctrl_mode(enum foc_ctrl_mode mode)
 {
-    (void)motor;
-    g_dispatch_calls++;
-    g_last_dispatch_event = (int)event;
-    return g_dispatch_rc;
+    g_request_ctrl_calls++;
+    g_last_ctrl_mode    = (int)mode;
+    _motor_ins.ctrl_mode = mode;
+    return true;
 }
 
-void motor_fsm_dispatch_calib(struct motor_dev *motor, enum foc_calib_state calib_type)
+bool motor_runtime_request_input_mode(enum foc_input_mode mode)
 {
-    g_dispatch_calib_calls++;
+    g_request_input_calls++;
+    g_last_input_mode     = (int)mode;
+    _motor_ins.input_mode = mode;
+    return true;
+}
+
+bool motor_runtime_request_calibration(enum foc_calib_state calib_type)
+{
+    g_request_calib_calls++;
     g_last_calib_type = (int)calib_type;
 
-    if ((motor != NULL) && (g_calib_enter_axis_state != 0)) {
-        motor->axis_state = (enum foc_axis_state)g_calib_enter_axis_state;
+    if (g_calib_enter_axis_state != 0) {
+        _motor_ins.axis_state = (enum foc_axis_state)g_calib_enter_axis_state;
     }
+
+    return true;
+}
+
+int motor_runtime_request_calibration_abort(void)
+{
+    g_request_calib_abort_calls++;
+    return g_abort_rc;
+}
+
+struct motor_dev *motor_runtime_current(void)
+{
+    return NULL;
+}
+
+void motor_runtime_attach(struct motor_dev *motor)
+{
+    (void)motor;
+}
+
+bool motor_runtime_snapshot(struct motor_runtime_snapshot *snapshot)
+{
+    if (snapshot == NULL) {
+        return false;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->axis_state  = (uint8_t)_motor_ins.axis_state;
+    snapshot->ctrl_mode   = (uint8_t)_motor_ins.ctrl_mode;
+    snapshot->input_mode  = (uint8_t)_motor_ins.input_mode;
+    snapshot->sensor_type = (uint8_t)_motor_ins.sensor_type;
+    snapshot->fault_code  = _motor_ins.fault_code;
+    snapshot->calib_state = (uint8_t)_motor_ins.calib_state.state;
+    snapshot->rs_state    = (uint8_t)_motor_ins.calib_state.rs_state;
+    snapshot->ls_state    = (uint8_t)_motor_ins.calib_state.ls_state;
+    snapshot->flux_state  = (uint8_t)_motor_ins.calib_state.flux_state;
+    snapshot->js_state    = (uint8_t)_motor_ins.calib_state.js_state;
+    snapshot->enc_state   = (uint8_t)_motor_ins.calib_state.enc_state;
+    snapshot->enc_valid   = _motor_ins.enc_pri.state.calib_valid;
+    snapshot->mech_offset = (_motor_ins.enc_pri.config != NULL) ? _motor_ins.enc_pri.config->mech_offset : 0.0f;
+    snapshot->pole_pairs  = (_motor_ins.enc_pri.config != NULL) ? _motor_ins.enc_pri.config->pole_pairs : 0U;
+    snapshot->save_req    = _motor_ins.calib_state.param_save_req;
+    return true;
 }
 
 static void test_cfg_ctrl_is_rejected_while_running(void)
@@ -216,6 +274,7 @@ static void test_cfg_ctrl_is_rejected_while_running(void)
 
     TEST_ASSERT(app_shell_cfg_command(3, argv) == SHELL_OK);
     TEST_ASSERT(_motor_ins.ctrl_mode == CTRL_MODE_CURR);
+    TEST_ASSERT(g_request_ctrl_calls == 0);
     TEST_ASSERT(strstr(g_output, "cmd=ctrl result=error") != NULL);
     TEST_ASSERT(strstr(g_output, "axis=running") != NULL);
 }
@@ -229,6 +288,8 @@ static void test_cfg_input_writes_formal_config_in_idle(void)
     _motor_ins.input_mode = INPUT_MODE_INACTIVE;
 
     TEST_ASSERT(app_shell_cfg_command(3, argv) == SHELL_OK);
+    TEST_ASSERT(g_request_input_calls == 1);
+    TEST_ASSERT(g_last_input_mode == INPUT_MODE_TRAP_TRAJ);
     TEST_ASSERT(_motor_ins.input_mode == INPUT_MODE_TRAP_TRAJ);
     TEST_ASSERT(strstr(g_output, "cmd=input result=ok input=traj") != NULL);
 }
@@ -241,8 +302,8 @@ static void test_cal_start_is_idle_only_event_path(void)
     _motor_ins.axis_state = AXIS_STATE_RUNNING;
 
     TEST_ASSERT(app_shell_cal_command(2, argv) == SHELL_OK);
-    TEST_ASSERT(g_dispatch_calib_calls == 0);
-    TEST_ASSERT(strstr(g_output, "cmd=start result=error") != NULL);
+    TEST_ASSERT(g_request_calib_calls == 0);
+    TEST_ASSERT(strstr(g_output, "cmd=enc action=start result=error") != NULL);
     TEST_ASSERT(strstr(g_output, "axis=running") != NULL);
 }
 
@@ -255,9 +316,9 @@ static void test_cal_start_reports_error_when_dispatch_does_not_enter_calib(void
     g_calib_enter_axis_state = 0;
 
     TEST_ASSERT(app_shell_cal_command(2, argv) == SHELL_OK);
-    TEST_ASSERT(g_dispatch_calib_calls == 1);
+    TEST_ASSERT(g_request_calib_calls == 1);
     TEST_ASSERT(_motor_ins.axis_state == AXIS_STATE_IDLE);
-    TEST_ASSERT(strstr(g_output, "cmd=start result=error") != NULL);
+    TEST_ASSERT(strstr(g_output, "cmd=enc action=start result=error") != NULL);
     TEST_ASSERT(strstr(g_output, "stage=enc") != NULL);
 }
 
@@ -270,9 +331,10 @@ static void test_cal_start_reports_ok_after_entering_calib(void)
     g_calib_enter_axis_state = AXIS_STATE_CALIB;
 
     TEST_ASSERT(app_shell_cal_command(2, argv) == SHELL_OK);
-    TEST_ASSERT(g_dispatch_calib_calls == 1);
+    TEST_ASSERT(g_request_calib_calls == 1);
+    TEST_ASSERT(g_last_calib_type == CALIB_ENC);
     TEST_ASSERT(_motor_ins.axis_state == AXIS_STATE_CALIB);
-    TEST_ASSERT(strstr(g_output, "cmd=start result=ok stage=enc") != NULL);
+    TEST_ASSERT(strstr(g_output, "cmd=enc action=start result=ok stage=enc") != NULL);
 }
 
 static void test_cal_abort_dispatches_event_only(void)
@@ -281,11 +343,10 @@ static void test_cal_abort_dispatches_event_only(void)
 
     test_env_reset();
     _motor_ins.axis_state = AXIS_STATE_CALIB;
-    g_dispatch_rc = 0;
+    g_abort_rc = 0;
 
     TEST_ASSERT(app_shell_cal_command(2, argv) == SHELL_OK);
-    TEST_ASSERT(g_dispatch_calls == 1);
-    TEST_ASSERT(g_last_dispatch_event == EV_CMD_CALIB_ABORT);
+    TEST_ASSERT(g_request_calib_abort_calls == 1);
     TEST_ASSERT(strstr(g_output, "cmd=abort result=ok") != NULL);
 }
 

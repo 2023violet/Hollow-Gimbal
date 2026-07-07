@@ -7,15 +7,17 @@
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "app_shell_task.h"
-#include <errno.h>
-#include <string.h>
+
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "config/tm_core_config.h"
 #include "console_session_config.h"
 #include "tm_runtime.h"
 #include "tm_shell.h"
-#if (TM_FEATURE_TASK_BUDGET != 0U)
+
+#include <errno.h>
+#include <string.h>
+#if (TM_APP_FEATURE_BUDGET_PROBE != 0U)
 #include "tm_task_budget_probe.h"
 #endif
 
@@ -33,32 +35,32 @@
 
 struct tm_shell_task_line_msg {
     uint16_t len;
-    char     line[SHELL_LINE_MAX + 1U];
+    char line[SHELL_LINE_MAX + 1U];
 };
 
-static osThreadId_t       _tm_shell_task_handle = NULL;
-static osMessageQueueId_t _tm_shell_task_queue  = NULL;
-static StaticQueue_t      _tm_shell_task_queue_cb;
+static osThreadId_t _tm_shell_task_handle = NULL;
+static osMessageQueueId_t _tm_shell_task_queue = NULL;
+static StaticQueue_t _tm_shell_task_queue_cb;
 static uint8_t
     _tm_shell_task_queue_storage[TM_SHELL_TASK_QUEUE_DEPTH * sizeof(struct tm_shell_task_line_msg)];
 
 static const osMessageQueueAttr_t _tm_shell_task_queue_attr = {
-    .name    = "app_shell_task",
-    .cb_mem  = &_tm_shell_task_queue_cb,
+    .name = "app_shell_task",
+    .cb_mem = &_tm_shell_task_queue_cb,
     .cb_size = sizeof(_tm_shell_task_queue_cb),
-    .mq_mem  = _tm_shell_task_queue_storage,
+    .mq_mem = _tm_shell_task_queue_storage,
     .mq_size = sizeof(_tm_shell_task_queue_storage),
 };
 
 static const osThreadAttr_t _tm_shell_task_attr = {
-    .name       = "app_shell_task",
-    .stack_size = TM_SHELL_TASK_STACK_BYTES,
-    .priority   = (osPriority_t)osPriorityBelowNormal,
+    .name = "app_shell_task",
+    .stack_size = TM_APP_TASK_STACK_SHELL_BYTES,
+    .priority = (osPriority_t)osPriorityBelowNormal,
 };
 
-static int                           _tm_shell_task_status          = TM_SHELL_TASK_STATUS_INIT;
-static tm_shell_task_banner_fn_t     _tm_shell_task_banner_hook     = NULL;
-static bool                          _tm_shell_task_transport_ready = false;
+static int _tm_shell_task_status = TM_SHELL_TASK_STATUS_INIT;
+static tm_shell_task_banner_fn_t _tm_shell_task_banner_hook = NULL;
+static bool _tm_shell_task_transport_ready = false;
 
 static struct {
     uint16_t queue_used;
@@ -115,7 +117,7 @@ static int _tm_shell_task_take_next_line(struct tm_shell_task_line_msg *msg, uin
 static int _tm_shell_task_process_once(uint32_t timeout)
 {
     struct tm_shell_task_line_msg msg;
-    int                           result;
+    int result;
 
     result = _tm_shell_task_take_next_line(&msg, timeout);
     if (result <= 0) {
@@ -136,9 +138,11 @@ int tm_shell_task_init(void)
 
     _tm_shell_task_transport_ready = false;
 
-    _tm_shell_task_queue = osMessageQueueNew(TM_SHELL_TASK_QUEUE_DEPTH,
-                                             sizeof(struct tm_shell_task_line_msg),
-                                             &_tm_shell_task_queue_attr);
+    _tm_shell_task_queue = osMessageQueueNew(
+        TM_SHELL_TASK_QUEUE_DEPTH,
+        sizeof(struct tm_shell_task_line_msg),
+        &_tm_shell_task_queue_attr
+    );
     if (_tm_shell_task_queue == NULL) {
         _tm_shell_task_status = -ENOMEM;
         return _tm_shell_task_status;
@@ -147,13 +151,13 @@ int tm_shell_task_init(void)
     _tm_shell_task_handle = osThreadNew(_tm_shell_task_entry, NULL, &_tm_shell_task_attr);
     if (_tm_shell_task_handle == NULL) {
         (void)osMessageQueueDelete(_tm_shell_task_queue);
-        _tm_shell_task_queue  = NULL;
+        _tm_shell_task_queue = NULL;
         _tm_shell_task_status = -ENOMEM;
         return _tm_shell_task_status;
     }
 
-#if (TM_FEATURE_TASK_BUDGET != 0U)
-    tm_task_budget_probe_register("shell", _tm_shell_task_handle, TM_SHELL_TASK_STACK_BYTES);
+#if (TM_APP_FEATURE_BUDGET_PROBE != 0U)
+    tm_task_budget_probe_register("shell", _tm_shell_task_handle, TM_APP_TASK_STACK_SHELL_BYTES);
 #endif
     _tm_shell_task_status = 0;
     return 0;
@@ -162,8 +166,8 @@ int tm_shell_task_init(void)
 int tm_shell_task_submit_line(const char *line, uint16_t len)
 {
     struct tm_shell_task_line_msg msg = {0};
-    bool                          use_queue;
-    osStatus_t                    status;
+    bool use_queue;
+    osStatus_t status;
 
     if (((line == NULL) && (len > 0U)) || (len > SHELL_LINE_MAX)) {
         return -EINVAL;
@@ -173,7 +177,7 @@ int tm_shell_task_submit_line(const char *line, uint16_t len)
         memcpy(msg.line, line, len);
     }
     msg.line[len] = '\0';
-    msg.len       = len;
+    msg.len = len;
 
     use_queue = false;
     tm_task_critical_enter();
@@ -222,17 +226,17 @@ bool tm_shell_task_diag_snapshot(struct tm_shell_task_diag_snapshot *snapshot)
 
     scheduler_running = tm_scheduler_is_running();
     tm_task_critical_enter();
-    snapshot->status               = _tm_shell_task_status;
-    snapshot->initialized          = ((_tm_shell_task_queue != NULL) &&
-                             (_tm_shell_task_handle != NULL) && (_tm_shell_task_status == 0));
-    snapshot->transport_ready      = snapshot->initialized && _tm_shell_task_transport_ready;
-    snapshot->ready                = snapshot->initialized && snapshot->transport_ready &&
-                      scheduler_running;
-    snapshot->queue_depth          = TM_SHELL_TASK_QUEUE_DEPTH;
-    snapshot->queue_used           = _tm_shell_task_diag.queue_used;
-    snapshot->queue_high_water     = _tm_shell_task_diag.queue_high_water;
-    snapshot->submit_ok_count      = _tm_shell_task_diag.submit_ok_count;
-    snapshot->submit_fail_count    = _tm_shell_task_diag.submit_fail_count;
+    snapshot->status = _tm_shell_task_status;
+    snapshot->initialized =
+        ((_tm_shell_task_queue != NULL) && (_tm_shell_task_handle != NULL) &&
+         (_tm_shell_task_status == 0));
+    snapshot->transport_ready = snapshot->initialized && _tm_shell_task_transport_ready;
+    snapshot->ready = snapshot->initialized && snapshot->transport_ready && scheduler_running;
+    snapshot->queue_depth = TM_SHELL_TASK_QUEUE_DEPTH;
+    snapshot->queue_used = _tm_shell_task_diag.queue_used;
+    snapshot->queue_high_water = _tm_shell_task_diag.queue_high_water;
+    snapshot->submit_ok_count = _tm_shell_task_diag.submit_ok_count;
+    snapshot->submit_fail_count = _tm_shell_task_diag.submit_fail_count;
     tm_task_critical_exit();
 
     return true;
@@ -294,47 +298,6 @@ static void _tm_shell_task_wait_transport_ready(void)
         osDelay(1U);
     }
 }
-
-#else
-
-int tm_shell_task_init(void)
-{
-    return 0;
-}
-
-int tm_shell_task_submit_line(const char *line, uint16_t len)
-{
-    (void)line;
-    (void)len;
-    return -ENOSYS;
-}
-
-bool tm_shell_task_diag_snapshot(struct tm_shell_task_diag_snapshot *snapshot)
-{
-    if (snapshot == NULL) {
-        return false;
-    }
-
-    memset(snapshot, 0, sizeof(*snapshot));
-    snapshot->status = -ENOSYS;
-    return true;
-}
-
-void tm_shell_task_set_banner_hook(tm_shell_task_banner_fn_t fn)
-{
-    (void)fn;
-}
-
-void tm_shell_task_notify_transport_ready(void)
-{
-}
-
-#if defined(THEMIS_HOST_TEST)
-int tm_shell_task_host_process_once(void)
-{
-    return -ENOSYS;
-}
-#endif
 
 #endif /* TM_SHELL_ENABLE != 0U */
 

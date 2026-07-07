@@ -2,13 +2,26 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Themis: Build fw-full-diag-carrier-debug",
+      "label": "Themis: Firmware build MinGW Makefiles",
       "type": "shell",
       "command": "cmake",
       "args": [
-        "--build",
-        "--preset",
-        "build-fw-full-diag-carrier-debug"
+        "-S",
+        ".",
+        "-B",
+        "build",
+        "-G",
+        "MinGW Makefiles",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_TOOLCHAIN_FILE=tools/cmake/arm-gcc-toolchain.cmake",
+        "-DTHEMIS_BUILD_FIRMWARE=ON",
+        "-DTHEMIS_BUILD_HOST_TESTS=OFF",
+        "-DTHEMIS_DEVDRV_PROFILE=full-diag",
+        "-DTHEMIS_PRODUCT_FLAVOR=carrier-demo",
+        "-DTHEMIS_ENABLE_BOARD_BENCH=OFF",
+        "-DTHEMIS_PLATFORM_VENDOR=at",
+        "-DTHEMIS_PLATFORM_SOC=at32f415",
+        "-DTHEMIS_FIRMWARE_TARGET_NAME=falcon-foc-at32"
       ],
       "group": {
         "kind": "build",
@@ -22,6 +35,18 @@
         "showReuseMessage": true,
         "clear": true
       },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Themis: Firmware compile MinGW Makefiles",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "build",
+        "-j4"
+      ],
+      "group": "build",
       "problemMatcher": "$gcc"
     },
     {

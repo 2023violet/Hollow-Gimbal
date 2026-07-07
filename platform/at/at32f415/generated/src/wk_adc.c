@@ -38,86 +38,94 @@
   */
 void wk_adc1_init(void)
 {
-  /* add user code begin adc1_init 0 */
+    /* add user code begin adc1_init 0 */
 
-  /* add user code end adc1_init 0 */
+    /* add user code end adc1_init 0 */
 
-  gpio_init_type gpio_init_struct;
-  adc_base_config_type adc_base_struct;
+    gpio_init_type gpio_init_struct;
+    adc_base_config_type adc_base_struct;
 
-  gpio_default_para_init(&gpio_init_struct);
+    gpio_default_para_init(&gpio_init_struct);
 
-  /* add user code begin adc1_init 1 */
+    /* add user code begin adc1_init 1 */
 
-  /* add user code end adc1_init 1 */
+    /* add user code end adc1_init 1 */
 
-  /*gpio--------------------------------------------------------------------*/ 
-  /* configure the IN1 pin */
-  gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
-  gpio_init_struct.gpio_pins = VBUS_PIN;
-  gpio_init(VBUS_GPIO_PORT, &gpio_init_struct);
+    /*gpio--------------------------------------------------------------------*/
+    /* configure the IN1 pin */
+    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
+    gpio_init_struct.gpio_pins = VBUS_PIN;
+    gpio_init(VBUS_GPIO_PORT, &gpio_init_struct);
 
-  /* configure the IN3 pin */
-  gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
-  gpio_init_struct.gpio_pins = IC_PIN;
-  gpio_init(IC_GPIO_PORT, &gpio_init_struct);
+    /* configure the IN2 pin */
+    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
+    gpio_init_struct.gpio_pins = ID_PAD_PIN;
+    gpio_init(ID_PAD_GPIO_PORT, &gpio_init_struct);
 
-  /* configure the IN4 pin */
-  gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
-  gpio_init_struct.gpio_pins = IB_PIN;
-  gpio_init(IB_GPIO_PORT, &gpio_init_struct);
+    /* configure the IN4 pin */
+    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
+    gpio_init_struct.gpio_pins = IB_PIN;
+    gpio_init(IB_GPIO_PORT, &gpio_init_struct);
 
-  /* configure the IN5 pin */
-  gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
-  gpio_init_struct.gpio_pins = IA_PIN;
-  gpio_init(IA_GPIO_PORT, &gpio_init_struct);
+    /* configure the IN5 pin */
+    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
+    gpio_init_struct.gpio_pins = IA_PIN;
+    gpio_init(IA_GPIO_PORT, &gpio_init_struct);
 
-  adc_reset(ADC1);
-  crm_adc_clock_div_set(CRM_ADC_DIV_4);
+    adc_reset(ADC1);
+    crm_adc_clock_div_set(CRM_ADC_DIV_4);
 
-  /*adc_settings--------------------------------------------------------------------*/ 
-  adc_base_default_para_init(&adc_base_struct);
-  adc_base_struct.sequence_mode = TRUE;
-  adc_base_struct.repeat_mode = FALSE;
-  adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
-  adc_base_struct.ordinary_channel_length = 1;
-  adc_base_config(ADC1, &adc_base_struct);
+    /*adc_settings--------------------------------------------------------------------*/
+    adc_base_default_para_init(&adc_base_struct);
+    adc_base_struct.sequence_mode = TRUE;
+    adc_base_struct.repeat_mode = FALSE;
+    adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
+    adc_base_struct.ordinary_channel_length = 2;
+    adc_base_config(ADC1, &adc_base_struct);
 
-  /* adc_preempt_conversionmode--------------------------------------------- */
-  adc_preempt_channel_length_set(ADC1, 4);
+    /* adc_ordinary_conversionmode-------------------------------------------- */
+    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_1, 1, ADC_SAMPLETIME_239_5);
+    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_2, 2, ADC_SAMPLETIME_239_5);
 
-  adc_preempt_channel_set(ADC1, ADC_CHANNEL_1, 1, ADC_SAMPLETIME_7_5);
-  adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_1, 0x0);
-  adc_preempt_channel_set(ADC1, ADC_CHANNEL_3, 2, ADC_SAMPLETIME_7_5);
-  adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_2, 0x0);
-  adc_preempt_channel_set(ADC1, ADC_CHANNEL_4, 3, ADC_SAMPLETIME_7_5);
-  adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_3, 0x0);
-  adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 4, ADC_SAMPLETIME_7_5);
-  adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_4, 0x0);
+    /* When "ADCx_ORDINARY_TRIG_SOFTWARE" is selected, user can only use software trigger. \
+  The software trigger function is adc_ordinary_software_trigger_enable(ADCx, TRUE); */
+    adc_ordinary_conversion_trigger_set(ADC1, ADC12_ORDINARY_TRIG_SOFTWARE, TRUE);
 
-  /* When "ADCx_PREEMPT_TRIG_SOFTWARE" is selected, user can only use software trigger. \
+    adc_ordinary_part_mode_enable(ADC1, FALSE);
+
+    adc_dma_mode_enable(ADC1, TRUE);
+    /* adc_preempt_conversionmode--------------------------------------------- */
+    adc_preempt_channel_length_set(ADC1, 2);
+
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_4, 1, ADC_SAMPLETIME_7_5);
+    adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_1, 0x0);
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 2, ADC_SAMPLETIME_7_5);
+    adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_2, 0x0);
+
+    /* When "ADCx_PREEMPT_TRIG_SOFTWARE" is selected, user can only use software trigger. \
   The software trigger function is adc_preempt_software_trigger_enable(ADCx, TRUE); */
-  adc_preempt_conversion_trigger_set(ADC1, ADC12_PREEMPT_TRIG_TMR1CH4, TRUE);
-  gpio_pin_remap_config(ADC1_ETP_MUX, TRUE);
+    adc_preempt_conversion_trigger_set(ADC1, ADC12_PREEMPT_TRIG_TMR3CH4, TRUE);
 
-  /* enable preempted channels conversion end interrupt */
-  adc_interrupt_enable(ADC1, ADC_PCCE_INT, TRUE);
+    /* enable preempted channels conversion end interrupt */
+    adc_interrupt_enable(ADC1, ADC_PCCE_INT, TRUE);
 
-  /* add user code begin adc1_init 2 */
+    /* add user code begin adc1_init 2 */
 
-  /* add user code end adc1_init 2 */
-  
-  adc_enable(ADC1, TRUE);
-  
-  /* adc calibration-------------------------------------------------------- */
-  adc_calibration_init(ADC1);
-  while(adc_calibration_init_status_get(ADC1));
-  adc_calibration_start(ADC1);
-  while(adc_calibration_status_get(ADC1));
+    /* add user code end adc1_init 2 */
 
-  /* add user code begin adc1_init 3 */
+    adc_enable(ADC1, TRUE);
 
-  /* add user code end adc1_init 3 */
+    /* adc calibration-------------------------------------------------------- */
+    adc_calibration_init(ADC1);
+    while (adc_calibration_init_status_get(ADC1))
+        ;
+    adc_calibration_start(ADC1);
+    while (adc_calibration_status_get(ADC1))
+        ;
+
+    /* add user code begin adc1_init 3 */
+
+    /* add user code end adc1_init 3 */
 }
 
 /* add user code begin 1 */

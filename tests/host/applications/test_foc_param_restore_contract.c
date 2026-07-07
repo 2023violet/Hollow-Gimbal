@@ -5,7 +5,9 @@
  * @date    2026.05.14
  */
 
+#include <errno.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,78 +54,57 @@ static void test_flash_reset(void)
     memset(g_flash, 0xFF, sizeof(g_flash));
 }
 
+static bool test_flash_span_is_valid(uint32_t addr, uint32_t size, uint32_t *offset)
+{
+    uint32_t end_addr;
+
+    if ((size == 0U) || (addr < BSP_FLASH_BASE_ADDR)) {
+        return false;
+    }
+
+    end_addr = addr + size;
+    if ((end_addr < addr) || (end_addr > (BSP_FLASH_BASE_ADDR + (uint32_t)sizeof(g_flash)))) {
+        return false;
+    }
+
+    *offset = addr - BSP_FLASH_BASE_ADDR;
+    return true;
+}
+
 int bsp_flash_read(uint32_t addr, uint8_t *buf, uint32_t size)
 {
     uint32_t offset;
 
-    if ((buf == NULL) || (addr < BSP_FLASH_BASE_ADDR)) {
-        return -1;
-    }
-
-    offset = addr - BSP_FLASH_BASE_ADDR;
-    if ((offset + size) > sizeof(g_flash)) {
-        return -1;
+    if ((buf == NULL) || !test_flash_span_is_valid(addr, size, &offset)) {
+        return -EINVAL;
     }
 
     memcpy(buf, &g_flash[offset], size);
-    return (int)size;
+    return 0;
 }
 
 int bsp_flash_write(uint32_t addr, const uint8_t *buf, uint32_t size)
 {
     uint32_t offset;
 
-    if ((buf == NULL) || (addr < BSP_FLASH_BASE_ADDR)) {
-        return -1;
-    }
-
-    offset = addr - BSP_FLASH_BASE_ADDR;
-    if ((offset + size) > sizeof(g_flash)) {
-        return -1;
+    if ((buf == NULL) || !test_flash_span_is_valid(addr, size, &offset)) {
+        return -EINVAL;
     }
 
     memcpy(&g_flash[offset], buf, size);
-    return (int)size;
+    return 0;
 }
 
 int bsp_flash_erase(uint32_t addr, uint32_t size)
 {
     uint32_t offset;
 
-    if (addr < BSP_FLASH_BASE_ADDR) {
-        return -1;
-    }
-
-    offset = addr - BSP_FLASH_BASE_ADDR;
-    if ((offset + size) > sizeof(g_flash)) {
-        return -1;
+    if (!test_flash_span_is_valid(addr, size, &offset)) {
+        return -EINVAL;
     }
 
     memset(&g_flash[offset], 0xFF, size);
     return 0;
-}
-
-bool bsp_flash_is_empty(uint32_t addr, uint32_t size)
-{
-    uint32_t offset;
-    uint32_t i;
-
-    if (addr < BSP_FLASH_BASE_ADDR) {
-        return false;
-    }
-
-    offset = addr - BSP_FLASH_BASE_ADDR;
-    if ((offset + size) > sizeof(g_flash)) {
-        return false;
-    }
-
-    for (i = 0U; i < size; ++i) {
-        if (g_flash[offset + i] != 0xFFU) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 void encoder_init(struct encoder_dev *enc, struct encoder_config *cfg)
@@ -143,32 +124,22 @@ void encoder_update(struct encoder_dev *enc)
 
 void foc_calib_runtime_refresh(struct motor_dev *motor)
 {
-    float torque_const;
     float tor_motor_needed;
     float iq_limit_by_mech;
-    float iq_limit_by_heat;
 
-    TEST_ASSERT(motor != NULL);
-
-    motor->calc_params.inv_poles = 1.0f / (float)motor->hw_config.poles;
-    motor->calc_params.inv_gear  = 1.0f / motor->hw_config.gear_ratio;
-    motor->calc_params.poles_over_2pi = (float)motor->hw_config.poles / FOC_2PI;
-
-    torque_const            = 1.5f * (float)motor->hw_config.poles * motor->hw_config.flux;
-    motor->calc_params.kt   = torque_const;
-    motor->calc_params.inv_kt = (torque_const > 1e-6f) ? (1.0f / torque_const) : 1.0f;
+    if (motor == NULL) {
+        return;
+    }
 
     tor_motor_needed =
         motor->prot_config.tor_peak / (motor->hw_config.gear_ratio * motor->hw_config.gear_eff);
-    iq_limit_by_mech = tor_motor_needed * motor->calc_params.inv_kt;
-    iq_limit_by_heat = motor->prot_config.i_peak;
+    iq_limit_by_mech = tor_motor_needed / (1.5f * motor->hw_config.poles * motor->hw_config.flux);
 
-    motor->ctrl_state.iq_max  = FOC_MIN(iq_limit_by_mech, iq_limit_by_heat);
+    motor->ctrl_state.iq_max  = FOC_MIN(iq_limit_by_mech, motor->prot_config.i_peak);
     motor->ctrl_state.id_max  = motor->ctrl_state.iq_max;
-    motor->ctrl_state.tor_max = motor->ctrl_state.iq_max * motor->calc_params.kt *
-                                motor->hw_config.gear_ratio * motor->hw_config.gear_eff;
     motor->ctrl_state.vel_max = motor->prot_config.vel_peak;
-
+    motor->ctrl_state.dyn_iq_limit  = motor->ctrl_state.iq_max;
+    motor->ctrl_state.dyn_vel_limit = motor->ctrl_state.vel_max;
     motor->ctrl_config.vel_pid.config.max_output     = motor->prot_config.i_rated;
     motor->ctrl_config.vel_pid.config.integral_limit = motor->prot_config.i_rated;
     motor->ctrl_config.pos_pid.config.max_output     = motor->ctrl_state.vel_max;
@@ -178,6 +149,26 @@ void foc_calib_runtime_refresh(struct motor_dev *motor)
 static void test_env_reset(void)
 {
     test_flash_reset();
+}
+
+static void test_bsp_flash_host_contract_uses_zero_and_negative_errno(void)
+{
+    uint32_t      addr = BSP_FLASH_BASE_ADDR + 0x100U;
+    const uint8_t tx[4] = {0x11U, 0x22U, 0x33U, 0x44U};
+    uint8_t       rx[4] = {0U};
+
+    test_env_reset();
+
+    TEST_ASSERT(bsp_flash_write(addr, tx, sizeof(tx)) == 0);
+    TEST_ASSERT(bsp_flash_read(addr, rx, sizeof(rx)) == 0);
+    TEST_ASSERT(memcmp(tx, rx, sizeof(tx)) == 0);
+    TEST_ASSERT(bsp_flash_erase(addr, sizeof(tx)) == 0);
+    TEST_ASSERT(memcmp(&g_flash[addr - BSP_FLASH_BASE_ADDR], "\xFF\xFF\xFF\xFF", sizeof(tx)) == 0);
+
+    TEST_ASSERT(bsp_flash_read(addr, NULL, sizeof(rx)) == -EINVAL);
+    TEST_ASSERT(bsp_flash_write(addr, NULL, sizeof(tx)) == -EINVAL);
+    TEST_ASSERT(bsp_flash_erase(addr, 0U) == -EINVAL);
+    TEST_ASSERT(bsp_flash_read(BSP_FLASH_BASE_ADDR - 4U, rx, sizeof(rx)) == -EINVAL);
 }
 
 static void test_sys_invalid_enum_falls_back_to_safe_defaults(void)
@@ -389,6 +380,7 @@ static void test_load_motor_then_finalize_preserves_tuning_and_refreshes_runtime
 
 int main(void)
 {
+    test_bsp_flash_host_contract_uses_zero_and_negative_errno();
     test_sys_invalid_enum_falls_back_to_safe_defaults();
     test_restore_transient_clear_preserves_persisted_input_mode();
     test_restore_finalize_rebinds_traj_and_runtime_limits();

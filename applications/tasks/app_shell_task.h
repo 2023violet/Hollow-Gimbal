@@ -6,10 +6,10 @@
  *
  * Design overview
  * ---------------
- * `app_shell_task` is the product-owned task owner for the interactive shell
- * session. It decouples transport-side line ingestion from synchronous
- * `tm_shell` command execution and uses one bounded static queue so command
- * pressure stays explicit and reviewable under tight RAM budgets.
+ * `app_shell_task` is the product-owned session owner for the interactive
+ * shell. It decouples transport-side line ingestion from synchronous
+ * `tm_shell` command execution and keeps one bounded static queue so command
+ * pressure stays explicit under tight RAM budgets.
  */
 
 #pragma once
@@ -17,6 +17,9 @@
 /* Includes ------------------------------------------------------------------------------------- */
 #include <stdbool.h>
 #include <stdint.h>
+#include "shell_config.h"
+
+#if TM_SHELL_ENABLE
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,6 +51,8 @@ int tm_shell_task_host_process_once(void);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif
 
 /* ---------------------------------------- end of file ----------------------------------------- */

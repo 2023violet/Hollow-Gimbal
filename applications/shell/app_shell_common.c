@@ -8,7 +8,6 @@
 /* Includes ------------------------------------------------------------------------------------- */
 #include "app_shell_common.h"
 #include <errno.h>
-#include <stdlib.h>
 #include <string.h>
 #include "tm_format.h"
 
@@ -27,6 +26,11 @@ static const uint32_t _app_shell_pow10_u32[] = {
     100000U,
     1000000U,
 };
+
+static bool _app_shell_is_space(char ch)
+{
+    return (ch == ' ') || (ch == '\t');
+}
 
 /* Public Functions ----------------------------------------------------------------------------- */
 
@@ -199,22 +203,75 @@ int app_shell_parse_input_mode(const char *text, enum foc_input_mode *mode_out)
 
 int app_shell_parse_float_arg(const char *text, float *out)
 {
-    char *end = NULL;
+    const char *cursor;
+    bool        negative;
+    bool        saw_digit;
+    uint8_t     frac_digits;
+    uint32_t    int_part;
+    uint32_t    frac_part;
+    uint32_t    frac_scale;
+    float       value;
 
     if ((text == NULL) || (out == NULL)) {
         return -EINVAL;
     }
 
-    *out = strtof(text, &end);
-    if (end == text) {
+    cursor = text;
+    while (_app_shell_is_space(*cursor)) {
+        cursor++;
+    }
+
+    negative = false;
+    if ((*cursor == '+') || (*cursor == '-')) {
+        negative = (*cursor == '-');
+        cursor++;
+    }
+
+    int_part   = 0U;
+    frac_part  = 0U;
+    frac_scale = 1U;
+    frac_digits = 0U;
+    saw_digit  = false;
+
+    while ((*cursor >= '0') && (*cursor <= '9')) {
+        saw_digit = true;
+        int_part  = (int_part * 10U) + (uint32_t)(*cursor - '0');
+        cursor++;
+    }
+
+    if (*cursor == '.') {
+        cursor++;
+        while ((*cursor >= '0') && (*cursor <= '9')) {
+            if (frac_digits >= APP_SHELL_FLOAT_FRAC_MAX) {
+                return -EINVAL;
+            }
+            saw_digit = true;
+            frac_part = (frac_part * 10U) + (uint32_t)(*cursor - '0');
+            frac_scale *= 10U;
+            frac_digits++;
+            cursor++;
+        }
+    }
+
+    if (!saw_digit) {
         return -EINVAL;
     }
 
-    while ((*end == ' ') || (*end == '\t')) {
-        end++;
+    while (_app_shell_is_space(*cursor)) {
+        cursor++;
     }
 
-    return (*end == '\0') ? 0 : -EINVAL;
+    if (*cursor != '\0') {
+        return -EINVAL;
+    }
+
+    value = (float)int_part;
+    if (frac_scale > 1U) {
+        value += ((float)frac_part / (float)frac_scale);
+    }
+
+    *out = negative ? -value : value;
+    return 0;
 }
 
 int app_shell_format_float(char *buffer, size_t buffer_size, float value, uint8_t frac_digits)

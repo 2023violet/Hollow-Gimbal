@@ -1,6 +1,6 @@
 param(
     [string]$RepoRoot = "",
-    [string]$ProjectFile = "work/AT32F415KBU7-4_WorkBench.ATWP",
+    [string]$ProjectFile = "work/AT32F403ACGT7_WorkBench.ATWP",
     [string]$Uv4Path = "",
     [string]$TargetName = "",
     [switch]$Rebuild

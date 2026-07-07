@@ -128,12 +128,12 @@ static void test_shell_help_lists_exported_commands_and_builtin_help(void)
     shell_process_line("help", 4U);
 
     TEST_ASSERT(strstr(g_output, "[help] count=3") != NULL);
-    TEST_ASSERT(strstr(g_output, "[System]") != NULL);
-    TEST_ASSERT(strstr(g_output, "[Diag]") != NULL);
-    TEST_ASSERT(strstr(g_output, "  cmd    : name=echo help=Echo one arg") != NULL);
-    TEST_ASSERT(strstr(g_output, "  cmd    : name=state help=Return state error") != NULL);
-    TEST_ASSERT(strstr(g_output, "[Built-in]") != NULL);
-    TEST_ASSERT(strstr(g_output, "  cmd    : name=help help=Show command list") != NULL);
+    TEST_ASSERT(strstr(g_output, "[System]") == NULL);
+    TEST_ASSERT(strstr(g_output, "[Diag]") == NULL);
+    TEST_ASSERT(strstr(g_output, "[Built-in]") == NULL);
+    TEST_ASSERT(strstr(g_output, "  cmd    : name=echo group=System usage='Echo one arg'") != NULL);
+    TEST_ASSERT(strstr(g_output, "  cmd    : name=state group=Diag usage='Return state error'") != NULL);
+    TEST_ASSERT(strstr(g_output, "  cmd    : name=help group=Built-in usage='Show command list'") != NULL);
     TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
 }
 
@@ -159,7 +159,7 @@ static void test_shell_dispatches_known_command_and_reports_unknown_ones(void)
     shell_output_reset();
     shell_process_line("missing", 7U);
 
-    TEST_ASSERT(strstr(g_output, "[shell] cmd=missing result=error rc=-2") != NULL);
+    TEST_ASSERT(strstr(g_output, "[shell] cmd=missing result=error reason=cmd_not_found rc=-2") != NULL);
     TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
 }
 
@@ -202,21 +202,21 @@ static void test_shell_reports_state_and_usage_errors(void)
 
     shell_env_reset(entries, TM_ARRAY_SIZE(entries));
     shell_process_line("echo", 4U);
-    TEST_ASSERT(strstr(g_output, "[shell] cmd=echo result=error rc=-3") != NULL);
+    TEST_ASSERT(strstr(g_output, "[shell] cmd=echo result=error reason=bad_argc rc=-3") != NULL);
 
     shell_output_reset();
     shell_process_line("state", 5U);
-    TEST_ASSERT(strstr(g_output, "[shell] cmd=state result=error rc=-5") != NULL);
+    TEST_ASSERT(strstr(g_output, "[shell] cmd=state result=error reason=bad_state rc=-5") != NULL);
     TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
 
     shell_output_reset();
     shell_process_line("arg", 3U);
-    TEST_ASSERT(strstr(g_output, "[shell] cmd=arg result=error rc=-4") != NULL);
+    TEST_ASSERT(strstr(g_output, "[shell] cmd=arg result=error reason=bad_arg rc=-4") != NULL);
     TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
 
     shell_output_reset();
     shell_process_line("fail", 4U);
-    TEST_ASSERT(strstr(g_output, "[shell] cmd=fail result=error rc=-22") != NULL);
+    TEST_ASSERT(strstr(g_output, "[shell] cmd=fail result=error reason=command_failed rc=-22") != NULL);
     TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
 }
 

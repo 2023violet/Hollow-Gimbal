@@ -101,6 +101,7 @@ void HardFault_Handler(void)
   }
 }
 
+
 /**
   * @brief  this function handles memory manage exception.
   * @param  none
@@ -159,21 +160,6 @@ void UsageFault_Handler(void)
 }
 
 /**
-  * @brief  this function handles svcall exception.
-  * @param  none
-  * @retval none
-  */
-void SVC_Handler(void)
-{
-  /* add user code begin SVCall_IRQ 0 */
-
-  /* add user code end SVCall_IRQ 0 */
-  /* add user code begin SVCall_IRQ 1 */
-
-  /* add user code end SVCall_IRQ 1 */
-}
-
-/**
   * @brief  this function handles debug monitor exception.
   * @param  none
   * @retval none
@@ -186,21 +172,6 @@ void DebugMon_Handler(void)
   /* add user code begin DebugMonitor_IRQ 1 */
 
   /* add user code end DebugMonitor_IRQ 1 */
-}
-
-/**
-  * @brief  this function handles pendsv_handler exception.
-  * @param  none
-  * @retval none
-  */
-void PendSV_Handler(void)
-{
-  /* add user code begin PendSV_IRQ 0 */
-
-  /* add user code end PendSV_IRQ 0 */
-  /* add user code begin PendSV_IRQ 1 */
-
-  /* add user code end PendSV_IRQ 1 */
 }
 
 /**

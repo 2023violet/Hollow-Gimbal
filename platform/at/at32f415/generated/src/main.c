@@ -38,7 +38,7 @@
 
 /* private includes ----------------------------------------------------------*/
 /* add user code begin private includes */
-
+#include "app_main.h"
 /* add user code end private includes */
 
 /* private typedef -----------------------------------------------------------*/
@@ -78,79 +78,98 @@
   */
 int main(void)
 {
-  /* add user code begin 1 */
+    /* add user code begin 1 */
 
-  /* add user code end 1 */
+    /* add user code end 1 */
 
-  /* system clock config. */
-  wk_system_clock_config();
+    /* system clock config. */
+    wk_system_clock_config();
 
-  /* config periph clock. */
-  wk_periph_clock_config();
+    /* config periph clock. */
+    wk_periph_clock_config();
 
-  /* init debug function. */
-  wk_debug_config();
+    /* init debug function. */
+    wk_debug_config();
 
-  /* nvic config. */
-  wk_nvic_config();
+    /* nvic config. */
+    wk_nvic_config();
 
-  /* timebase config for
+    /* timebase config for
      void wk_delay_us(uint32_t delay);
      void wk_delay_ms(uint32_t delay); */
-  wk_timebase_init();
+    wk_timebase_init();
 
-  /* init gpio function. */
-  wk_gpio_config();
+    /* init gpio function. */
+    wk_gpio_config();
 
-  /* init adc1 function. */
-  wk_adc1_init();
+    /* init adc1 function. */
+    wk_adc1_init();
 
-  /* init dma1 channel1 */
-  wk_dma1_channel1_init();
-  /* config dma channel transfer parameter */
-  /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
+    /* init dma1 channel1 */
+    wk_dma1_channel1_init();
+    /* config dma channel transfer parameter */
+    /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
      and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
-  wk_dma_channel_config(DMA1_CHANNEL1, 
-                        (uint32_t)&USART1->dt, 
-                        DMA1_CHANNEL1_MEMORY_BASE_ADDR, 
-                        DMA1_CHANNEL1_BUFFER_SIZE);
-  dma_channel_enable(DMA1_CHANNEL1, TRUE);
+    // wk_dma_channel_config(
+    //     DMA1_CHANNEL1,
+    //     (uint32_t)&USART1->dt,
+    //     DMA1_CHANNEL1_MEMORY_BASE_ADDR,
+    //     DMA1_CHANNEL1_BUFFER_SIZE
+    // );
+    // dma_channel_enable(DMA1_CHANNEL1, TRUE);
 
-  /* init dma1 channel2 */
-  wk_dma1_channel2_init();
-  /* config dma channel transfer parameter */
-  /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
+    /* init dma1 channel2 */
+    wk_dma1_channel2_init();
+    /* config dma channel transfer parameter */
+    /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
      and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
-  wk_dma_channel_config(DMA1_CHANNEL2, 
-                        (uint32_t)&USART1->dt, 
-                        DMA1_CHANNEL2_MEMORY_BASE_ADDR, 
-                        DMA1_CHANNEL2_BUFFER_SIZE);
-  dma_channel_enable(DMA1_CHANNEL2, TRUE);
+    // wk_dma_channel_config(
+    //     DMA1_CHANNEL2,
+    //     (uint32_t)&USART1->dt,
+    //     DMA1_CHANNEL2_MEMORY_BASE_ADDR,
+    //     DMA1_CHANNEL2_BUFFER_SIZE
+    // );
+    // dma_channel_enable(DMA1_CHANNEL2, TRUE);
 
-  /* init usart1 function. */
-  wk_usart1_init();
+    /* init dma1 channel3 */
+    wk_dma1_channel3_init();
+    /* config dma channel transfer parameter */
+    /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
+     and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
+    // wk_dma_channel_config(
+    //     DMA1_CHANNEL3,
+    //     (uint32_t)&ADC1->odt,
+    //     DMA1_CHANNEL3_MEMORY_BASE_ADDR,
+    //     DMA1_CHANNEL3_BUFFER_SIZE
+    // );
+    // dma_channel_enable(DMA1_CHANNEL3, TRUE);
 
-  /* init spi1 function. */
-  wk_spi1_init();
+    /* init usart1 function. */
+    wk_usart1_init();
 
-  /* init tmr1 function. */
-  wk_tmr1_init();
+    /* init spi1 function. */
+    wk_spi1_init();
 
-  /* init tmr5 function. */
-  wk_tmr5_init();
+    /* init tmr1 function. */
+    wk_tmr1_init();
 
-  /* add user code begin 2 */
+    /* init tmr5 function. */
+    wk_tmr5_init();
 
-  /* add user code end 2 */
+    /* init tmr3 function. */
+    wk_tmr3_init();
 
-  while(1)
-  {
-    /* add user code begin 3 */
+    /* add user code begin 2 */
+    app_main_bootstrap();
+    /* add user code end 2 */
 
-    /* add user code end 3 */
-  }
+    while (1) {
+        /* add user code begin 3 */
+
+        /* add user code end 3 */
+    }
 }
 
-  /* add user code begin 4 */
+/* add user code begin 4 */
 
-  /* add user code end 4 */
+/* add user code end 4 */

@@ -7,8 +7,8 @@ themis_add_module(
   BASE_DIR
   ${CMAKE_CURRENT_LIST_DIR}
   SOURCES
-  "console_port.c"
-  "system_port.c"
+  "bsp_console.c"
+  "bsp_system.c"
   PUBLIC_INCLUDE_DIRS
   ".."
   "."

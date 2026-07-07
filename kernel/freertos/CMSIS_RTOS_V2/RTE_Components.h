@@ -13,5 +13,5 @@
 #pragma once
 
 #ifndef CMSIS_device_header
-#define CMSIS_device_header "at32f415.h"
+#error "CMSIS_device_header must be provided by the active platform compile definitions."
 #endif

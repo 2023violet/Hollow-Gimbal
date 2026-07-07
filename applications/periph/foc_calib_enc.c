@@ -1,29 +1,36 @@
 /**
  * @file    foc_calib_enc.c
- * @brief   FOC Encoder Calibration Module (Final Stable)
- * @version v1.4.0 (Fix: Calc/Flush Separation)
- * @date    2026.01.31
+ * @brief   FOC hardware-coupled encoder calibration implementation
+ * @version v1.5.0
+ * @date    2026.05.22
  *
- * Copyright (c) 2026 Zhang Jiaming <164293474@qq.com>. All rights reserved.
+ * Implementation role
+ * -------------------
+ * - pairs with `foc_calib_enc.h`
+ * - owns the encoder calibration state machine and LUT build/flush path
+ * - keeps flash save requests deferred through the runtime owner
  */
 
+/* Includes ------------------------------------------------------------------------------------- */
+/* Includes ------------------------------------------------------------------------------------- */
 #include "foc_calib_enc.h"
 #include "foc_ctrl.h"
+#include "foc_math.h"
+#include "motor_calibration_runtime.h"
 #include "motor_drv.h"
-#include "foc_param.h"
 #include "vofa.h"
-#include <string.h>
 #include <math.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Private function prototypes ------------------------------------------------------------------ */
+/* Private Helpers ------------------------------------------------------------------------------ */
 static void  _calib_reset_ctx(struct foc_enc_calib_ctx *ctx);
 static float _calib_get_norm_mech_pos(struct motor_dev *motor);
 
-/* State Handler Prototypes */
+/* Private State Handlers ----------------------------------------------------------------------- */
 static void _state_pp_start(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx);
 static void _state_pp_calc(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx);
 static void _state_lut_start(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx);
@@ -33,16 +40,18 @@ static void _state_lut_calc(struct motor_dev *motor, struct foc_enc_calib_ctx *c
 static void _state_lut_flush(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx);
 static void _state_lut_end(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx);
 
-/* Public functions ----------------------------------------------------------------------------- */
+/* Public Functions ----------------------------------------------------------------------------- */
 
 /**
- * @brief  Initialize the encoder calibration module
- * * @param  motor  Pointer to the motor device structure
+ * @brief  Initialize the encoder calibration state machine.
+ *
+ * @param  motor  Motor instance.
  */
 void foc_calib_enc_init(struct motor_dev *motor)
 {
-    if (motor == NULL)
+    if (motor == NULL) {
         return;
+    }
 
     struct foc_enc_calib_ctx *ctx = &motor->calib_state.enc_ctx;
 
@@ -69,13 +78,21 @@ void foc_calib_enc_init(struct motor_dev *motor)
 }
 
 /**
- * @brief  Execute encoder calibration state machine
- * * @param  motor  Pointer to the motor device structure
+ * @brief  Advance the encoder calibration state machine.
+ *
+ * @param  motor  Motor instance.
  */
 void foc_calib_enc(struct motor_dev *motor)
 {
-    if (motor == NULL)
+    if (motor == NULL) {
         return;
+    }
+
+    if (motor->calib_state.enc_state == ENC_IDLE) {
+        if (motor->calib_state.param_save_req & PARAM_SAVE_ENC) {
+            return;
+        }
+    }
 
     struct foc_enc_calib_ctx *ctx = &motor->calib_state.enc_ctx;
 
@@ -159,31 +176,49 @@ static float _calib_get_norm_mech_pos(struct motor_dev *motor)
 static void _state_pp_start(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx)
 {
     memset(ctx->lut, 0, sizeof(ctx->lut)); /* Critical Clear */
+
     if (++ctx->cnt_i < CALIB_ALIGN_DURATION) {
-        ctx->vd_ref                = CALIB_VOLTAGE;
-        ctx->pe_set                = 0.0f;
-        ctx->pe_acc                = CALIB_ACCEL;
-        ctx->pos_start             = ctx->pos;
+        ctx->vd_ref = CALIB_VOLTAGE;
+        ctx->pe_set = 0.0f;
+        ctx->pe_acc = CALIB_ACCEL;
+        ctx->pos_start = ctx->pos;
         motor->enc_pri.config->dir = DIR_CCW;
     } else {
-        ctx->pe_set += ctx->pe_acc;
+        if (ctx->pe_set < FOC_2PI) {
+            ctx->pe_set += ctx->pe_acc;
+            if (ctx->pe_set > FOC_2PI) {
+                ctx->pe_set = FOC_2PI;
+            }
+        }
+
         if (ctx->pe_set > CALIB_CHECK_ANGLE_MIN) {
-            if (ctx->pe_set < CALIB_CHECK_ANGLE_MAX)
+            if (ctx->pe_set < CALIB_CHECK_ANGLE_MAX) {
                 ctx->pos_dir_end = ctx->pos;
-            if (fabsf(ctx->pos_start - ctx->pos) < CALIB_CHECK_POS_TH)
+            }
+
+            if (fabsf(foc_wrap_pm_pi(ctx->pos_start - ctx->pos)) < CALIB_CHECK_POS_TH ||
+                (ctx->pe_set >= FOC_2PI && (ctx->cnt_i > CALIB_ALIGN_DURATION + 2000U))) {
                 motor->calib_state.enc_state = ENC_PP_CALC;
+            }
         }
     }
 }
 
 static void _state_pp_calc(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx)
 {
-    ctx->pn = (uint8_t)(round(ctx->pe_set / FOC_2PI));
-    if (ctx->pn == 0)
-        ctx->pn = 1;
+    int32_t pole_pairs = foc_round_i32(ctx->pe_set / FOC_2PI);
+
+    if (pole_pairs <= 0) {
+        pole_pairs = 1;
+    } else if (pole_pairs > UINT8_MAX) {
+        pole_pairs = UINT8_MAX;
+    }
+
+    ctx->pn = (uint8_t)pole_pairs;
     motor->enc_pri.config->pole_pairs = ctx->pn;
     float pos_dif                     = ctx->pos_dir_end - ctx->pos_start;
     pos_dif                           = foc_wrap_pm_pi(pos_dif);
+#if 1
     if (pos_dif < 0) {
         motor->hw_config.phase_order =
             (motor->hw_config.phase_order == PHASE_ORDER_ABC) ? PHASE_ORDER_ACB : PHASE_ORDER_ABC;
@@ -191,6 +226,10 @@ static void _state_pp_calc(struct motor_dev *motor, struct foc_enc_calib_ctx *ct
     } else {
         motor->enc_pri.config->dir = DIR_CCW;
     }
+#else
+    motor->enc_pri.config->dir = DIR_CCW;
+#endif
+
     motor->calib_state.enc_state = ENC_LUT_START;
 }
 
@@ -334,62 +373,11 @@ static void _state_lut_end(struct motor_dev *motor, struct foc_enc_calib_ctx *ct
      *
      * Instead: signal motor_task to perform the save in RTOS (task) context.
      */
-    motor->calib_state.param_save_req |= PARAM_SAVE_ENC;
+    motor_calibration_runtime_request_encoder_save(motor);
 
     // motor->axis_state            = AXIS_STATE_IDLE;
     // motor->calib_state.enc_state = ENC_IDLE;
 }
-
-#if 0
-void motor_align_and_print_offset(struct motor_dev *motor)
-{
-    // /* 1. 强制使用电压开环模式 */
-    // motor->ctrl_mode = CTRL_MODE_VOLT;
-
-    /* 2. 强行输出电压矢量：Vd=1.5V, Vq=0, Theta=0 */
-    /* 这会将转子死死吸在电角度 0 度的位置 */
-    float align_voltage = 1.5f; // 如果电机没反应，可加到 2.0f-3.0f，注意不要过流
-
-    /* 持续 2 秒，确保电机稳定下来 */
-    for (int i = 0; i < 2000; i++) {
-        /* 注意：这里第三个参数是 Electrical Angle，给 0.0f */
-        foc_ctrl_volt(motor, align_voltage, 0.0f, 0.0f);
-        osDelay(1);
-    }
-
-    /* 3. 读取此时的编码器原始值 */
-    encoder_update(&motor->enc_pri); /* 确保读到最新数据 */
-
-    /* 获取调整方向后的原始值 (raw_adjusted) */
-    /* 注意：我们需要知道经方向修正后的值，但还没减去 offset 的值 */
-    /* 在 encoder.c 中，cnt = raw_adjusted - off_interp; */
-    /* 我们可以直接读 encoder 结构体里的 raw_value */
-    uint16_t raw = motor->enc_pri.state.raw_value;
-
-    /* 计算当前的逻辑计数值 */
-    int32_t current_cnt;
-    if (motor->enc_pri.config->dir == 0) { // DIR_CW
-        current_cnt = raw;
-    } else {                       // DIR_CCW
-        current_cnt = 65536 - raw; // 假设 16bit 编码器 (65536)
-    }
-
-    /* 4. 这个 current_cnt 就是您的新零点偏移量！ */
-    /* 因为此时电角度为 0，所以 MechAngle * Poles = 0 */
-    /* 所以我们将当前位置设为 mech_offset */
-
-    motor->enc_pri.config->mech_offset = (float)current_cnt / 65536.0f * 6.2831853f;
-
-    /* 停止输出 */
-    pwm_out_disable();
-
-    for (int i = 0; i < 2000; i++) {
-        osDelay(1);
-    }
-    while (1)
-        ; // 卡住，让您有时间看打印的参数
-}
-#endif
 
 #ifdef __cplusplus
 }

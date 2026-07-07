@@ -50,8 +50,8 @@ Current live files:
 
 - board init: `bsp/board/bsp_init.c`
 - flash backend: `bsp/board/bsp_flash.c`
-- console port: `bsp/ports/console_port.c`
-- system port: `bsp/ports/system_port.c`
+- console BSP: `bsp/ports/bsp_console.c`
+- system BSP: `bsp/ports/bsp_system.c`
 - board facts: `bsp/bsp_config.h`
 
 Current live startup relationship:
@@ -66,7 +66,7 @@ Current live persistence relationship:
 
 Future BSP changes must prefer:
 
-- adding a thin `*_port` only when a real control-plane peripheral needs it
+- adding a thin `bsp_xxx` module only when a real control-plane peripheral needs it
 - keeping vendor headers inside `.c`
 - keeping public headers northbound and product-focused
 

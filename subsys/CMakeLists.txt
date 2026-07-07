@@ -8,22 +8,13 @@ set(_subsys_core_sources
     "daemon/tm_daemon.c"
     "export/tm_export.c"
     "format/tm_format.c"
+    "ipc/tm_ipc.c"
     "log/tm_log.c"
+    "runtime/tm_task_budget_probe.c"
     "runtime/tm_runtime.c"
+    "shell/tm_shell.c"
     "time/core_time.c"
 )
-
-if(THEMIS_FEATURE_IPC)
-  list(APPEND _subsys_core_sources "ipc/tm_ipc.c")
-endif()
-
-if(THEMIS_FEATURE_TASK_BUDGET)
-  list(APPEND _subsys_core_sources "runtime/tm_task_budget_probe.c")
-endif()
-
-if(THEMIS_FEATURE_SHELL)
-  list(APPEND _subsys_core_sources "shell/tm_shell.c")
-endif()
 
 set(_subsys_core_public_include_dirs
     "assert"

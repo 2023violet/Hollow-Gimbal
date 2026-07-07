@@ -4,6 +4,16 @@
 
 set(_freertos_heap_source "portable/MemMang/${THEMIS_FREERTOS_HEAP_IMPL}.c")
 
+if((NOT DEFINED THEMIS_CPU_FREERTOS_PORT_GLOB) OR ("${THEMIS_CPU_FREERTOS_PORT_GLOB}" STREQUAL ""))
+  message(FATAL_ERROR "FreeRTOS kernel manifest requires THEMIS_CPU_FREERTOS_PORT_GLOB.")
+endif()
+
+if((NOT DEFINED THEMIS_CPU_FREERTOS_PORT_INCLUDE_DIR) OR ("${THEMIS_CPU_FREERTOS_PORT_INCLUDE_DIR}"
+                                                          STREQUAL "")
+)
+  message(FATAL_ERROR "FreeRTOS kernel manifest requires THEMIS_CPU_FREERTOS_PORT_INCLUDE_DIR.")
+endif()
+
 themis_add_module(
   NAME
   freertos
@@ -19,11 +29,11 @@ themis_add_module(
   "timers.c"
   "CMSIS_RTOS_V2/*.c"
   "CMSIS_RTOS_V2/os_systick.c"
-  "portable/GCC/ARM_CM3/*.c"
+  "${THEMIS_CPU_FREERTOS_PORT_GLOB}"
   "${_freertos_heap_source}"
   PUBLIC_INCLUDE_DIRS
   "include"
-  "portable/GCC/ARM_CM3"
+  "${THEMIS_CPU_FREERTOS_PORT_INCLUDE_DIR}"
   "CMSIS_RTOS_V2"
   PRIVATE_COMPILE_DEFINITIONS
   "_RTE_"

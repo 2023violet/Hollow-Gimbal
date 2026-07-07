@@ -17,7 +17,11 @@ Current live scope:
 
 - FalconFoc no-`dev/drv` architecture
 - `platform/at/at32f403a` ownership
+- platform / SoC migration guidance
+- FalconFoc CMake build constitution and new-product landing workflow
+- small-MCU BSP light-wrapper policy and writing contract
 - `bsp/board + bsp/ports` structure
+- live BSP module naming is `bsp_xxx`, not `*_port`
 - startup chain through `applications/app_main.c`
 - shell transport and session split
 - current build, test, and board-debug entry points

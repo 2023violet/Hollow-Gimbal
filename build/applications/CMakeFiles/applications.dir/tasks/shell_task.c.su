@@ -1,0 +1,10 @@
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:221:13:_process_dma_rx	24	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:132:13:_hw_usart_tx	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:196:13:_shell_try_take_tx_frame	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:143:13:_drain_tx_queue	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:274:13:_shell_task_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:169:13:_shell_try_enqueue_tx_frame	24	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:108:13:_shell_async_print	16	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:77:6:shell_task_init	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:91:6:shell_task_rx_notify	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/shell_task.c:98:6:USART1_IRQHandler	8	static

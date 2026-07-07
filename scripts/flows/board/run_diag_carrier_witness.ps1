@@ -203,7 +203,7 @@ function New-WitnessSummary
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add("# FalconFoc diag/cal board witness")
+    $lines.Add("# FalconFoc shell-final board witness")
     $lines.Add("")
     $lines.Add("## 1. Run Context")
     $lines.Add("")
@@ -218,7 +218,7 @@ function New-WitnessSummary
     $lines.Add("")
     $lines.Add(('- Build + flash: `{0}`' -f $(if ($DidBuildAndFlash) { "done" } else { "skipped" })))
     $lines.Add(('- Memory report: `{0}`' -f $(if ($DidMemoryReport) { "done" } else { "skipped" })))
-    $lines.Add('- Witness flow: `sys reboot -> help -> sys status -> state/diag/cal boundary`')
+    $lines.Add('- Witness flow: `sys reboot -> help -> sys status -> state show -> obs all -> diag pid all show -> diag param show -> store save sys -> store status`')
     $lines.Add("")
     $lines.Add("## 3. Artifacts")
     $lines.Add("")
@@ -308,7 +308,7 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
         Write-Host ("[diag_carrier_witness] port: " + $resolvedPortName)
     }
 
-    $logLines.Add((("# FalconFoc diag/cal board witness {0:o}") -f [DateTime]::Now))
+    $logLines.Add((("# FalconFoc shell-final board witness {0:o}") -f [DateTime]::Now))
     $logLines.Add(("port={0} baud={1}" -f $resolvedPortName, $BaudRate))
 
     $serialPort = New-Object System.IO.Ports.SerialPort $resolvedPortName, $BaudRate, "None", 8, "One"
@@ -342,17 +342,12 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
         $commandSpecs = @(
             @{ Command = "help"; TimeoutMs = 2400; QuietMs = 500 },
             @{ Command = "sys status"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "fault status"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "cfg ctrl vel"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "state start"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "diag pid vel kp 0.1000"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "diag param rs 0.2300"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "state stop"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "cal enc"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "cal status"; TimeoutMs = 1200; QuietMs = 250 },
-            @{ Command = "cal abort"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "fault status post-cal"; ActualCommand = "fault status"; TimeoutMs = 2400; QuietMs = 500 },
-            @{ Command = "sys status final"; ActualCommand = "sys status"; TimeoutMs = 2400; QuietMs = 500 }
+            @{ Command = "state show"; TimeoutMs = 2400; QuietMs = 500 },
+            @{ Command = "obs all"; TimeoutMs = 2400; QuietMs = 500 },
+            @{ Command = "diag pid all show"; TimeoutMs = 2400; QuietMs = 500 },
+            @{ Command = "diag param show"; TimeoutMs = 2400; QuietMs = 500 },
+            @{ Command = "store save sys"; TimeoutMs = 2400; QuietMs = 500 },
+            @{ Command = "store status"; TimeoutMs = 2400; QuietMs = 500 }
         )
 
         foreach ($spec in $commandSpecs) {
@@ -367,9 +362,6 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
                 -QuietMs ([int]$spec.QuietMs)
             $logLines.Add($responses[$label])
 
-            if ($actual -eq "cal enc") {
-                Start-Sleep -Milliseconds 250
-            }
         }
 
         if (-not $SkipReboot) {
@@ -381,7 +373,9 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
                     "[shell] name=FalconFoc version=",
                     "shell=on",
                     "flavor=carrier-demo",
-                    "transport=uart1-dma"
+                    "uart=USART1",
+                    "baud=1000000",
+                    "transport=dma"
                 )
             Add-CheckResult -Results $checks -Name "post-reboot banner" -Passed $passed -Detail "expect shell-on carrier banner"
             if (-not $passed) { $errors.Add("Missing shell-on carrier reboot banner.") }
@@ -389,18 +383,13 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
 
         $assertionSpecs = @(
             @{ Name = "help"; Response = "help"; Tokens = @("[help] count=", "name=diag") ; Detail = "expect diag command visible in shell-on image" },
-            @{ Name = "sys status"; Response = "sys status"; Tokens = @("[sys] cmd=status result=ok", "shell=1", "flavor=carrier-demo", "ready=1") ; Detail = "expect live shell status" },
-            @{ Name = "fault status"; Response = "fault status"; Tokens = @("[fault] cmd=status result=ok", "active=0", "name=none") ; Detail = "expect clean fault state" },
-            @{ Name = "cfg ctrl vel"; Response = "cfg ctrl vel"; Tokens = @("[cfg] cmd=ctrl result=ok", "ctrl=vel") ; Detail = "expect idle-only config write accepted" },
-            @{ Name = "state start"; Response = "state start"; Tokens = @("[state] cmd=start result=ok", "axis=running") ; Detail = "expect axis running" },
-            @{ Name = "diag pid runtime guard"; Response = "diag pid vel kp 0.1000"; Tokens = @("[diag] cmd=pid result=error", "axis=running", "policy=idle-only") ; Detail = "expect runtime pid write rejection" },
-            @{ Name = "diag param runtime guard"; Response = "diag param rs 0.2300"; Tokens = @("[diag] cmd=param result=error", "axis=running", "policy=idle-only") ; Detail = "expect runtime param write rejection" },
-            @{ Name = "state stop"; Response = "state stop"; Tokens = @("[state] cmd=stop result=ok", "axis=idle") ; Detail = "expect axis idle after stop" },
-            @{ Name = "cal enc start"; Response = "cal enc"; Tokens = @("[cal] cmd=start result=ok", "stage=enc") ; Detail = "expect actual calib entry" },
-            @{ Name = "cal status"; Response = "cal status"; Tokens = @("[cal] cmd=status result=ok", "axis=calib", "stage=enc") ; Detail = "expect calib status witness" },
-            @{ Name = "cal abort"; Response = "cal abort"; Tokens = @("[cal] cmd=abort result=ok") ; Detail = "expect calib abort closeout" },
-            @{ Name = "fault status post-cal"; Response = "fault status post-cal"; Tokens = @("[fault] cmd=status result=ok", "active=0", "name=none") ; Detail = "expect no fault after calib abort" },
-            @{ Name = "sys status final"; Response = "sys status final"; Tokens = @("[sys] cmd=status result=ok", "ready=1") ; Detail = "expect shell still healthy" }
+            @{ Name = "sys status"; Response = "sys status"; Tokens = @("[sys] cmd=status result=ok", "shell=on", "flavor=carrier-demo", "ready=1") ; Detail = "expect live shell status" },
+            @{ Name = "state show"; Response = "state show"; Tokens = @("[state] cmd=show result=ok", "axis=idle") ; Detail = "expect rebooted axis to stay idle" },
+            @{ Name = "obs all"; Response = "obs all"; Tokens = @("[obs] cmd=all result=ok view=all", "curr", "out", "temp", "enc") ; Detail = "expect live repeated-row observe view" },
+            @{ Name = "diag pid all show"; Response = "diag pid all show"; Tokens = @("[diag] cmd=pid action=show result=ok loop=all", "loop=id", "loop=vel") ; Detail = "expect pid show shell contract" },
+            @{ Name = "diag param show"; Response = "diag param show"; Tokens = @("[diag] cmd=param action=show result=ok", "motor", "band") ; Detail = "expect param show shell contract" },
+            @{ Name = "store save sys"; Response = "store save sys"; Tokens = @("[store] cmd=save result=ok target=sys mode=deferred", "total_data=", "total_flash=", "write='queued; safe-task will commit flash later'") ; Detail = "expect deferred save evidence" },
+            @{ Name = "store status"; Response = "store status"; Tokens = @("[store] cmd=status result=ok", "name=sys") ; Detail = "expect persisted slot visibility" }
         )
 
         foreach ($spec in $assertionSpecs) {
@@ -435,7 +424,7 @@ if ($errors.Count -gt 0) {
         Write-Host ("[diag_carrier_witness] ERROR: " + $entry)
     }
 
-    throw ("FalconFoc diag/cal board witness failed. See '{0}' and '{1}'." -f $rawLogPath, $summaryPath)
+    throw ("FalconFoc shell-final board witness failed. See '{0}' and '{1}'." -f $rawLogPath, $summaryPath)
 }
 
 Write-Host ("[diag_carrier_witness] summary: " + $summaryPath)

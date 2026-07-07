@@ -15,8 +15,6 @@ endif()
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/applications/algo/*.c")
 set(OLD_GLOB
   "D:/study/Software/Hollow-Gimbal/applications/algo/foc_core.c"
-  "D:/study/Software/Hollow-Gimbal/applications/algo/foc_param.c"
-  "D:/study/Software/Hollow-Gimbal/applications/algo/foc_restore.c"
   "D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c"
   "D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c"
   "D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c"
@@ -35,6 +33,41 @@ set(OLD_GLOB
   "D:/study/Software/Hollow-Gimbal/applications/periph/foc_ctrl.c"
   "D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c"
   "D:/study/Software/Hollow-Gimbal/applications/periph/ntc_sensor.c"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/study/Software/Hollow-Gimbal/build/CMakeFiles/cmake.verify_globs")
+endif()
+
+# _matched at cmake/ThemisBuild.cmake:63 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/applications/runtime/*.c")
+set(OLD_GLOB
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c"
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/foc_restore.c"
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/motor_calibration_runtime.c"
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/motor_fault_runtime.c"
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/motor_runtime.c"
+  "D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "D:/study/Software/Hollow-Gimbal/build/CMakeFiles/cmake.verify_globs")
+endif()
+
+# _matched at cmake/ThemisBuild.cmake:63 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/study/Software/Hollow-Gimbal/applications/shell/*.c")
+set(OLD_GLOB
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_banner.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cal.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_cfg.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_diag.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_fault.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_obs.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_state.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_sys.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_common.c"
+  "D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_output_helpers.c"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")

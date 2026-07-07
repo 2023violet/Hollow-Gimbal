@@ -1,22 +1,56 @@
-# Themis CMake构建架构说明
+# Themis CMake 构建架构说明
 
 ## 1. 文档目标
 
-本文固定 FalconFoc 当前 live CMake 构建口径，只描述当前仓库真实存在的构建轴、平台入口、contract target 和验证入口。
+本文固定 FalconFoc 当前 live 仓库的正式 CMake 口径，只描述仓库今天真实存在的 build owner、metadata contract、prepared inactive 策略与验证入口。
 
-## 2. 正式入口
+与本文配套的长期使用与施工手册见：
+
+- `docs/architecture/Themis_FalconFoc_CMake构建策略与新产品落地规范.md`
+
+这份文档回答 4 件事：
+
+1. root `CMakeLists.txt` 到底负责什么，不负责什么。
+2. `CPU class`、`platform/SoC`、`board`、`motor/product` 4 类真相分别归谁。
+3. 当前 live baseline 与 prepared inactive 平台是怎样共存的。
+4. 以后换芯时标准 CMake 路径应该怎么走。
+
+## 2. 当前正式入口
 
 ### 2.1 顶层 `CMakeLists.txt`
 
 职责：
 
 - 定义 firmware / host-test 开关
-- 定义 profile / flavor 构建轴
-- 定义 platform 入口与 override 入口
+- 定义 profile / flavor 入口
+- 解析 `vendor/soc`
+- 加载 platform metadata
+- 加载 CPU-class metadata
 - 创建 contract target
-- 组装最终 firmware 与 host tests
+- 组装 firmware 与 host tests
 
-### 2.2 `cmake/ThemisBuild.cmake`
+不负责：
+
+- 持有某颗芯片的 startup / linker / exact part 宏
+- 持有某个 CPU class 的 `mcpu` / `mfpu` / FreeRTOS port 真相
+- 承载 FalconFoc 产品 feature policy
+
+### 2.2 `cmake/ThemisPlatformMetadata.cmake`
+
+职责：
+
+- 统一声明 platform selection cache
+- 统一声明 expert metadata override cache
+- 统一 root 与 toolchain 的 platform / CPU-class metadata 装配逻辑
+- 固定 `THEMIS_CPU_CLASS_OVERRIDE > platform default` 的优先级
+
+不负责：
+
+- module / firmware DSL
+- product feature policy
+- source manifest owner
+
+### 2.3 `cmake/ThemisBuild.cmake`
 
 职责：
 
@@ -24,104 +58,219 @@
 - 固定 module / interface-module / host-test / firmware 的声明方式
 - 让子层 manifest 保持 declarative
 
-当前正式 helper：
-
-- `themis_add_module()`
-- `themis_add_interface_module()`
-- `themis_add_host_test()`
-- `themis_add_firmware()`
-
-### 2.3 `tools/cmake/arm-gcc-toolchain.cmake`
+### 2.4 `tools/cmake/arm-gcc-toolchain.cmake`
 
 职责：
 
 - 定义 ARM bare-metal 交叉编译身份
 - 查找 `arm-none-eabi-*`
-- 导出 MCU / FPU / ABI 基线 flags
+- 先解析 platform metadata，再解析 CPU-class metadata
+- 生成工具链级 `mcpu` / `mfpu` / `mfloat-abi` baseline
 
-## 3. 当前正式构建轴
+不负责：
 
-### 3.1 产物类型
+- 写死 live baseline SoC
+- 写死 live CPU class
+- 持有产品层行为
 
-- `THEMIS_BUILD_FIRMWARE=ON`
-  - 生成 MCU firmware ELF / HEX / BIN / MAP
-- `THEMIS_BUILD_HOST_TESTS=ON`
-  - 生成 native host tests 与 `ctest`
+## 3. 四类 owner 口径
 
-### 3.2 资源轴
+### 3.1 CPU class owner
 
-- `THEMIS_DEVDRV_PROFILE`
-  - `tiny`
-  - `standard`
-  - `full-diag`
-- `THEMIS_PRODUCT_FLAVOR`
-  - `carrier-demo`
-  - `headless-tiny`
+固定目录：
 
-这两条轴共同决定：
+- `platform/cpu/<cpu-class>/ThemisCpuClassDefaults.cmake`
 
-- 功能裁剪
-- 资源预算
-- 默认验证口径
+职责：
 
-## 4. 平台解析模型
+- `mcpu`
+- `mfpu`
+- `mfloat-abi`
+- FreeRTOS `portable` 路径
+- `ARM_MATH_*`
 
-### 4.1 source of truth
+当前正式 CPU-class：
 
-顶层当前对外暴露：
+- `cortex-m4f-hard`
+- `cortex-m3-soft`
+
+### 3.2 Platform / SoC owner
+
+固定目录：
+
+- `platform/<vendor>/<soc>/`
+
+职责：
+
+- startup
+- linker script
+- vendor headers
+- generated bring-up
+- SoC compile definitions
+- `THEMIS_PLATFORM_CPU_CLASS_DEFAULT`
+- board-visible SoC facts passed through compile definitions, such as:
+  - `CMSIS_device_header`
+  - `THEMIS_PLATFORM_FLASH_DRIVER_HEADER`
+  - `THEMIS_PLATFORM_FLASH_*`
+  - `THEMIS_PLATFORM_MOTOR_SOFTIRQ_*`
+- 平台时序 seam，例如 `generated/inc/tm_platform_foc_timing.h`
+
+不负责：
+
+- FreeRTOS CPU-class 通用逻辑
+- 产品 feature policy
+- 电机默认参数
+
+### 3.3 Board owner
+
+当前 owner：
+
+- `bsp/board`
+- `bsp/ports`
+
+职责：
+
+- 引脚与外设实例
+- 板级 flash / reset / console 事实
+- 薄控制面 port
+
+### 3.4 Motor / product owner
+
+当前 owner：
+
+- `applications/`
+- 当前默认电机与保护参数仍由 `applications/algo/foc_config.h` 持有
+
+职责：
+
+- 极对数
+- Rs / Ls / flux / J
+- 默认 PID
+- 保护阈值
+- 校准默认值
+
+本轮明确不引入新的 motor-profile 框架。
+
+## 4. 当前 metadata contract
+
+### 4.1 Platform metadata
+
+每个真实平台目录必须自带：
+
+- `ThemisPlatformDefaults.cmake`
+
+必须定义：
+
+- `THEMIS_PLATFORM_TARGET_DEFAULT`
+- `THEMIS_PLATFORM_ENTRY_SOURCE_DEFAULT`
+- `THEMIS_PLATFORM_STARTUP_SOURCE_DEFAULT`
+- `THEMIS_PLATFORM_LINKER_SCRIPT_DEFAULT`
+- `THEMIS_PLATFORM_COMPILE_DEFINITIONS_DEFAULT`
+- `THEMIS_PLATFORM_CPU_CLASS_DEFAULT`
+
+规则：
+
+- 这些默认值属于 platform owner
+- `cmake/ThemisPlatformMetadata.cmake` 统一装配
+- root / toolchain 只解析和校验
+- 显式 `*_OVERRIDE` 永远高于 defaults
+
+### 4.2 CPU-class metadata
+
+每个真实 CPU-class 目录必须自带：
+
+- `ThemisCpuClassDefaults.cmake`
+
+必须定义：
+
+- `THEMIS_CPU_TOOLCHAIN_CPU_DEFAULT`
+- `THEMIS_CPU_TOOLCHAIN_FPU_DEFAULT`
+- `THEMIS_CPU_TOOLCHAIN_FLOAT_DEFAULT`
+- `THEMIS_CPU_FREERTOS_PORT_GLOB_DEFAULT`
+- `THEMIS_CPU_FREERTOS_PORT_INCLUDE_DIR_DEFAULT`
+- `THEMIS_CPU_ARM_MATH_DEFINE_DEFAULT`
+
+规则：
+
+- 这些默认值属于 CPU-class owner
+- `cmake/ThemisPlatformMetadata.cmake` 统一装配
+- root / toolchain / kernel 只消费，不再写死
+- `MCU_CPU` / `MCU_FPU` / `MCU_FLOAT` 继续保留，但降级为 emergency/debug 入口
+
+## 5. 当前公开 CMake 入口
+
+当前正式标准入口：
 
 - `THEMIS_PLATFORM_VENDOR`
 - `THEMIS_PLATFORM_SOC`
+- `THEMIS_DEVDRV_PROFILE`
+- `THEMIS_PRODUCT_FLAVOR`
+- `THEMIS_ENABLE_BOARD_BENCH`
+- `THEMIS_FIRMWARE_TARGET_NAME`
+- `THEMIS_FREERTOS_HEAP_IMPL`
+
+当前 expert metadata override 入口：
+
 - `THEMIS_PLATFORM_DIR_OVERRIDE`
 - `THEMIS_PLATFORM_TARGET_OVERRIDE`
 - `THEMIS_ENTRY_SOURCE_OVERRIDE`
 - `THEMIS_STARTUP_SOURCE_OVERRIDE`
 - `THEMIS_LINKER_SCRIPT_OVERRIDE`
+- `THEMIS_PLATFORM_COMPILE_DEFINITIONS_OVERRIDE`
+- `THEMIS_CPU_CLASS_OVERRIDE`
 
-### 4.2 解析结果
+紧急 toolchain/debug 入口：
 
-每次 configure 重新解析：
+- `MCU_CPU`
+- `MCU_FPU`
+- `MCU_FLOAT`
 
-- `THEMIS_PLATFORM_DIR`
-- `THEMIS_PLATFORM_TARGET`
-- `THEMIS_ENTRY_SOURCE`
-- `THEMIS_STARTUP_SOURCE`
-- `THEMIS_LINKER_SCRIPT`
+标准换芯路径不应依赖 `MCU_*`，也不应绕过 preset lane 扩散裸 `cmake -S/-B -DCMAKE_TOOLCHAIN_FILE=...`。
 
-正式规则：
+## 6. 当前 contract target
 
-- 默认由 `vendor/soc` 推导
-- 只有显式 `*_OVERRIDE` 才偏离默认
-- 派生结果不单独写入 `CACHE`
+当前正式 contract target：
 
-### 4.3 当前正式默认值
+- `themis_root_headers`
+- `themis_build_contract`
+- `themis_cpu_class_contract`
+- `themis_platform_contract`
+- `themis_host_test_contract`
+
+职责拆分：
+
+- `themis_build_contract`
+  - 语言标准、warning、profile/flavor
+- `themis_cpu_class_contract`
+  - `ARM_MATH_*`
+- `themis_platform_contract`
+  - SoC compile definitions
+
+## 7. 当前 live baseline 与 prepared inactive
+
+当前唯一 live baseline：
 
 - `THEMIS_PLATFORM_VENDOR=at`
 - `THEMIS_PLATFORM_SOC=at32f403a`
-- `THEMIS_PLATFORM_DIR=platform/at/at32f403a`
-- `THEMIS_PLATFORM_TARGET=at32f403a-hal`
-- `THEMIS_FIRMWARE_TARGET_NAME=falcon-foc-at32`
+- `THEMIS_PLATFORM_CPU_CLASS_DEFAULT=cortex-m4f-hard`
 
-## 5. Contract Target
+当前允许存在的 prepared inactive：
 
-当前正式提供：
+- `platform/at/at32f415`
+- `platform/at/at32f423`
+- `platform/cpu/cortex-m3-soft`
+- `platform/cpu/cortex-m4f-hard`
 
-- `themis_root_headers`
-  - 统一导出 `include/` 与 `include/config/`
-- `themis_build_contract`
-  - 统一导出语言标准、warning 基线、profile/flavor 语义
-- `themis_platform_contract`
-  - 统一导出平台 compile definitions
-- `themis_host_test_contract`
-  - 统一导出 host-test 口径
+prepared inactive 的定义：
 
-一句话理解：
+- 可以 configure / build
+- 不自动进入默认 preset
+- 不自动成为 board witness lane
+- 不改变 live 文档默认口径
 
-**子模块只声明本层事实，contract target 负责统一全局语义。**
+## 8. 当前 build graph
 
-## 6. 当前 live build graph
-
-当前 firmware 构建顺序为：
+firmware 构建顺序：
 
 1. `components/utils`
 2. `components/protocol`
@@ -133,62 +282,70 @@
 8. `applications`
 9. final firmware target
 
-这不是目录展示，而是当前 FalconFoc-lite 的正式 build ownership。
+这个顺序表达的是当前 build ownership，不是目录展示。
 
-## 7. 当前 `subsys` 口径
+## 9. 标准换芯路径
 
-当前 live 产物只要求：
+### 9.1 同 CPU-class 的 SoC 替换
 
-- `subsys-core`
-  - framework 核心机制
-- `subsys`
-  - 顶层编译聚合入口
+标准命令：
 
-本仓库当前不再把退役的 `device/`、`drivers/`、以及相关依赖链视为 live 构建面。
+```bash
+cmake --preset fw-full-diag-carrier-debug -DTHEMIS_PLATFORM_SOC=<soc>
+```
 
-## 8. 目标命名
+前提：
 
-当前正式 canonical target：
+- `platform/<vendor>/<soc>/` 已存在
+- 该目录带 `ThemisPlatformDefaults.cmake`
+- 该 metadata 已绑定 CPU class
 
-- `at32f403a-hal`
-- `subsys-core`
-- `falcon-foc-at32`
+### 9.2 跨 CPU-class 的 SoC 替换
 
-文档、脚本、验证口径都必须使用这些 live 名称，不再写旧目标名。
+标准顺序：
 
-## 9. Preset 入口
+1. 先补 `platform/cpu/<cpu-class>/ThemisCpuClassDefaults.cmake`
+2. 再补 `platform/<vendor>/<soc>/ThemisPlatformDefaults.cmake`
+3. 最后只切 `THEMIS_PLATFORM_SOC`
 
-当前正式 configure preset：
+只有异常 bring-up 才回退到 `MCU_*` override。
 
-- `host-debug`
-- `host-relwithdebinfo`
-- `fw-tiny-carrier-minsizerel`
-- `fw-tiny-headless-minsizerel`
-- `fw-standard-carrier-minsizerel`
-- `fw-full-diag-carrier-debug`
+## 9.3 第二阶段 root+helper 收口补充
 
-正式要求：
+第二阶段之后，root `CMakeLists.txt` 的正式理解进一步收口为：
 
-- build tree 固定落在 `${sourceDir}/build/<preset>`
-- host preset 显式关闭 firmware，打开 host tests
-- firmware preset 显式打开 firmware，关闭 host tests，并声明 toolchain
+- 声明 public build cache 入口
+- 调用 helper 完成装配
+- 挂接 layer manifest
+- 组装最终 firmware / host tests
 
-## 10. 固件产物合同
+当前 root 不再直接持有下面这些实现细节：
 
-当前正式 firmware basename：
+- `THEMIS_BUILD_FIRMWARE` / `THEMIS_BUILD_HOST_TESTS` / `profile` / `flavor` 校验
+- firmware entry / startup / linker / platform target 的最终派生
+- contract target 的逐条创建
+- configure 状态输出与 metadata lane 判定
 
-- `falcon-foc-at32`
+第二阶段新增的正式内部 helper 为：
 
-因此当前正式产物路径口径为：
+- `cmake/ThemisBuildAxes.cmake`
+  - 负责 build 轴 cache 声明、合法性校验、profile/flavor 派生
+- `cmake/ThemisFirmwareAssembly.cmake`
+  - 负责 firmware-only metadata 装配与路径校验
+- `cmake/ThemisContracts.cmake`
+  - 负责 `themis_*_contract` target 创建与共享 compile policy
+- `cmake/ThemisStatusReport.cmake`
+  - 负责 host / firmware lane 的统一 configure 状态输出
 
-- `build/<preset>/output/falcon-foc-at32.elf`
-- `build/<preset>/output/falcon-foc-at32.hex`
-- `build/<preset>/output/falcon-foc-at32.bin`
-- `build/<preset>/output/falcon-foc-at32.map`
+这些 helper 的边界固定为“单一职责 internal owner”：
 
-## 11. 当前正式验证入口
+- 可以继续压薄 root
+- 不能重新长成第二个 root
+- 不对 leaf manifest 或脚本层承诺公共扩展 API
 
-### 11.1 Host 验证
+## 10. 当前验证入口
+
+### 10.1 Host
 
 ```bash
 cmake --preset host-debug
@@ -196,27 +353,22 @@ cmake --build --preset build-host-debug
 ctest --preset test-host-debug
 ```
 
-### 11.2 Firmware 构建验证
+### 10.2 Firmware
 
 ```bash
-cmake --preset fw-tiny-carrier-minsizerel
-cmake --build --preset build-fw-tiny-carrier-minsizerel
+cmake --preset fw-full-diag-carrier-debug
+cmake --build --preset build-fw-full-diag-carrier-debug
 ```
 
-### 11.3 构建系统质量门
+### 10.3 CMake / platform gate
 
 ```bash
-pwsh ./scripts/check_cmake_quality.ps1 -RepoRoot <git-root>
-pwsh ./scripts/check_platform_backend_contract.ps1 -RepoRoot <git-root>
-pwsh ./scripts/check_themis_quality_gate.ps1 -RepoRoot <git-root> -Scope cmake
+pwsh ./scripts/gates/check_platform_backend_contract.ps1 -RepoRoot <git-root>
+pwsh ./scripts/gates/check_cmake_quality.ps1 -RepoRoot <git-root>
+pwsh ./scripts/gates/check_cmake_smoke.ps1 -RepoRoot <git-root>
+pwsh ./scripts/gates/check_themis_quality_gate.ps1 -RepoRoot <git-root> -Scope cmake
 ```
 
-需要摘要时继续使用：
+## 11. 一句话结论
 
-```bash
-pwsh ./scripts/check_themis_quality_gate.ps1 -RepoRoot <git-root> -Scope all -Summary
-```
-
-## 12. 一句话结论
-
-**FalconFoc 当前的正式 CMake 架构已经收口为：preset 驱动、contract 收口、platform 可替换、FalconFoc-lite build graph 固定，并由质量门脚本持续守住。**
+**FalconFoc 当前正式 CMake 口径已经收口为：root 只装配，CPU class 管 core/FPU/RTOS，platform 管 SoC 真相，board 管板级真相，applications 管电机与产品真相。未来换芯的标准动作是补 owner，不是把特例塞回 shared layer。**

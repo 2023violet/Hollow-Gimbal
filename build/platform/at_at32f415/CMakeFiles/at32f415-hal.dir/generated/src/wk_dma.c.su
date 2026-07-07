@@ -1,3 +1,4 @@
 D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_dma.c:39:6:wk_dma1_channel1_init	40	static
 D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_dma.c:71:6:wk_dma1_channel2_init	40	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_dma.c:106:6:wk_dma_channel_config	0	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_dma.c:103:6:wk_dma1_channel3_init	40	static
+D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_dma.c:138:6:wk_dma_channel_config	0	static

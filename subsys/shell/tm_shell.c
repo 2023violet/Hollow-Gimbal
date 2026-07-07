@@ -21,11 +21,13 @@
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "tm_shell.h"
-#include <stdarg.h>
-#include <string.h>
+
 #include "tm_assert.h"
 #include "tm_format.h"
 #include "tm_runtime.h"
+
+#include <stdarg.h>
+#include <string.h>
 
 #if (TM_FEATURE_SHELL != 0U)
 
@@ -56,11 +58,11 @@ extern const struct shell_cmd_entry Image$$ER_SHELL_CMD$$Limit;
 #define _p_end   ((const struct shell_cmd_entry *)__section_end(".shell_cmd"))
 
 #elif defined(__GNUC__)
-extern const struct shell_cmd_entry _shell_cmd_start[];
-extern const struct shell_cmd_entry _shell_cmd_end[];
+extern const struct shell_cmd_entry __shell_cmd_begin[];
+extern const struct shell_cmd_entry __shell_cmd_end[];
 
-#define _p_start (_shell_cmd_start)
-#define _p_end   (_shell_cmd_end)
+#define _p_start (__shell_cmd_begin)
+#define _p_end   (__shell_cmd_end)
 
 #else
 #error "tm_shell.c: Unsupported compiler toolchain."
@@ -77,6 +79,24 @@ static void _noop_print(const char *str, uint16_t len)
 {
     (void)str;
     (void)len;
+}
+
+static const char *_shell_error_reason(int ret)
+{
+    switch (ret) {
+    case -2:
+        return "cmd_not_found";
+    case SHELL_ERR_ARGC:
+        return "bad_argc";
+    case SHELL_ERR_ARG:
+        return "bad_arg";
+    case SHELL_ERR_STATE:
+        return "bad_state";
+    case SHELL_ERR_CMD:
+        return "bad_cmd";
+    default:
+        return "command_failed";
+    }
 }
 
 /* Linear walk is acceptable because the exported command table is intentionally small. */
@@ -99,8 +119,7 @@ static int _cmd_help(int argc, char *argv[])
 {
     const struct shell_cmd_entry *entries[SHELL_CMD_MAX];
     const struct shell_cmd_entry *entry;
-    const char                   *last_category = NULL;
-    uint32_t                      count         = 0U;
+    uint32_t count = 0U;
 
     (void)argc;
     (void)argv;
@@ -116,7 +135,7 @@ static int _cmd_help(int argc, char *argv[])
 
     for (uint32_t i = 1U; i < count; i++) {
         const struct shell_cmd_entry *key = entries[i];
-        int                           j   = (int)i - 1;
+        int j = (int)i - 1;
 
         /* Insertion sort keeps the implementation tiny for the expected command count. */
         while ((j >= 0) && (entries[j]->priority > key->priority)) {
@@ -129,28 +148,17 @@ static int _cmd_help(int argc, char *argv[])
     shell_printf("\r\n[help] count=%lu\r\n", (unsigned long)(count + 1U));
 
     for (uint32_t i = 0U; i < count; i++) {
-        const char *category = entries[i]->category;
-        bool        new_group;
+        const char *group = (entries[i]->category != NULL) ? entries[i]->category : "Misc";
 
-        new_group = ((category == NULL) != (last_category == NULL));
-        if (!new_group && (category != NULL) && (last_category != NULL)) {
-            new_group = (strcmp(category, last_category) != 0);
-        }
-
-        if (new_group) {
-            if (category != NULL) {
-                shell_printf("  [%s]\r\n", category);
-            } else {
-                shell_print("  [Misc]\r\n");
-            }
-            last_category = category;
-        }
-
-        shell_printf("  cmd    : name=%s help=%s\r\n", entries[i]->name, entries[i]->help);
+        shell_printf(
+            "  cmd    : name=%s group=%s usage='%s'\r\n",
+            entries[i]->name,
+            group,
+            entries[i]->help
+        );
     }
 
-    shell_print("  [Built-in]\r\n");
-    shell_print("  cmd    : name=help help=Show command list\r\n");
+    shell_print("  cmd    : name=help group=Built-in usage='Show command list'\r\n");
 
     return SHELL_OK;
 }
@@ -170,8 +178,8 @@ void shell_set_print(shell_print_fn_t fn)
 
 void shell_process_line(const char *line, uint16_t len)
 {
-    char   token_buf[SHELL_LINE_MAX + 1U];
-    char  *argv[SHELL_ARGC_MAX];
+    char token_buf[SHELL_LINE_MAX + 1U];
+    char *argv[SHELL_ARGC_MAX];
     size_t argc = 0U;
 
     tm_assert(!tm_is_in_isr());
@@ -222,7 +230,11 @@ void shell_process_line(const char *line, uint16_t len)
 
     const struct shell_cmd_entry *entry = _find_cmd(cmd_name);
     if (entry == NULL) {
-        shell_printf("\r\n[shell] cmd=%s result=error rc=-2\r\n", cmd_name);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=-2\r\n",
+            cmd_name,
+            _shell_error_reason(-2)
+        );
         shell_print(SHELL_PROMPT);
         return;
     }
@@ -233,19 +245,40 @@ void shell_process_line(const char *line, uint16_t len)
     case SHELL_OK:
         break;
     case SHELL_ERR_ARGC:
-        shell_printf("\r\n[shell] cmd=%s result=error rc=-3\r\n", entry->name);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=-3\r\n",
+            entry->name,
+            _shell_error_reason(ret)
+        );
         break;
     case SHELL_ERR_ARG:
-        shell_printf("\r\n[shell] cmd=%s result=error rc=-4\r\n", entry->name);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=-4\r\n",
+            entry->name,
+            _shell_error_reason(ret)
+        );
         break;
     case SHELL_ERR_STATE:
-        shell_printf("\r\n[shell] cmd=%s result=error rc=-5\r\n", entry->name);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=-5\r\n",
+            entry->name,
+            _shell_error_reason(ret)
+        );
         break;
     case SHELL_ERR_CMD:
-        shell_printf("\r\n[shell] cmd=%s result=error rc=-6\r\n", entry->name);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=-6\r\n",
+            entry->name,
+            _shell_error_reason(ret)
+        );
         break;
     default:
-        shell_printf("\r\n[shell] cmd=%s result=error rc=%d\r\n", entry->name, ret);
+        shell_printf(
+            "\r\n[shell] cmd=%s result=error reason=%s rc=%d\r\n",
+            entry->name,
+            _shell_error_reason(ret),
+            ret
+        );
         break;
     }
 
@@ -268,10 +301,10 @@ void shell_print(const char *str)
 
 void shell_printf(const char *fmt, ...)
 {
-    char             buffer[SHELL_PRINTF_BUF_SIZE];
+    char buffer[SHELL_PRINTF_BUF_SIZE];
     shell_print_fn_t print_fn;
-    va_list          args;
-    size_t           len;
+    va_list args;
+    size_t len;
 
     tm_assert(!tm_is_in_isr());
 

@@ -1,10 +1,14 @@
 /**
- * @file foc_calib_enc.h
- * @brief  FOC Control Utilities & Constants - Calibration
+ * @file    foc_calib.h
+ * @brief   FOC hardware-coupled calibration engine entry points
  * @version v1.0.0
- * @date 2025.12.23
- * 
- * Copyright (c) 2025 Zhang Jiaming <164293474@qq.com>. All rights reserved.
+ * @date    2025.12.23
+ *
+ * Design overview
+ * ---------------
+ * This header owns the hardware-coupled calibration engines for current
+ * offsets and motor-parameter calibration steps. Runtime policy and post-step
+ * product behavior stay outside this module.
  */
 
 #pragma once
@@ -19,52 +23,17 @@ extern "C" {
 /* Public Functions ----------------------------------------------------------------------------- */
 
 /**
- * @brief  Initialize calibration state
- * 
- * @param  motor  Motor instance pointer
+ * @brief  Initialize calibration state owned by the hardware-coupled engine.
  */
 void foc_calib_init(struct motor_dev *motor);
 
 /**
- * @brief  Update current controller gains
- *
- * @param  motor  Motor instance pointer
- */
-void foc_curr_gain_calc(struct motor_dev *motor);
-
-/**
- * @brief  Refresh derived constants and runtime limits from the current config.
- *
- * This updates calc_params and runtime ceilings only. It does not rewrite the
- * caller-owned PID Kp/Ki/Kd tuning fields.
- *
- * @param  motor  Motor instance pointer.
- */
-void foc_calib_runtime_refresh(struct motor_dev *motor);
-
-/**
- * @brief  Calculate velocity controller gains
- *
- * @param  motor  Motor instance pointer
- */
-void foc_vel_gain_calc(struct motor_dev *motor);
-
-/**
- * @brief  Calculate position controller gains
- */
-void foc_pos_gain_calc(struct motor_dev *motor);
-
-/**
- * @brief  Calibrate current offsets (IA/IB/IC)
- *
- * @param  motor  Motor instance pointer
+ * @brief  Measure and apply ADC current offsets before closed-loop control.
  */
 void foc_calib_curr(struct motor_dev *motor);
 
 /**
- * @brief  Calibration Loop
- *
- * @param  motor  Motor instance pointer
+ * @brief  Advance the active motor calibration step machine.
  */
 void foc_calib_loop(struct motor_dev *motor);
 

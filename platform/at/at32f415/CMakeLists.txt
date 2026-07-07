@@ -1,4 +1,4 @@
-# Themis AT32f415 platform manifest. Role: - compile vendor/platform sources that define the
+# Themis at32f415 platform manifest. Role: - compile vendor/platform sources that define the
 # active SoC baseline - export platform include directories and compile-time contracts - keep
 # generated platform facts isolated from upper-layer policy
 
@@ -32,7 +32,7 @@ themis_add_module(
   "vendor/drivers/src/at32f415_spi.c"
   "vendor/drivers/src/at32f415_tmr.c"
   "vendor/drivers/src/at32f415_usart.c"
-  "vendor/cmsis/cm4/device_support/startup/system_at32f415.c"
+  "vendor/cmsis/cm4/device_support/system_at32f415.c"
   "vendor/cmsis/dsp/Source/CommonTables/CommonTables.c"
   "vendor/cmsis/dsp/Source/FastMathFunctions/arm_cos_f32.c"
   "vendor/cmsis/dsp/Source/FastMathFunctions/arm_sin_f32.c"
@@ -47,7 +47,7 @@ themis_add_module(
   PUBLIC_INCLUDE_DIRS
   "generated/inc"
   "vendor/drivers/inc"
-  "vendor/cmsis/cm4/device_support/startup"
+  "vendor/cmsis/cm4/device_support"
   "vendor/cmsis/cm4/core_support"
   "vendor/cmsis/dsp/include"
   "vendor/cmsis/dsp/include/dsp"

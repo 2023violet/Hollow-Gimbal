@@ -8,12 +8,16 @@
  * -------------------
  * This file owns only the board-local pre-kernel glue that must exist before
  * the staged export pipeline and scheduler startup. Raw MCU bring-up remains
- * owned by `platform/at/at32f415/generated/src/main.c`.
+ * owned by `platform/<vendor>/<soc>/generated/src/main.c`.
  */
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "bsp_init.h"
-#include "at32f415.h"
+#ifndef CMSIS_device_header
+#error "bsp_init.c requires CMSIS_device_header from platform compile definitions."
+#endif
+
+#include CMSIS_device_header
 #include "core_time.h"
 
 /* Public Functions ----------------------------------------------------------------------------- */

@@ -20,9 +20,6 @@ set(WK_Include_Dirs
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/cm4/device_support
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/dsp/include
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/dsp/PrivateInclude
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/include
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/portable/memmang
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/portable/GCC/ARM_CM3
 )
 
 # AT32 WorkBench generated application sources
@@ -56,7 +53,6 @@ set(WK_Application_Src
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/dsp/Source/SupportFunctions/SupportFunctions.c
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/dsp/Source/SVMFunctions/SVMFunctions.c
     ${CMAKE_SOURCE_DIR}/libraries/cmsis/dsp/Source/TransformFunctions/TransformFunctions.c
-    ${CMAKE_SOURCE_DIR}/project/src/freertos_app.c
 )
 
 # AT32 Drivers
@@ -76,17 +72,6 @@ set(AT32_Drivers_Src
 )
 
 # Drivers Middlewares
-set(FreeRTOS_Src
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/croutine.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/event_groups.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/list.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/queue.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/tasks.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/timers.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/portable/GCC/ARM_CM3/port.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/portable/memmang/heap_4.c
-    ${CMAKE_SOURCE_DIR}/middlewares/freertos/source/stream_buffer.c
-)
 
 # Link directories setup
 set(WK_LINK_DIRS
@@ -96,7 +81,6 @@ set(WK_LINK_DIRS
 # Project static libraries
 set(WK_LINK_LIBS
     AT32_Drivers
-    FreeRTOS
 )
 
 # Interface library for includes and symbols
@@ -108,11 +92,6 @@ target_compile_definitions(at32_workbench INTERFACE ${WK_Defines_Syms})
 add_library(AT32_Drivers OBJECT)
 target_sources(AT32_Drivers PRIVATE ${AT32_Drivers_Src})
 target_link_libraries(AT32_Drivers PUBLIC at32_workbench)
-
-# Create FreeRTOS static library
-add_library(FreeRTOS OBJECT)
-target_sources(FreeRTOS PRIVATE ${FreeRTOS_Src})
-target_link_libraries(FreeRTOS PUBLIC at32_workbench)
 
 # Add AT32 WorkBench generated application sources to the project
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${WK_Application_Src})

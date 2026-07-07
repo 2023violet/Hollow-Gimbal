@@ -14,6 +14,7 @@ Current official entry points:
 Layout:
 
 - `scripts/gates/`: canonical gate implementations
+  - includes `check_cmake_smoke.ps1` for preset-first host/live/prepared-inactive configure smoke
 - `scripts/flows/host/`: canonical host flows
 - `scripts/flows/board/`: canonical FalconFoc board smoke flows
 - `scripts/lib/`: reusable helpers

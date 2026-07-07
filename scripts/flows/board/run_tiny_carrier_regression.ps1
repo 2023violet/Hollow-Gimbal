@@ -213,7 +213,7 @@ function New-RegressionSummary
     $lines.Add("## 4. Manual Checkpoints")
     $lines.Add("")
     $lines.Add("- Confirm boot banner and shell prompt are visible after flash.")
-    $lines.Add('- Confirm shell banner or `sys status` reports `shell=1` and `flavor=carrier-demo`.')
+    $lines.Add('- Confirm shell banner or `sys status` reports `shell=on` and `flavor=carrier-demo`.')
     $lines.Add('- Confirm `stack / tasks / watchdog / mem` all return structured output.')
     $lines.Add('- Confirm runtime logs still show healthy `heap_min` and no unexpected reboot before the watchdog step.')
     if ($DidShellProbe -or $DidScenarioProbe -or $DidShellTrip -or $DidOpenOcdInject) {

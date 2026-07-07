@@ -1,0 +1,3 @@
+D:/study/Software/Hollow-Gimbal/applications/tasks/vofa_task.c:56:6:vofa_task_init	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/vofa_task.c:102:13:_vofa_task_entry	8	static
+D:/study/Software/Hollow-Gimbal/applications/tasks/vofa_task.c:72:6:_usart_dma_send_data	8	static

@@ -54,6 +54,12 @@ applications/app_main.c
 10. `COM54` 上的 shell 是否仍能正常进入并响应 `ver`。
 11. `store save sys -> reboot -> store status` 是否仍保留参数恢复能力。
 
+当前 live 补充规则：
+
+- `tm_ipc_export_init()` 默认不在 FalconFoc 默认镜像里出现
+- `vofa_task_init()` 只在 `TM_FEATURE_VOFA=1` 或 telemetry 路径显式开启时进入启动链
+- `COM54` 上的 shell witness 以 `help` / `sys status` 为准，不再使用退役的 `ver` 探针
+
 ## 5. 文档回退判定
 
 下面内容如果重新出现在 live 启动文档中，应视为回退：

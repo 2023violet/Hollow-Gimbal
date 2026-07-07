@@ -125,6 +125,67 @@ extern "C" {
         (b)      = _t;       \
     } while (0)
 
+/**
+ * @brief  Round a float to the nearest integral value, away from zero.
+ *
+ * Product code must not call the libc round-family APIs directly because they
+ * may pull extra double-precision helpers into the final image. Use
+ * `foc_round_i32()` for integer sinks and keep `foc_round()` for local
+ * float-only helper paths. This helper preserves the sign of negative zero and
+ * relies on `floorf()`, which is already part of the current image.
+ *
+ * Behaviour:
+ *   · 1.5f  ->  2.0f   · -1.5f -> -2.0f
+ *   · 1.4f  ->  1.0f   · -1.4f -> -1.0f
+ *   · 0.0f  ->  0.0f   · -0.0f -> -0.0f  (Strict sign preservation)
+ *
+ * @param  x  Input value.
+ * @return    x rounded to the nearest integer (as a float).
+ */
+static inline float foc_round(float x)
+{
+    /* Preserve negative zero explicitly before the generic +/-0.5 path. */
+    if (x == 0.0f) {
+        return x;
+    }
+
+    /* Standard round-away-from-zero using floorf */
+    if (x >= 0.0f) {
+        return floorf(x + 0.5f);
+    } else {
+        return -floorf(-x + 0.5f);
+    }
+}
+
+/**
+ * @brief  Round a float to the nearest int32_t, away from zero.
+ *
+ * This is the formal FalconFoc product entry for integer rounding on the
+ * current calibration path. New product code that feeds an integer field
+ * should use this helper instead of direct libc rounding calls.
+ *
+ * @param  x  Input value.
+ * @return    x rounded to the nearest int. Out‑of‑range inputs saturate
+ *            to INT32_MAX (0x7FFFFFFF) or INT32_MIN (0x80000000) due to
+ *            M4F VCVT instruction behavior, rather than causing UB.
+ */
+static inline int32_t foc_round_i32(float x)
+{
+    /* On Cortex-M4F, (int32_t) compiles to VCVT.S32.F32, which truncates
+     * towards zero. By offsetting by +/- 0.5, we achieve round-away-from-zero.
+     *
+     * CRITICAL NOTE ON OVERFLOW:
+     * C standard says casting float > INT32_MAX to int32_t is UB.
+     * However, ARM AAPCS guarantees the M4F VCVT instruction will SATURATE
+     * the result to 0x7FFFFFFF / 0x80000000 instead of crashing.
+     * This makes the function robust in real hardware control loops. */
+    if (x >= 0.0f) {
+        return (int32_t)(x + 0.5f);
+    } else {
+        return (int32_t)(x - 0.5f);
+    }
+}
+
 /** @} */
 
 /* Section 4: Angle & modulo helpers (inline for ISR use) --------------------------------------- */

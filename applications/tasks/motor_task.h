@@ -1,40 +1,35 @@
 /**
  * @file    motor_task.h
- * @brief   Motor task public hooks
- * @version v1.2.0
- * @date    2026.05.12
+ * @brief   Motor task public entry
+ * @version v1.3.0
+ * @date    2026.05.22
+ *
+ * Design overview
+ * ---------------
+ * This header exposes only the task bring-up entry for the motor owner.
+ * Product logic, calibration glue, and runtime policy stay in their own
+ * owners.
+ *
+ * Usage example
+ * -------------
+ * - call `motor_task_init()` once during the application bring-up chain
+ * - the task owner then creates the live motor threads and binds the runtime
+ *   seam to the product motor instance
  */
 
 #pragma once
 
 /* Includes ------------------------------------------------------------------------------------- */
-#include "foc_common.h"
-#include "tm_common.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Public Functions ----------------------------------------------------------------------------- */
+/* Lifecycle ----------------------------------------------------------------------------- */
 
 /**
- * @brief Prepare motor hardware and software state before entering CALIB.
- *
- * Called by the FSM enter-callback for `AXIS_STATE_CALIB`.
- *
- * @param  motor  Motor instance pointer.
+ * @brief  Bring up the FalconFoc motor task owner and its child threads.
  */
-void motor_calib_prepare_entry(struct motor_dev *motor);
-
-/**
- * @brief Apply the formal post-restore normalization path after motor/sys load.
- *
- * Shared by startup bring-up and shell-triggered restore so both paths refresh
- * derived runtime state and reset transient setpoints in the same way.
- *
- * @param  motor  Motor instance pointer.
- */
-void motor_restore_after_param_load(struct motor_dev *motor);
+void motor_task_init(void);
 
 #ifdef __cplusplus
 }

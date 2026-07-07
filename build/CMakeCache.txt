@@ -32,13 +32,13 @@ CMAKE_ASM_COMPILER_AR:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none
 CMAKE_ASM_COMPILER_RANLIB:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.3 rel1/bin/arm-none-eabi-gcc-ranlib.exe
 
 //Flags used by the ASM compiler during all build types.
-CMAKE_ASM_FLAGS:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -x assembler-with-cpp
+CMAKE_ASM_FLAGS:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -x assembler-with-cpp
 
 //Flags used by the ASM compiler during DEBUG builds.
 CMAKE_ASM_FLAGS_DEBUG:STRING=-g
 
 //Assembler baseline flags
-CMAKE_ASM_FLAGS_INIT:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -x assembler-with-cpp
+CMAKE_ASM_FLAGS_INIT:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -x assembler-with-cpp
 
 //Flags used by the ASM compiler during MINSIZEREL builds.
 CMAKE_ASM_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
@@ -65,13 +65,13 @@ CMAKE_CXX_COMPILER_AR:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none
 CMAKE_CXX_COMPILER_RANLIB:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.3 rel1/bin/arm-none-eabi-gcc-ranlib.exe
 
 //Flags used by the CXX compiler during all build types.
-CMAKE_CXX_FLAGS:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -fdata-sections -ffunction-sections -Wall -fno-exceptions -fno-rtti
+CMAKE_CXX_FLAGS:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -fdata-sections -ffunction-sections -Wall -fno-exceptions -fno-rtti
 
 //Flags used by the CXX compiler during DEBUG builds.
 CMAKE_CXX_FLAGS_DEBUG:STRING=-g
 
 //C++ compiler baseline flags
-CMAKE_CXX_FLAGS_INIT:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -fdata-sections -ffunction-sections -Wall -fno-exceptions -fno-rtti
+CMAKE_CXX_FLAGS_INIT:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -fdata-sections -ffunction-sections -Wall -fno-exceptions -fno-rtti
 
 //Flags used by the CXX compiler during MINSIZEREL builds.
 CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
@@ -94,13 +94,13 @@ CMAKE_C_COMPILER_AR:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none-e
 CMAKE_C_COMPILER_RANLIB:FILEPATH=C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.3 rel1/bin/arm-none-eabi-gcc-ranlib.exe
 
 //Flags used by the C compiler during all build types.
-CMAKE_C_FLAGS:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -fdata-sections -ffunction-sections -Wall
+CMAKE_C_FLAGS:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -fdata-sections -ffunction-sections -Wall
 
 //Flags used by the C compiler during DEBUG builds.
 CMAKE_C_FLAGS_DEBUG:STRING=-g
 
 //C compiler baseline flags
-CMAKE_C_FLAGS_INIT:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb -fdata-sections -ffunction-sections -Wall
+CMAKE_C_FLAGS_INIT:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft -fdata-sections -ffunction-sections -Wall
 
 //Flags used by the C compiler during MINSIZEREL builds.
 CMAKE_C_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG
@@ -115,13 +115,13 @@ CMAKE_C_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG
 CMAKE_DLLTOOL:FILEPATH=C:/Program Files (x86)/mingw64/bin/dlltool.exe
 
 //Flags used by the linker during all build types.
-CMAKE_EXE_LINKER_FLAGS:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections
+CMAKE_EXE_LINKER_FLAGS:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections
 
 //Flags used by the linker during DEBUG builds.
 CMAKE_EXE_LINKER_FLAGS_DEBUG:STRING=
 
 //Linker baseline flags
-CMAKE_EXE_LINKER_FLAGS_INIT:STRING=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=soft -mthumb --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections
+CMAKE_EXE_LINKER_FLAGS_INIT:STRING=-mcpu=cortex-m3 -mthumb -mfloat-abi=soft --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections
 
 //Flags used by the linker during MINSIZEREL builds.
 CMAKE_EXE_LINKER_FLAGS_MINSIZEREL:STRING=
@@ -277,20 +277,23 @@ CMAKE_TOOLCHAIN_FILE:FILEPATH=D:/study/Software/Hollow-Gimbal/tools/cmake/arm-gc
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
-//Target CPU core (for example: cortex-m4, cortex-m7)
-MCU_CPU:STRING=cortex-m4
+//Target CPU core. Override only for exceptional bring-up/debug.
+MCU_CPU:STRING=cortex-m3
 
-//Floating-point ABI (hard | soft | softfp)
+//Floating-point ABI (hard | soft | softfp).
 MCU_FLOAT:STRING=soft
 
-//Target FPU (for example: fpv4-sp-d16, fpv5-d16)
-MCU_FPU:STRING=fpv4-sp-d16
+//Target FPU. Leave empty for CPU classes without an FPU.
+MCU_FPU:STRING=none
 
 //Build the embedded firmware ELF/HEX/BIN artifacts.
 THEMIS_BUILD_FIRMWARE:BOOL=ON
 
 //Build native host-side component tests.
 THEMIS_BUILD_HOST_TESTS:BOOL=OFF
+
+//Optional CPU-class metadata override.
+THEMIS_CPU_CLASS_OVERRIDE:STRING=
 
 //Themis lite resource profile: tiny, standard, or full-diag.
 THEMIS_DEVDRV_PROFILE:STRING=full-diag
@@ -310,32 +313,11 @@ THEMIS_ENABLE_LIBC_FLOAT_SCANF:BOOL=OFF
 //Optional firmware entry source override.
 THEMIS_ENTRY_SOURCE_OVERRIDE:FILEPATH=
 
-//Compile Themis IPC runtime and broker task.
-THEMIS_FEATURE_IPC:BOOL=OFF
-
-//Compile FalconFoc shell transport, session, and commands.
-THEMIS_FEATURE_SHELL:BOOL=OFF
-
-//Compile task-budget probe support.
-THEMIS_FEATURE_TASK_BUDGET:BOOL=ON
-
-//Compile verbose logging defaults.
-THEMIS_FEATURE_VERBOSE_LOG:BOOL=ON
-
-//Compile FalconFoc VOFA telemetry surfaces.
-THEMIS_FEATURE_VOFA:BOOL=OFF
-
 //Canonical firmware executable target and artifact basename.
 THEMIS_FIRMWARE_TARGET_NAME:STRING=falcon-foc-at32
 
 //Selected FreeRTOS heap backend implementation.
 THEMIS_FREERTOS_HEAP_IMPL:STRING=heap_4
-
-//Minimum linker-reserved heap size for the firmware image.
-THEMIS_LINKER_MIN_HEAP_SIZE:STRING=0x0
-
-//Minimum linker-reserved stack size for the firmware image.
-THEMIS_LINKER_MIN_STACK_SIZE:STRING=0x400
 
 //Optional firmware linker-script override.
 THEMIS_LINKER_SCRIPT_OVERRIDE:FILEPATH=

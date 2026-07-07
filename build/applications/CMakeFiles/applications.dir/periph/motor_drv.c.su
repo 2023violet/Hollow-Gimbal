@@ -1,8 +1,9 @@
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:25:6:foc_pid_init	160	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:84:6:foc_lpf_init	0	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:98:6:pwm_out_enable	8	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:115:6:pwm_out_disable	8	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:130:6:pwm_out_set_duty	16	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:168:10:adc_read_channel_blocking	0	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:179:6:adc_read_ordinary	0	static
-D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:189:6:adc_read_phases	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:26:6:foc_pid_init	160	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:85:6:foc_lpf_init	0	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:99:6:pwm_out_enable	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:116:6:pwm_out_disable	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:131:6:pwm_out_set_duty	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:181:10:adc_read_channel_blocking	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:209:6:adc_read_ordinary_dma	16	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:244:6:adc_read_ordinary	8	static
+D:/study/Software/Hollow-Gimbal/applications/periph/motor_drv.c:256:6:adc_read_phases	24	static

@@ -9,6 +9,7 @@
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "motor_drv.h"
+
 #include "ntc_sensor.h"
 
 #ifdef __cplusplus
@@ -26,52 +27,52 @@ void foc_pid_init(struct motor_dev *motor)
 {
     /* --- 1. Current Loop (Inner Loop - Fast) --- */
     struct pid_config curr_cfg = {
-        .mode           = PID_POSITION,
-        .kp             = DEFAULT_CURR_PID_KP,
-        .ki             = DEFAULT_CURR_PID_KI,
-        .kd             = DEFAULT_CURR_PID_KD,
-        .max_output     = DEFAULT_CURR_MAX_OUT,
+        .mode = PID_POSITION,
+        .kp = DEFAULT_CURR_PID_KP,
+        .ki = DEFAULT_CURR_PID_KI,
+        .kd = DEFAULT_CURR_PID_KD,
+        .max_output = DEFAULT_CURR_MAX_OUT,
         .integral_limit = DEFAULT_CURR_MAX_OUT,
-        .dead_band      = 0.0f,
-        .output_lpf_hz  = 0.0f,
-        .deriv_lpf_hz   = 0.0f,
-        .improve        = PID_INTEGRAL_LIMIT,
+        .dead_band = 0.0f,
+        .output_lpf_hz = 0.0f,
+        .deriv_lpf_hz = 0.0f,
+        .improve = PID_INTEGRAL_LIMIT,
     };
     pid_init(&motor->ctrl_config.id_pid, &curr_cfg);
     pid_init(&motor->ctrl_config.iq_pid, &curr_cfg);
 
     /* --- 2. Velocity Loop (Middle Loop) --- */
     struct pid_config vel_cfg = {
-        .mode           = PID_POSITION,
-        .kp             = DEFAULT_VEL_PID_KP,
-        .ki             = DEFAULT_VEL_PID_KI,
-        .kd             = DEFAULT_VEL_PID_KD,
-        .max_output     = DEFAULT_VEL_MAX_OUT,
+        .mode = PID_POSITION,
+        .kp = DEFAULT_VEL_PID_KP,
+        .ki = DEFAULT_VEL_PID_KI,
+        .kd = DEFAULT_VEL_PID_KD,
+        .max_output = DEFAULT_VEL_MAX_OUT,
         .integral_limit = DEFAULT_VEL_MAX_OUT,
-        .dead_band      = 0.0f,
-        .output_lpf_hz  = 0.0f,
-        .deriv_lpf_hz   = 0.0f,
-        .improve        = PID_INTEGRAL_LIMIT,
+        .dead_band = 0.0f,
+        .output_lpf_hz = 0.0f,
+        .deriv_lpf_hz = 0.0f,
+        .improve = PID_INTEGRAL_LIMIT,
     };
     pid_init(&motor->ctrl_config.vel_pid, &vel_cfg);
 
     /* --- 3. Position Loop (Outer Loop - Slow) --- */
     struct pid_config pos_cfg = {
-        .mode           = PID_POSITION,
-        .kp             = DEFAULT_POS_PID_KP,
-        .ki             = DEFAULT_POS_PID_KI,
-        .kd             = DEFAULT_POS_PID_KD,
-        .max_output     = DEFAULT_POS_MAX_OUT,
+        .mode = PID_POSITION,
+        .kp = DEFAULT_POS_PID_KP,
+        .ki = DEFAULT_POS_PID_KI,
+        .kd = DEFAULT_POS_PID_KD,
+        .max_output = DEFAULT_POS_MAX_OUT,
         .integral_limit = DEFAULT_POS_MAX_OUT,
-        .dead_band      = 0.0f,
-        .output_lpf_hz  = 0.0f,
-        .deriv_lpf_hz   = 0.0f,
-        .improve        = PID_INTEGRAL_LIMIT,
+        .dead_band = 0.0f,
+        .output_lpf_hz = 0.0f,
+        .deriv_lpf_hz = 0.0f,
+        .improve = PID_INTEGRAL_LIMIT,
     };
     pid_init(&motor->ctrl_config.pos_pid, &pos_cfg);
 
-    motor->ctrl_config.id_pid.dt  = CURR_LOOP_TS;
-    motor->ctrl_config.iq_pid.dt  = CURR_LOOP_TS;
+    motor->ctrl_config.id_pid.dt = CURR_LOOP_TS;
+    motor->ctrl_config.iq_pid.dt = CURR_LOOP_TS;
     motor->ctrl_config.vel_pid.dt = VEL_LOOP_TS;
     motor->ctrl_config.pos_pid.dt = POS_LOOP_TS;
 }
@@ -97,16 +98,16 @@ void foc_lpf_init(struct motor_dev *motor)
  */
 void pwm_out_enable(void)
 {
+    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_1, 0);
+    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_2, 0);
+    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_3, 0);
+
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_1, TRUE);
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_1C, TRUE);
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_2, TRUE);
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_2C, TRUE);
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_3, TRUE);
     tmr_channel_enable(TMR1, TMR_SELECT_CHANNEL_3C, TRUE);
-
-    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_1, 0);
-    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_2, 0);
-    tmr_channel_value_set(TMR1, TMR_SELECT_CHANNEL_3, 0);
 }
 
 /**
@@ -131,27 +132,39 @@ void pwm_out_set_duty(struct motor_dev *motor)
 {
     switch (motor->hw_config.phase_order) {
     case PHASE_ORDER_ABC: {
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_3,
-                              (uint32_t)(motor->foc_calc.dtc_a * TMR1->pr));
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_2,
-                              (uint32_t)(motor->foc_calc.dtc_b * TMR1->pr));
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_1,
-                              (uint32_t)(motor->foc_calc.dtc_c * TMR1->pr));
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_3,
+            (uint32_t)(motor->foc_calc.dtc_a * TMR1->pr)
+        );
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_2,
+            (uint32_t)(motor->foc_calc.dtc_b * TMR1->pr)
+        );
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_1,
+            (uint32_t)(motor->foc_calc.dtc_c * TMR1->pr)
+        );
     } break;
 
     case PHASE_ORDER_ACB: {
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_3,
-                              (uint32_t)(motor->foc_calc.dtc_a * TMR1->pr));
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_2,
-                              (uint32_t)(motor->foc_calc.dtc_c * TMR1->pr));
-        tmr_channel_value_set(TMR1,
-                              TMR_SELECT_CHANNEL_1,
-                              (uint32_t)(motor->foc_calc.dtc_b * TMR1->pr));
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_3,
+            (uint32_t)(motor->foc_calc.dtc_a * TMR1->pr)
+        );
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_2,
+            (uint32_t)(motor->foc_calc.dtc_c * TMR1->pr)
+        );
+        tmr_channel_value_set(
+            TMR1,
+            TMR_SELECT_CHANNEL_1,
+            (uint32_t)(motor->foc_calc.dtc_b * TMR1->pr)
+        );
     } break;
     }
 }
@@ -167,8 +180,16 @@ void pwm_out_set_duty(struct motor_dev *motor)
  */
 uint16_t adc_read_channel_blocking(adc_channel_select_type channel)
 {
-    (void)channel;
-    return 0;
+    adc_flag_clear(ADC1, ADC_CCE_FLAG);
+    adc_ordinary_channel_set(ADC1, channel, 1, ADC_SAMPLETIME_239_5);
+    adc_ordinary_software_trigger_enable(ADC1, TRUE);
+
+    uint32_t timeout = 0;
+    while ((adc_flag_get(ADC1, ADC_CCE_FLAG) == RESET) && timeout < 0xFFFF) {
+        timeout++;
+    }
+
+    return adc_ordinary_conversion_data_get(ADC1);
 }
 
 /**
@@ -176,54 +197,90 @@ uint16_t adc_read_channel_blocking(adc_channel_select_type channel)
  * 
  * @param  motor  Pointer to motor instance structure
  */
+/**
+ * @brief  Read ordinary ADC channels (VBAT) using DMA.
+ *
+ * This avoids blocking the caller while ADC completes conversion.
+ * Assumes ADC1 ordinary sequence is configured for one channel and
+ * DMA1_CHANNEL3 is mapped to ADC1 by the generated initialization code.
+ *
+ * @param  motor  Pointer to motor instance structure
+ */
+void adc_read_ordinary_dma(struct motor_dev *motor)
+{
+    /* Number of ordinary conversions configured in wk_adc1_init(). */
+    const uint16_t channel_count = 1U;
+
+    /* Static DMA buffer aligned for halfword transfers. */
+    static uint16_t dma_buffer[1];
+
+    /* Clear DMA flags before transfer. */
+    dma_flag_clear(DMA1_FDT3_FLAG);
+    dma_flag_clear(DMA1_DTERR3_FLAG);
+
+    /* Configure DMA source (ADC data register) and destination (local buffer). */
+    DMA1_CHANNEL3->paddr = (uint32_t)&ADC1->odt;
+    DMA1_CHANNEL3->maddr = (uint32_t)dma_buffer;
+    DMA1_CHANNEL3->dtcnt = channel_count;
+
+    /* Enable DMA channel and trigger ADC conversion. */
+    dma_channel_enable(DMA1_CHANNEL3, TRUE);
+    adc_ordinary_software_trigger_enable(ADC1, TRUE);
+
+    /* Wait for transfer complete with timeout. */
+    uint32_t timeout = 0U;
+    while ((dma_flag_get(DMA1_FDT3_FLAG) == RESET) && (timeout < 0xFFFFU)) {
+        timeout++;
+    }
+
+    /* Disable DMA channel after transfer. */
+    dma_channel_enable(DMA1_CHANNEL3, FALSE);
+
+    /* Convert VBAT raw sample to voltage. */
+    motor->meas_data.v_bus_raw = (float)dma_buffer[0];
+    motor->meas_data.v_bus = FAC_VBUS(motor->meas_data.v_bus_raw);
+}
+
 void adc_read_ordinary(struct motor_dev *motor)
 {
-    (void)motor;
+    adc_read_ordinary_dma(motor);
 }
 
 /**
- * @brief  Read and convert phase currents from ADC injected group
- * 
+ * @brief  Read phase B and C currents from ADC injected group, then
+ *         reconstruct phase A current via Kirchhoff's current law
+ *         (ia + ib + ic = 0  =>  ia = -(ib + ic))
+ *
  * @param  motor  Pointer to motor instance structure
  */
 void adc_read_phases(struct motor_dev *motor)
 {
-    motor->meas_data.v_bus_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_1);
-    motor->meas_data.v_bat_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2);
-    motor->meas_data.ib_raw    = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_3);
-    motor->meas_data.ia_raw    = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_4);
+    /* --- 1. Read raw ADC values for phases B and C only ---
+     * Channel mapping (per current hardware wiring):
+     *   Phase B -> ADC_PREEMPT_CHANNEL_1
+     *   Phase C -> ADC_PREEMPT_CHANNEL_2
+     */
+    switch (motor->hw_config.phase_order) {
+    case PHASE_ORDER_ABC: {
+        motor->meas_data.ib_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_1);
+        motor->meas_data.ic_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2);
+    } break;
 
-    motor->meas_data.b     = FAC_CURR((motor->meas_data.ib_raw - motor->meas_data.ib_offset));
-    motor->meas_data.a     = FAC_CURR((motor->meas_data.ia_raw - motor->meas_data.ia_offset));
-    /* ia + ib + ic = 0 → ic = -ia -ib */
-    motor->meas_data.c     = -motor->meas_data.a - motor->meas_data.b;
-    motor->meas_data.v_bus = FAC_VBUS(motor->meas_data.v_bus_raw);
-    motor->meas_data.v_bat = FAC_VBUS(motor->meas_data.v_bat_raw);
+    case PHASE_ORDER_ACB: {
+        motor->meas_data.ic_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_1);
+        motor->meas_data.ib_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2);
+    } break;
+    }
+
+    /* --- 2. Convert measured phases to physical current (A) --- */
+    motor->meas_data.b = FAC_CURR((motor->meas_data.ib_raw - motor->meas_data.ib_offset));
+    motor->meas_data.c = FAC_CURR((motor->meas_data.ic_raw - motor->meas_data.ic_offset));
+    motor->meas_data.ia_raw = motor->meas_data.ia_offset -
+        (motor->meas_data.ib_raw - motor->meas_data.ib_offset) -
+        (motor->meas_data.ic_raw - motor->meas_data.ic_offset);
+
+    motor->meas_data.a = FAC_CURR((motor->meas_data.ia_raw - motor->meas_data.ia_offset));
 }
-
-// void adc_read_phases(struct motor_dev *motor)
-// {
-//     motor->meas_data.v_bus_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_1);
-
-//     switch (motor->hw_config.phase_order) {
-//     case PHASE_ORDER_ABC: {
-//         motor->meas_data.ic_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2);
-//         motor->meas_data.ib_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_3);
-//         motor->meas_data.ia_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_4);
-//     } break;
-
-//     case PHASE_ORDER_ACB: {
-//         motor->meas_data.ib_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2);
-//         motor->meas_data.ic_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_3);
-//         motor->meas_data.ia_raw = adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_4);
-//     } break;
-//     }
-
-//     motor->meas_data.c     = FAC_CURR((motor->meas_data.ic_raw - motor->meas_data.ic_offset));
-//     motor->meas_data.b     = FAC_CURR((motor->meas_data.ib_raw - motor->meas_data.ib_offset));
-//     motor->meas_data.a     = FAC_CURR((motor->meas_data.ia_raw - motor->meas_data.ia_offset));
-//     motor->meas_data.v_bus = FAC_VBUS(motor->meas_data.v_bus_raw);
-// }
 
 #ifdef __cplusplus
 }

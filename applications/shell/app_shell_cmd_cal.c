@@ -10,33 +10,33 @@
 #include "app_shell_common.h"
 #include "app_shell_profile.h"
 #include <string.h>
-#include "foc_param.h"
-#include "motor_fsm.h"
 #include "tm_shell_output.h"
 
-#if APP_SHELL_HAS_CAL_CMDS
+#if APP_SHELL_ENABLED && APP_SHELL_HAS_CAL_CMDS
 
 /* Private Helpers ------------------------------------------------------------------------------ */
 
 static const char *_app_shell_cal_stage_name(void)
 {
-    if (_motor_ins.axis_state != AXIS_STATE_CALIB) {
+    struct motor_runtime_snapshot snapshot;
+
+    if (!motor_runtime_snapshot(&snapshot) || (snapshot.axis_state != AXIS_STATE_CALIB)) {
         return "idle";
     }
 
-    if (_motor_ins.calib_state.enc_state != ENC_IDLE) {
+    if (snapshot.enc_state != ENC_IDLE) {
         return "enc";
     }
-    if (_motor_ins.calib_state.js_state != JS_IDLE) {
+    if (snapshot.js_state != JS_IDLE) {
         return "js";
     }
-    if (_motor_ins.calib_state.flux_state != FX_IDLE) {
+    if (snapshot.flux_state != FX_IDLE) {
         return "flux";
     }
-    if (_motor_ins.calib_state.ls_state != LS_IDLE) {
+    if (snapshot.ls_state != LS_IDLE) {
         return "ls";
     }
-    if (_motor_ins.calib_state.rs_state != RS_IDLE) {
+    if (snapshot.rs_state != RS_IDLE) {
         return "rs";
     }
 
@@ -45,48 +45,80 @@ static const char *_app_shell_cal_stage_name(void)
 
 static void _app_shell_cal_status(void)
 {
+    struct motor_runtime_snapshot snapshot;
     char offset[16];
+
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("cal", "cmd=status result=error reason=snapshot_unavailable");
+        return;
+    }
 
     TM_SHELL_SUMMARY("cal",
                      "cmd=status result=ok axis=%s stage=%s enc_valid=%u save_req=0x%02x",
-                     app_shell_axis_state_name(_motor_ins.axis_state),
+                     app_shell_axis_state_name(snapshot.axis_state),
                      _app_shell_cal_stage_name(),
-                     _motor_ins.enc_pri.state.calib_valid ? 1U : 0U,
-                     (unsigned)_motor_ins.calib_state.param_save_req);
+                     snapshot.enc_valid ? 1U : 0U,
+                     (unsigned)snapshot.save_req);
     TM_SHELL_ROW("step",
                  "rs=%u ls=%u flux=%u js=%u enc=%u",
-                 (unsigned)_motor_ins.calib_state.rs_state,
-                 (unsigned)_motor_ins.calib_state.ls_state,
-                 (unsigned)_motor_ins.calib_state.flux_state,
-                 (unsigned)_motor_ins.calib_state.js_state,
-                 (unsigned)_motor_ins.calib_state.enc_state);
+                 (unsigned)snapshot.rs_state,
+                 (unsigned)snapshot.ls_state,
+                 (unsigned)snapshot.flux_state,
+                 (unsigned)snapshot.js_state,
+                 (unsigned)snapshot.enc_state);
     TM_SHELL_ROW("enc",
                  "offset=%s pole_pairs=%u",
-                 app_shell_format_float_or_dash(offset, sizeof(offset), _motor_ins.enc_pri.config->mech_offset, 3U),
-                 (unsigned)_motor_ins.enc_pri.config->pole_pairs);
+                 app_shell_format_float_or_dash(offset, sizeof(offset), snapshot.mech_offset, 3U),
+                 (unsigned)snapshot.pole_pairs);
 }
 
-static int _app_shell_cal_start(enum foc_calib_state calib_type, const char *name)
+static int _app_shell_cal_start(enum foc_calib_state calib_type, const char *cmd_name, const char *stage_name)
 {
-    if (_motor_ins.axis_state != AXIS_STATE_IDLE) {
+    struct motor_runtime_snapshot snapshot;
+
+    if (!motor_runtime_snapshot(&snapshot)) {
         TM_SHELL_SUMMARY("cal",
-                         "cmd=start result=error axis=%s stage=%s",
-                         app_shell_axis_state_name(_motor_ins.axis_state),
-                         name);
+                         "cmd=%s action=start result=error reason=snapshot_unavailable stage=%s",
+                         cmd_name,
+                         stage_name);
         return SHELL_OK;
     }
 
-    motor_fsm_dispatch_calib(&_motor_ins, calib_type);
-
-    if (_motor_ins.axis_state != AXIS_STATE_CALIB) {
+    if (snapshot.axis_state != AXIS_STATE_IDLE) {
         TM_SHELL_SUMMARY("cal",
-                         "cmd=start result=error axis=%s stage=%s",
-                         app_shell_axis_state_name(_motor_ins.axis_state),
-                         name);
+                         "cmd=%s action=start result=error axis=%s stage=%s",
+                         cmd_name,
+                         app_shell_axis_state_name(snapshot.axis_state),
+                         stage_name);
         return SHELL_OK;
     }
 
-    TM_SHELL_SUMMARY("cal", "cmd=start result=ok stage=%s", name);
+    if (!motor_runtime_request_calibration(calib_type)) {
+        TM_SHELL_SUMMARY("cal",
+                         "cmd=%s action=start result=error reason=snapshot_unavailable stage=%s",
+                         cmd_name,
+                         stage_name);
+        return SHELL_OK;
+    }
+
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("cal",
+                         "cmd=%s action=start result=error reason=snapshot_unavailable stage=%s",
+                         cmd_name,
+                         stage_name);
+        return SHELL_OK;
+    }
+
+    if (snapshot.axis_state != AXIS_STATE_CALIB) {
+        TM_SHELL_SUMMARY("cal",
+                         "cmd=%s action=start result=error axis=%s stage=%s",
+                         cmd_name,
+                         app_shell_axis_state_name(snapshot.axis_state),
+                         stage_name);
+        return SHELL_OK;
+    }
+
+    TM_SHELL_SUMMARY("cal", "cmd=%s action=start result=ok stage=%s", cmd_name, stage_name);
     return SHELL_OK;
 }
 
@@ -94,40 +126,53 @@ static int _app_shell_cal_start(enum foc_calib_state calib_type, const char *nam
 
 int app_shell_cal_command(int argc, char *argv[])
 {
+    struct motor_runtime_snapshot snapshot;
+    int                           rc;
+
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("cal", "cmd=status result=error reason=snapshot_unavailable");
+        return SHELL_OK;
+    }
+
     if ((argc == 1) || ((argc == 2) && (strcmp(argv[1], "status") == 0))) {
         _app_shell_cal_status();
         return SHELL_OK;
     }
 
     if ((argc == 2) && (strcmp(argv[1], "abort") == 0)) {
-        if (_motor_ins.axis_state != AXIS_STATE_CALIB) {
+        if (snapshot.axis_state != AXIS_STATE_CALIB) {
             TM_SHELL_SUMMARY("cal",
                              "cmd=abort result=error axis=%s",
-                             app_shell_axis_state_name(_motor_ins.axis_state));
+                             app_shell_axis_state_name(snapshot.axis_state));
             return SHELL_OK;
         }
 
-        (void)motor_fsm_dispatch(&_motor_ins, EV_CMD_CALIB_ABORT);
+        rc = motor_runtime_request_calibration_abort();
+        if (rc < 0) {
+            TM_SHELL_SUMMARY("cal", "cmd=abort result=error axis=%s rc=%d", app_shell_axis_state_name(snapshot.axis_state), rc);
+            return SHELL_OK;
+        }
+
         TM_SHELL_SUMMARY("cal", "cmd=abort result=ok");
         return SHELL_OK;
     }
 
     if ((argc == 2) && (strcmp(argv[1], "enc") == 0)) {
-        return _app_shell_cal_start(CALIB_ENC, "enc");
+        return _app_shell_cal_start(CALIB_ENC, "enc", "enc");
     }
 
     if ((argc == 3) && (strcmp(argv[1], "motor") == 0)) {
         if (strcmp(argv[2], "all") == 0 || strcmp(argv[2], "rs") == 0) {
-            return _app_shell_cal_start(CALIB_RS, argv[2]);
+            return _app_shell_cal_start(CALIB_RS, "motor", argv[2]);
         }
         if (strcmp(argv[2], "ls") == 0) {
-            return _app_shell_cal_start(CALIB_LS, "ls");
+            return _app_shell_cal_start(CALIB_LS, "motor", "ls");
         }
         if (strcmp(argv[2], "flux") == 0) {
-            return _app_shell_cal_start(CALIB_FLUX, "flux");
+            return _app_shell_cal_start(CALIB_FLUX, "motor", "flux");
         }
         if (strcmp(argv[2], "js") == 0) {
-            return _app_shell_cal_start(CALIB_JS, "js");
+            return _app_shell_cal_start(CALIB_JS, "motor", "js");
         }
         return SHELL_ERR_ARG;
     }

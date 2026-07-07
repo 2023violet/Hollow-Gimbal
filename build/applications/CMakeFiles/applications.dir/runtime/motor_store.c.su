@@ -1,0 +1,17 @@
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:521:12:_map_tp_rc	0	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:541:13:_ctrl_mode_is_valid	0	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:554:13:_input_mode_is_valid	0	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:754:13:_ab_fill_status	64	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:579:13:_slot_read_seq_num	8	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:613:12:_ab_save	88	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:707:12:_ab_load	40	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:246:5:foc_param_save_motor	336	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:280:5:foc_param_load_motor	352	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:339:5:foc_param_save_enc	16	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:364:5:foc_param_load_enc	32	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:395:5:foc_param_save_sys	16	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:413:5:foc_param_load_sys	40	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:440:6:foc_param_check_all	8	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:450:6:foc_param_save_layout	0	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:483:6:foc_param_erase_all	8	static
+D:/study/Software/Hollow-Gimbal/applications/runtime/motor_store.c:496:13:foc_param_status_str	0	static

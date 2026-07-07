@@ -140,6 +140,18 @@ function Assert-ValueEquals
     }
 }
 
+function Assert-PresetHidden
+{
+    param(
+        [object]$Preset,
+        [string]$PresetName
+    )
+
+    if (-not ($Preset.PSObject.Properties.Name -contains "hidden") -or (-not [bool]$Preset.hidden)) {
+        throw "Preset '$PresetName' must stay hidden."
+    }
+}
+
 $paths = Resolve-ThemisPaths -Root $RepoRoot
 $presetPath = Join-Path $paths.RepoRoot "CMakePresets.json"
 
@@ -173,6 +185,58 @@ $requiredTestPresets = @(
     "test-host-debug",
     "test-host-relwithdebinfo"
 )
+
+$hostBasePreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
+                                      -PresetName "host-base" `
+                                      -Kind "configure"
+Assert-PresetHidden -Preset $hostBasePreset -PresetName "host-base"
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $hostBasePreset `
+                                                        -VariableName "THEMIS_BUILD_FIRMWARE") `
+                   -ExpectedValue "OFF" `
+                   -Message "host-base must own THEMIS_BUILD_FIRMWARE=OFF."
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $hostBasePreset `
+                                                        -VariableName "THEMIS_BUILD_HOST_TESTS") `
+                   -ExpectedValue "ON" `
+                   -Message "host-base must own THEMIS_BUILD_HOST_TESTS=ON."
+
+$fwBasePreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
+                                    -PresetName "fw-base" `
+                                    -Kind "configure"
+Assert-PresetHidden -Preset $fwBasePreset -PresetName "fw-base"
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $fwBasePreset `
+                                                        -VariableName "THEMIS_BUILD_FIRMWARE") `
+                   -ExpectedValue "ON" `
+                   -Message "fw-base must own THEMIS_BUILD_FIRMWARE=ON."
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $fwBasePreset `
+                                                        -VariableName "THEMIS_BUILD_HOST_TESTS") `
+                   -ExpectedValue "OFF" `
+                   -Message "fw-base must own THEMIS_BUILD_HOST_TESTS=OFF."
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $fwBasePreset `
+                                                        -VariableName "THEMIS_FIRMWARE_TARGET_NAME") `
+                   -ExpectedValue "falcon-foc-at32" `
+                   -Message "fw-base must own the canonical firmware target name."
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $fwBasePreset `
+                                                        -VariableName "THEMIS_PLATFORM_VENDOR") `
+                   -ExpectedValue "at" `
+                   -Message "fw-base must own the live platform vendor baseline."
+Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
+                                                        -Preset $fwBasePreset `
+                                                        -VariableName "THEMIS_PLATFORM_SOC") `
+                   -ExpectedValue "at32f403a" `
+                   -Message "fw-base must own the live platform SoC baseline."
+
+$fwBaseToolchain = Get-PresetProperty -PresetList $presetJson.configurePresets `
+                                      -Preset $fwBasePreset `
+                                      -PropertyName "toolchainFile"
+if ([string]::IsNullOrWhiteSpace([string]$fwBaseToolchain)) {
+    throw "fw-base must own the firmware toolchainFile."
+}
 
 foreach ($presetName in $requiredConfigurePresets) {
     $preset = Assert-PresetExists -PresetList $presetJson.configurePresets -PresetName $presetName -Kind "configure"
@@ -236,6 +300,9 @@ Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson
 $tinyCarrierPreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
                                          -PresetName "fw-tiny-carrier-minsizerel" `
                                          -Kind "configure"
+if (@($tinyCarrierPreset.inherits) -notcontains "fw-base") {
+    throw "fw-tiny-carrier-minsizerel must inherit fw-base."
+}
 Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
                                                         -Preset $tinyCarrierPreset `
                                                         -VariableName "THEMIS_DEVDRV_PROFILE") `
@@ -250,6 +317,9 @@ Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson
 $tinyHeadlessPreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
                                           -PresetName "fw-tiny-headless-minsizerel" `
                                           -Kind "configure"
+if (@($tinyHeadlessPreset.inherits) -notcontains "fw-base") {
+    throw "fw-tiny-headless-minsizerel must inherit fw-base."
+}
 Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
                                                         -Preset $tinyHeadlessPreset `
                                                         -VariableName "THEMIS_PRODUCT_FLAVOR") `
@@ -259,6 +329,9 @@ Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson
 $standardCarrierPreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
                                              -PresetName "fw-standard-carrier-minsizerel" `
                                              -Kind "configure"
+if (@($standardCarrierPreset.inherits) -notcontains "fw-base") {
+    throw "fw-standard-carrier-minsizerel must inherit fw-base."
+}
 Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
                                                         -Preset $standardCarrierPreset `
                                                         -VariableName "THEMIS_DEVDRV_PROFILE") `
@@ -268,6 +341,9 @@ Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson
 $fullDiagCarrierPreset = Assert-PresetExists -PresetList $presetJson.configurePresets `
                                              -PresetName "fw-full-diag-carrier-debug" `
                                              -Kind "configure"
+if (@($fullDiagCarrierPreset.inherits) -notcontains "fw-base") {
+    throw "fw-full-diag-carrier-debug must inherit fw-base."
+}
 Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
                                                         -Preset $fullDiagCarrierPreset `
                                                         -VariableName "THEMIS_DEVDRV_PROFILE") `

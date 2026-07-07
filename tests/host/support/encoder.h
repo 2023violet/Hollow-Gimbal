@@ -25,6 +25,13 @@ typedef struct gpio_type_ {
     uint32_t reserved;
 } gpio_type;
 
+extern spi_type  g_host_spi1;
+extern gpio_type g_host_gpioa;
+
+#define SPI1        (&g_host_spi1)
+#define GPIOA       (&g_host_gpioa)
+#define GPIO_PINS_4 (4U)
+
 struct encoder_config {
     spi_type  *spi_instance;
     gpio_type *cs_port;

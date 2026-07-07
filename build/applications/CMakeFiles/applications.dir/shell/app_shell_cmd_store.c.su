@@ -1,0 +1,8 @@
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:60:12:_app_shell_store_resolve_target	16	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:142:13:_app_shell_store_requires_idle	16	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:86:13:_app_shell_store_result_row	8	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:20:13:_app_shell_store_slot_row	72	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:45:13:_app_shell_store_status	72	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:91:13:_app_shell_store_layout_total	24	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:126:13:_app_shell_store_pending_row	24	static
+D:/study/Software/Hollow-Gimbal/applications/shell/app_shell_cmd_store.c:165:5:app_shell_store_command	168	static

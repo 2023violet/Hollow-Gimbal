@@ -132,6 +132,31 @@ function Resolve-GovernanceDocByTokens
     return To-RepoRelativePath -Root $Root -FullPath $matches[0].FullName
 }
 
+function Resolve-ApplicationDocByTokens
+{
+    param(
+        [string]$Root,
+        [string[]]$Tokens
+    )
+
+    $matches = @(Get-ChildItem -Path (Join-Path $Root "docs\application") -Filter "*.md" |
+        Where-Object {
+            $raw = Get-Content -LiteralPath $_.FullName -Encoding UTF8 -Raw
+            foreach ($token in $Tokens) {
+                if ($raw.IndexOf($token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                    return $false
+                }
+            }
+            return $true
+        })
+
+    if ($matches.Count -ne 1) {
+        return $null
+    }
+
+    return To-RepoRelativePath -Root $Root -FullPath $matches[0].FullName
+}
+
 $repoRoot = Resolve-ThemisRoot -Root $RepoRoot
 $errors   = New-Object "System.Collections.Generic.List[string]"
 $transportDocRelativePath = Resolve-GovernanceDocByTokens -Root $repoRoot -Tokens @(
@@ -146,6 +171,13 @@ $shellDocRelativePath = Resolve-GovernanceDocByTokens -Root $repoRoot -Tokens @(
     "ASCII",
     "128"
 )
+$shellManualRelativePath = Resolve-ApplicationDocByTokens -Root $repoRoot -Tokens @(
+    "COM54",
+    "USART1",
+    "full-diag",
+    "shell=on",
+    "reason=cmd_not_found rc=-2"
+)
 
 $requiredFiles = @(
     "applications\tasks\shell_task.h",
@@ -154,10 +186,15 @@ $requiredFiles = @(
     "applications\tasks\app_shell_task.c",
     "applications\shell\app_shell_banner.h",
     "applications\shell\app_shell_banner.c",
+    "bsp\ports\bsp_console.h",
+    "bsp\ports\bsp_console.c",
+    "tests\host\bsp\test_bsp_console_contract.c",
     "tests\host\subsys\test_tm_shell_task.c",
     "tests\CMakeLists.txt",
     "scripts\run_host_tests.ps1",
     "scripts\flows\host\run_host_tests.ps1",
+    "scripts\flows\board\run_diag_carrier_witness.ps1",
+    "scripts\flows\board\run_tiny_carrier_regression.ps1",
     "scripts\check_themis_quality_gate.ps1",
     "scripts\gates\check_themis_quality_gate.ps1"
 )
@@ -176,6 +213,12 @@ if ($null -eq $shellDocRelativePath) {
     $errors.Add("ERROR: unable to resolve FalconFoc-lite shell output governance doc by content tokens")
 } else {
     Assert-Exists -Root $repoRoot -RelativePath $shellDocRelativePath -Errors $errors
+}
+
+if ($null -eq $shellManualRelativePath) {
+    $errors.Add("ERROR: unable to resolve FalconFoc-lite shell manual by content tokens")
+} else {
+    Assert-Exists -Root $repoRoot -RelativePath $shellManualRelativePath -Errors $errors
 }
 
 Assert-Contains -Root $repoRoot `
@@ -227,6 +270,15 @@ Assert-Contains -Root $repoRoot `
                 -Errors $errors
 
 Assert-Contains -Root $repoRoot `
+                -RelativePath "tests\host\bsp\test_bsp_console_contract.c" `
+                -Markers @(
+                    "bsp_console_shell_rx_start(",
+                    "bsp_console_write_poll(",
+                    "bsp_console_write_dma("
+                ) `
+                -Errors $errors
+
+Assert-Contains -Root $repoRoot `
                 -RelativePath "tests\host\subsys\test_tm_shell_task.c" `
                 -Markers @(
                     "tm_shell_task_init()",
@@ -239,6 +291,8 @@ Assert-Contains -Root $repoRoot `
 Assert-Contains -Root $repoRoot `
                 -RelativePath "tests\CMakeLists.txt" `
                 -Markers @(
+                    '"bsp/ports/bsp_console.c"',
+                    'test_bsp_console_contract',
                     '"applications/tasks/app_shell_task.c"',
                     'test_tm_shell_task'
                 ) `
@@ -260,6 +314,20 @@ Assert-Contains -Root $repoRoot `
                 ) `
                 -Errors $errors
 
+$shellCommandFiles = @(Get-ChildItem -Path (Join-Path $repoRoot "applications\shell") -Filter "app_shell_cmd_*.c")
+foreach ($file in $shellCommandFiles) {
+    $raw = Get-Content -LiteralPath $file.FullName -Encoding UTF8 -Raw
+    if ($raw -match 'motor->') {
+        $relative = To-RepoRelativePath -Root $repoRoot -FullPath $file.FullName
+        $errors.Add("ERROR: $relative must not access live product state through direct motor-> writes or reads")
+    }
+}
+
+$faultRuntimeRaw = Get-Content -LiteralPath (Join-Path $repoRoot "applications\runtime\motor_fault_runtime.c") -Encoding UTF8 -Raw
+if ($faultRuntimeRaw -match 'axis_state\s*=') {
+    $errors.Add("ERROR: applications/runtime/motor_fault_runtime.c must not write axis_state directly")
+}
+
 Assert-Contains -Root $repoRoot `
                 -RelativePath $transportDocRelativePath `
                 -Markers @(
@@ -280,17 +348,114 @@ Assert-Contains -Root $repoRoot `
                     "repeated row",
                     "ASCII",
                     "shell_task",
-                    "app_shell_task"
+                    "app_shell_task",
+                    "reason=snapshot_unavailable",
+                    "reason=idle_only",
+                    "reason=redirect target=cfg",
+                    "usage='Show command list'",
+                    "next='help'",
+                    "queue_used",
+                    "submit_ok_count"
                 ) `
                 -Errors $errors
+
+Assert-Contains -Root $repoRoot `
+                -RelativePath "applications\shell\app_shell_banner.c" `
+                -Markers @(
+                    "build_date=%s build_time=%s shell=%s flavor=%s",
+                    "uart=USART1 baud=1000000 transport=dma",
+                    "next='help'"
+                ) `
+                -Errors $errors
+
+Assert-Contains -Root $repoRoot `
+                -RelativePath "subsys\shell\tm_shell.c" `
+                -Markers @(
+                    "group=%s usage='%s'",
+                    "name=help group=Built-in usage='Show command list'",
+                    "reason=%s rc=-2",
+                    "cmd_not_found"
+                ) `
+                -Errors $errors
+
+Assert-Contains -Root $repoRoot `
+                -RelativePath $shellManualRelativePath `
+                -Markers @(
+                    "build_date=",
+                    "build_time=",
+                    "next='help'",
+                    "version=",
+                    "data=",
+                    "shell=on",
+                    "queue_used",
+                    "queue_depth",
+                    "submit_ok_count",
+                    "submit_fail_count",
+                    "reason=redirect target=cfg",
+                    "reason=idle_only",
+                    "reason=cmd_not_found rc=-2"
+                ) `
+                -Errors $errors
+
+Assert-Omits -Root $repoRoot `
+             -RelativePath $shellManualRelativePath `
+             -Markers @(
+                 "help=type 'help'",
+                 "shell=1",
+                 "queue=<used>/<depth>",
+                 "owner=cfg",
+                 "policy=idle-only"
+             ) `
+             -Errors $errors
+
+Assert-Contains -Root $repoRoot `
+                -RelativePath "scripts\flows\board\run_diag_carrier_witness.ps1" `
+                -Markers @(
+                    "shell=on",
+                    "uart=USART1",
+                    "baud=1000000",
+                    "transport=dma",
+                    "state show",
+                    "obs all",
+                    "diag pid all show",
+                    "diag param show",
+                    "store save sys",
+                    "store status"
+                ) `
+                -Errors $errors
+
+Assert-Omits -Root $repoRoot `
+             -RelativePath "scripts\flows\board\run_diag_carrier_witness.ps1" `
+             -Markers @(
+                 "shell=1",
+                 "policy=idle-only",
+                 "[cal] cmd=start result=ok",
+                 "transport=uart1-dma",
+                 "diag pid vel kp 0.1000",
+                 "diag param rs 0.2300"
+             ) `
+             -Errors $errors
+
+Assert-Contains -Root $repoRoot `
+                -RelativePath "scripts\flows\board\run_tiny_carrier_regression.ps1" `
+                -Markers @(
+                    "shell=on"
+                ) `
+                -Errors $errors
+
+Assert-Omits -Root $repoRoot `
+             -RelativePath "scripts\flows\board\run_tiny_carrier_regression.ps1" `
+             -Markers @(
+                 "shell=1"
+             ) `
+             -Errors $errors
 
 foreach ($entry in $errors) {
     Write-Host $entry
 }
 
-Write-Host ("[transport_shell_hardening] checked {0} files and {1} contract groups" -f `
-    $requiredFiles.Count, `
-    10)
+Write-Host ("[transport_shell_hardening] checked {0} required files plus live shell contract markers" -f `
+    $requiredFiles.Count)
 Write-Host ("[transport_shell_hardening] {0} errors, 0 warnings" -f $errors.Count)
 
 if ($errors.Count -gt 0) {

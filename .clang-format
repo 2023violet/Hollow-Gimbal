@@ -1,13 +1,14 @@
-# Themis active C/C++ formatter baseline.
+# Themis shared C/C++ formatter baseline.
 # Decision:
 # - Keep the repo-active 4-space / function-brace-on-next-line style as the
-#   current executable standard.
-# - Document stricter alternatives in docs instead of forcing them into the
-#   repo before the owned code corpus is ready.
+#   formal Themis executable standard.
+# - This revision prioritizes cross-project review consistency and formatter
+#   determinism over table-style alignment aesthetics.
+# - Includes are sorted and regrouped so the template behaves more like a
+#   general-purpose shared standard across future Themis repositories.
 
-Language: Cpp
+---
 BasedOnStyle: LLVM
-Standard: Latest
 LineEnding: LF
 
 IndentWidth: 4
@@ -21,17 +22,15 @@ IndentPPDirectives: None
 PPIndentWidth: 0
 
 # Alignment.
-AccessModifierOffset: -1
-
 AlignConsecutiveAssignments:
-  Enabled: true
-  AcrossEmptyLines: false # true
+  Enabled: false
+  AcrossEmptyLines: false
   AcrossComments: true
   AlignCompound: false
   PadOperators: true
 
 AlignConsecutiveDeclarations:
-  Enabled: true
+  Enabled: false
   AcrossEmptyLines: false
   AcrossComments: true
   AlignCompound: false
@@ -45,13 +44,13 @@ AlignConsecutiveMacros:
   PadOperators: true
 
 AlignConsecutiveBitFields:
-  Enabled: true
+  Enabled: false
 
 AlignArrayOfStructures: None
-AlignAfterOpenBracket: Align
-AlignOperands: Align
+AlignAfterOpenBracket: BlockIndent
+AlignOperands: DontAlign
 AlignEscapedNewlines: Left
-AlignTrailingComments: true
+AlignTrailingComments: false
 
 # Braces.
 BraceWrapping:
@@ -86,7 +85,6 @@ PenaltyBreakOpenParenthesis: 0
 PenaltyReturnTypeOnItsOwnLine: 200
 
 AllowShortFunctionsOnASingleLine: None
-AllowShortLambdasOnASingleLine: All
 
 # Control statements.
 AllowShortIfStatementsOnASingleLine: Never
@@ -97,19 +95,14 @@ AllowShortEnumsOnASingleLine: false
 
 # Operators and spacing.
 BreakBeforeBinaryOperators: None
-
 BreakBeforeTernaryOperators: true
-BreakConstructorInitializers: AfterColon
-BreakInheritanceList: AfterColon
 BreakStringLiterals: true
 
 SpaceBeforeAssignmentOperators: true
 SpaceBeforeParens: ControlStatements
 SpaceBeforeRangeBasedForLoopColon: true
-SpaceBeforeCtorInitializerColon: true
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
-SpaceAfterTemplateKeyword: true
 
 # Pointer/reference alignment.
 PointerAlignment: Right
@@ -136,28 +129,35 @@ IncludeCategories:
     Priority: 2
 
 # Misc.
-AlwaysBreakTemplateDeclarations: MultiLine
 AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakAfterReturnType: None
-
 BreakArrays: false
-Cpp11BracedListStyle: true
-
-FixNamespaceComments: true
-NamespaceIndentation: None
 
 InsertBraces: false
 InsertNewlineAtEOF: true
 
 # Macros.
 WhitespaceSensitiveMacros:
-  - BOOST_PP_STRINGIZE
-  - CF_SWIFT_NAME
-  - NS_SWIFT_NAME
   - PP_STRINGIZE
   - STRINGIZE
 
 ForEachMacros:
   - foreach
-  - Q_FOREACH
-  - BOOST_FOREACH
+
+---
+Language: Cpp
+Standard: c++20
+
+AccessModifierOffset: -4
+
+AllowShortLambdasOnASingleLine: All
+BreakConstructorInitializers: AfterColon
+BreakInheritanceList: AfterColon
+SpaceBeforeCtorInitializerColon: true
+SpaceAfterTemplateKeyword: true
+
+AlwaysBreakTemplateDeclarations: MultiLine
+Cpp11BracedListStyle: true
+
+FixNamespaceComments: true
+NamespaceIndentation: None

@@ -44,7 +44,7 @@ extern "C" {
 #define SHELL_FW_DATE                   __DATE__ " " __TIME__
 
 #define SHELL_RX_BUF_SIZE               (256U)
-#define SHELL_TX_RING_SIZE              (1024U)
+#define SHELL_TX_RING_SIZE              (768U)
 #define FLAG_SHELL_RX                   TM_BIT(0U)
 #define FLAG_SHELL_TX                   TM_BIT(1U)
 

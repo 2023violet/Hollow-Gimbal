@@ -50,7 +50,9 @@
       "cacheVariables": {
         "THEMIS_BUILD_FIRMWARE": "ON",
         "THEMIS_BUILD_HOST_TESTS": "OFF",
-        "THEMIS_FIRMWARE_TARGET_NAME": "falcon-foc-at32"
+        "THEMIS_FIRMWARE_TARGET_NAME": "falcon-foc-at32",
+        "THEMIS_PLATFORM_VENDOR": "at",
+        "THEMIS_PLATFORM_SOC": "at32f415"
       }
     },
     {

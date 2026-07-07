@@ -11,6 +11,11 @@ Current scope:
 - FalconFoc shell usage
 - FalconFoc shell compile-time on/off policy
 - operator-facing workflow that still exists in `applications/shell/`
+- FalconFoc product runtime ownership entry:
+  - `applications/runtime/README.md`
+- shell command owners are read/request-only:
+  - read via runtime snapshot/read seam
+  - write via runtime request seam
 
 Removed from the live application doc surface:
 - retired UI flow documents

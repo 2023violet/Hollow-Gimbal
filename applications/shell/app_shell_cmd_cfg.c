@@ -14,13 +14,23 @@
 
 /* Private Helpers ------------------------------------------------------------------------------ */
 
+#if APP_SHELL_ENABLED
+
 static void _app_shell_cfg_show(void)
 {
+    struct motor_runtime_snapshot snapshot;
+
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("cfg", "cmd=show result=error reason=snapshot_unavailable");
+        return;
+    }
+
     TM_SHELL_SUMMARY("cfg",
-                     "cmd=show result=ok shell=on ctrl=%s input=%s",
-                     app_shell_ctrl_mode_name(_motor_ins.ctrl_mode),
-                     app_shell_input_mode_name(_motor_ins.input_mode));
-    TM_SHELL_ROW("hint", "persist=store save sys");
+                     "cmd=show result=ok shell=%s ctrl=%s input=%s",
+                     tm_shell_onoff_name(TM_SHELL_ENABLE != 0U),
+                     app_shell_ctrl_mode_name(snapshot.ctrl_mode),
+                     app_shell_input_mode_name(snapshot.input_mode));
+    TM_SHELL_ROW("hint", "next='store save sys'");
 }
 
 /* Public Functions ----------------------------------------------------------------------------- */
@@ -29,6 +39,7 @@ int app_shell_cfg_command(int argc, char *argv[])
 {
     enum foc_ctrl_mode  ctrl_mode;
     enum foc_input_mode input_mode;
+    struct motor_runtime_snapshot snapshot;
 
     if ((argc == 1) || ((argc == 2) && (strcmp(argv[1], "show") == 0))) {
         _app_shell_cfg_show();
@@ -39,11 +50,16 @@ int app_shell_cfg_command(int argc, char *argv[])
         return SHELL_ERR_ARGC;
     }
 
-    if (_motor_ins.axis_state != AXIS_STATE_IDLE) {
+    if (!motor_runtime_snapshot(&snapshot)) {
+        TM_SHELL_SUMMARY("cfg", "cmd=%s result=error reason=snapshot_unavailable", argv[1]);
+        return SHELL_OK;
+    }
+
+    if (snapshot.axis_state != AXIS_STATE_IDLE) {
         TM_SHELL_SUMMARY("cfg",
                          "cmd=%s result=error axis=%s",
                          argv[1],
-                         app_shell_axis_state_name(_motor_ins.axis_state));
+                         app_shell_axis_state_name(snapshot.axis_state));
         return SHELL_OK;
     }
 
@@ -52,8 +68,12 @@ int app_shell_cfg_command(int argc, char *argv[])
             return SHELL_ERR_ARG;
         }
 
-        _motor_ins.ctrl_mode = ctrl_mode;
-        TM_SHELL_SUMMARY("cfg", "cmd=ctrl result=ok ctrl=%s", app_shell_ctrl_mode_name(_motor_ins.ctrl_mode));
+        if (!motor_runtime_request_ctrl_mode(ctrl_mode)) {
+            TM_SHELL_SUMMARY("cfg", "cmd=ctrl result=error reason=snapshot_unavailable");
+            return SHELL_OK;
+        }
+
+        TM_SHELL_SUMMARY("cfg", "cmd=ctrl result=ok ctrl=%s", app_shell_ctrl_mode_name((uint8_t)ctrl_mode));
         return SHELL_OK;
     }
 
@@ -62,8 +82,12 @@ int app_shell_cfg_command(int argc, char *argv[])
             return SHELL_ERR_ARG;
         }
 
-        _motor_ins.input_mode = input_mode;
-        TM_SHELL_SUMMARY("cfg", "cmd=input result=ok input=%s", app_shell_input_mode_name(_motor_ins.input_mode));
+        if (!motor_runtime_request_input_mode(input_mode)) {
+            TM_SHELL_SUMMARY("cfg", "cmd=input result=error reason=snapshot_unavailable");
+            return SHELL_OK;
+        }
+
+        TM_SHELL_SUMMARY("cfg", "cmd=input result=ok input=%s", app_shell_input_mode_name((uint8_t)input_mode));
         return SHELL_OK;
     }
 
@@ -71,5 +95,7 @@ int app_shell_cfg_command(int argc, char *argv[])
 }
 
 SHELL_CMD_EXPORT(cfg, app_shell_cfg_command, 70U, "[show|ctrl <mode>|input <mode>]", "Config");
+
+#endif
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -61,11 +61,12 @@ extern "C" {
 /**
  * @brief  Active compile-time protocol selection.
  *
- * Override with `-DVOFA_PROTOCOL=...` when needed. FireWater is safer on a
- * shared debug UART because ordinary text and waveform frames can coexist.
+ * Default is JustFloat: the waveform lane runs on the shared console UART at
+ * reduced frame rate, and JustFloat frames are what the host-side debug
+ * scripts parse. FireWater remains selectable for text-coexistent lanes.
  */
 #ifndef VOFA_PROTOCOL
-#define VOFA_PROTOCOL VOFA_PROTO_FIREWATER
+#define VOFA_PROTOCOL VOFA_PROTO_JUSTFLOAT
 #endif
 
 /** Maximum number of simultaneously bound channels. */

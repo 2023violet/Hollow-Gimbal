@@ -117,6 +117,73 @@ bool motor_runtime_diag_set_param(const char *name, float value);
 bool motor_runtime_diag_set_pid(const char *loop_name, const char *field, float value);
 bool motor_runtime_diag_reset_pid(const char *loop_name);
 bool motor_runtime_diag_set_voltage(float vd, float vq, float we_ramp);
+bool motor_runtime_diag_set_if(float iq_amp, float we);
+/**
+ * @brief  Enter pure voltage-mode open-loop spin at an output-shaft speed.
+ *
+ * Converts the commanded rpm into an electrical rad/s target using the
+ * configured pole pairs and applies it through the CTRL_MODE_VOLT path with
+ * if_enable cleared, so no current loop wraps the open-loop angle.  Valid
+ * from IDLE only, exactly like the other diag motion writes.
+ *
+ * @param  vel_rpm      Open-loop speed target (output shaft, rpm).
+ * @param  vq           Q-axis voltage amplitude (V, >= 0).
+ * @param  we_elec_out  Receives the derived electrical velocity (rad/s).
+ *
+ * @return true when the command was accepted.
+ */
+bool motor_runtime_diag_set_voltloop(float vel_rpm, float vq, float *we_elec_out);
+bool motor_runtime_request_if_to_vel_handoff(float vel_rpm);
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+bool motor_runtime_request_bench_velocity_step(float vel_rpm);
+struct motor_runtime_adc_view {
+    float ia_raw;
+    float ib_raw;
+    float ic_raw;
+    float ia_offset;
+    float ib_offset;
+    float ic_offset;
+    float ia_residual;
+    float ib_residual;
+    float ic_residual;
+    uint32_t sample_seq;
+    uint32_t sample_count;
+    uint32_t fresh_count;
+    uint8_t pwm_map;
+    uint8_t adc_map;
+    uint16_t adc_trigger;
+    bool calib_valid;
+    bool clamp_used;
+};
+bool motor_runtime_diag_read_adc(struct motor_runtime_adc_view *view);
+bool motor_runtime_diag_zero_current_offsets(void);
+struct motor_runtime_bench_status {
+    uint32_t heartbeat_age_ms;
+    uint32_t timeout_count;
+    bool     armed;
+    bool     expired;
+};
+bool motor_runtime_diag_bench_keepalive(void);
+bool motor_runtime_diag_bench_status(struct motor_runtime_bench_status *out);
+bool motor_runtime_bench_watchdog_tick(const struct motor_dev *motor);
+#endif
+bool motor_runtime_diag_set_phase_volt(int phase, float volt);
+bool motor_runtime_diag_set_phase_seed_offset(float offset_rad);
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+bool motor_runtime_diag_set_encoder_dir(uint8_t dir);
+bool motor_runtime_diag_set_encoder_abs(uint8_t dir, float mech_offset);
+bool motor_runtime_diag_set_pwm_map(uint8_t map_id);
+bool motor_runtime_diag_set_adc_map(uint8_t map_id);
+void motor_runtime_diag_reset_maps(void);
+bool motor_runtime_diag_set_adc_trigger(uint16_t compare);
+bool motor_runtime_diag_read_bench_maps(uint8_t *pwm_map,
+                                        uint8_t *adc_map,
+                                        uint16_t *adc_trigger);
+bool motor_runtime_diag_encoder_trace_clear(void);
+bool motor_runtime_diag_encoder_trace_read(uint32_t index,
+                                           struct encoder_bench_sample *out);
+uint32_t motor_runtime_diag_encoder_trace_count(void);
+#endif
 bool motor_runtime_request_set_passthrough(enum foc_ctrl_mode mode, float target, float limit);
 bool motor_runtime_request_vel_ramp(float target_rads, float max_acc_rads);
 bool motor_runtime_request_torque_ramp(float target_torque, float max_acc);
@@ -190,6 +257,35 @@ struct motor_runtime_snapshot {
     float    i_q;
     /** D-axis current snapshot in amperes. */
     float    i_d;
+    /** Raw ADC samples for phase A/B/C. */
+    float    ia_raw;
+    float    ib_raw;
+    float    ic_raw;
+    /** Raw ADC offsets used for phase-current subtraction. */
+    float    ia_offset;
+    float    ib_offset;
+    float    ic_offset;
+    /** Reconstructed phase currents in amperes. */
+    float    ia;
+    float    ib;
+    float    ic;
+    /** Raw bus-voltage ADC sample. */
+    float    v_bus_raw;
+    /** Voltage-open-loop and measured electrical-angle diagnostics. */
+    float    theta_sim;
+    float    theta_elec;
+    float    we_volt_now;
+    float    we_volt_ramp;
+    /** Last FOC voltage-vector values. */
+    float    vd;
+    float    vq;
+    float    v_alpha;
+    float    v_beta;
+    /** Last SVPWM duty values and sector. */
+    float    dtc_a;
+    float    dtc_b;
+    float    dtc_c;
+    uint8_t  sector;
     /** Output-shaft velocity snapshot in RPM. */
     float    out_vel_rpm;
     /** Output-shaft multi-turn position snapshot in turns. */

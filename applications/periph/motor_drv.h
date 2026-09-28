@@ -11,6 +11,7 @@
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "foc_common.h"
+#include "motor_bench_mapping.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,13 @@ void foc_pid_init(struct motor_dev *motor);
  * @param  motor  Pointer to motor instance structure
  */
 void foc_lpf_init(struct motor_dev *motor);
+
+/**
+ * @brief  Refresh current-loop low-pass filter coefficients from live config
+ *
+ * @param  motor  Pointer to motor instance structure
+ */
+void foc_lpf_refresh(struct motor_dev *motor);
 
 /**
  * @brief  Enable PWM Outputs
@@ -80,6 +88,29 @@ void adc_read_ordinary(struct motor_dev *motor);
  * @param  motor  Pointer to motor instance structure
  */
 void adc_read_phases(struct motor_dev *motor);
+
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+/** @brief Select a RAM-only bench PWM permutation. */
+bool motor_drv_diag_set_pwm_map(uint8_t map_id);
+
+/** @brief Select a RAM-only bench ADC-rank permutation. */
+bool motor_drv_diag_set_adc_map(uint8_t map_id);
+
+/** @brief Restore the default bench mapping and ADC trigger. */
+void motor_drv_diag_reset_maps(void);
+
+/** @brief Read the active bench PWM permutation. */
+uint8_t motor_drv_diag_get_pwm_map(void);
+
+/** @brief Read the active bench ADC-rank permutation. */
+uint8_t motor_drv_diag_get_adc_map(void);
+
+/** @brief Set the RAM-only ADC trigger compare value. */
+bool motor_drv_diag_set_adc_trigger(uint16_t compare);
+
+/** @brief Read the active RAM-only ADC trigger compare value. */
+uint16_t motor_drv_diag_get_adc_trigger(void);
+#endif
 
 #ifdef __cplusplus
 }

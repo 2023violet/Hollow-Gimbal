@@ -58,6 +58,9 @@ enum foc_ctrl_mode {
     CTRL_MODE_CURR = 1, /* Torque control */
     CTRL_MODE_VEL = 2, /* Velocity control */
     CTRL_MODE_POS = 3, /* Position control */
+    CTRL_MODE_VVEL = 4, /* Voltage-mode velocity: vel PID drives Uq directly,
+                         * current loop bypassed (diagnostic fallback, never
+                         * persisted by the store layer) */
 };
 
 /**
@@ -263,6 +266,8 @@ struct motor_ctrl_config {
     struct pid_dev id_pid;
     struct pid_dev vel_pid;
     struct pid_dev pos_pid;
+    struct pid_dev vvel_pid; /* Voltage-mode velocity loop (CTRL_MODE_VVEL),
+                              * output unit is volts, not amperes */
 
     /* Ramp parameters */
     float ramp_vel; /* Maximum ramp velocity (rad/s, output shaft) */
@@ -321,7 +326,23 @@ struct motor_ctrl_state {
 
     /* Voltage open-loop state */
     float theta_sim; /* Simulated electrical angle for CTRL_MODE_VOLT (rad) */
-    float we_volt_ramp; /* Electrical angular velocity for voltage open-loop (rad/s) */
+    float theta_seed_offset_rad; /* Bench-only transient seed offset (rad) */
+    float we_volt_ramp; /* Electrical angular velocity target for voltage open-loop (rad/s) */
+    float we_volt_now; /* Ramped electrical angular velocity actually applied (rad/s) */
+
+    /* I-f sub-mode (CTRL_MODE_VOLT + if_enable): closed-loop current amplitude
+     * following the same open-loop theta_sim angle. Provides damping that the
+     * pure voltage source cannot. */
+    float if_iq_target; /* Q-axis current amplitude command (A) */
+    uint8_t if_enable; /* Non-zero selects the I-f path inside CTRL_MODE_VOLT */
+
+    /* Voltage-mode velocity output (CTRL_MODE_VVEL): q-axis voltage produced
+     * by vvel_pid at the outer-loop rate, applied to the measured electrical
+     * angle by the inner step.  Volts. */
+    float vvel_vq;
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+    uint8_t bench_vel_step_armed; /* I-f-to-velocity handoff completed in this bench run */
+#endif
 
     // float omega_elec_set; /* Electrical angular velocity setpoint (rad/s) */
     // float omega_mech_set; /* Mechanical speed setpoint (rad/s) */
@@ -357,6 +378,14 @@ struct motor_meas_data {
     float ia_offset; /* Phase A raw ADC value */
     float ib_offset; /* Phase B raw ADC value */
     float ic_offset; /* Phase C raw ADC value */
+    volatile uint32_t injected_sample_seq; /* Completed injected ADC scans. */
+    uint32_t adc_calib_sample_count;
+    uint32_t adc_calib_fresh_count;
+    float adc_calib_ia_stddev;
+    float adc_calib_ib_stddev;
+    float adc_calib_ic_stddev;
+    bool adc_calib_valid;
+    bool adc_calib_clamp_used;
 
     /* Voltage measurements */
     float v_bus; /* Bus voltage (V) */

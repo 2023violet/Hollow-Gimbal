@@ -116,7 +116,9 @@ static void _vofa_task_entry(void *argument)
         (void)(vofa_time_us);
 #endif
 
-        osDelay(1);
+        /* 100 Hz frame cadence: 7ch JustFloat = 32 B/frame -> ~32 kbaud,
+         * which fits the 115200 console lane alongside shell text. */
+        osDelay(10);
     }
 }
 

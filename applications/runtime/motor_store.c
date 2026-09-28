@@ -540,6 +540,10 @@ static int _map_tp_rc(int tp_rc)
 
 static bool _ctrl_mode_is_valid(uint8_t value)
 {
+    /* NOTE: CTRL_MODE_VVEL is deliberately absent — the voltage-mode velocity
+     * fallback is a bench/diagnostic mode and must never be restored from the
+     * persisted default-ctrl strategy.  A stale stored value of 4 falls back
+     * to the default below. */
     switch ((enum foc_ctrl_mode)value) {
     case CTRL_MODE_VOLT:
     case CTRL_MODE_CURR:

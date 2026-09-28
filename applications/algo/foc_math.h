@@ -297,11 +297,12 @@ static inline float foc_phase_angle(float x, float y)
 /**
  * @brief  Discrete first-order IIR low-pass filter.
  *
- * Transfer function (bilinear, Tustin approximation):
+ * Transfer function (first-order backward-Euler style approximation):
  *   y[n] = α · x[n] + (1 − α) · y[n−1]
  *   where α = ωc / (ωc + fs),  ωc = 2π · fc
  *
- * For ADC ISR use (constant Ts), α is computed once in lpf_init().
+ * This is not the strict bilinear/Tustin coefficient. For ADC ISR use
+ * (constant Ts), α is computed once in lpf_init().
  */
 struct lpf {
     float alpha;  /* Filter coefficient in (0, 1). Closer to 1 → less filtering. */

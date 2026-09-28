@@ -22,6 +22,17 @@ extern "C" {
 /* Public Functions ----------------------------------------------------------------------------- */
 
 /**
+ * @brief  Check whether VBUS is safe for numeric normalisation.
+ *
+ * This is a numeric guard only; product undervoltage/overvoltage policy stays
+ * in the fault runtime.
+ */
+static inline bool foc_vbus_numeric_valid(float v_bus)
+{
+    return isfinite(v_bus) && (v_bus > FOC_VBUS_NUMERIC_MIN_V);
+}
+
+/**
  * @brief  Update derived measurements and dynamic per-tick control limits.
  */
 void foc_para_calc(struct motor_dev *motor);

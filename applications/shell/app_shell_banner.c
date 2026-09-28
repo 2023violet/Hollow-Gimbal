@@ -24,7 +24,7 @@ void app_shell_banner_print(void)
                  __TIME__,
                  tm_shell_onoff_name(TM_SHELL_ENABLE != 0U),
                  TM_PRODUCT_FLAVOR_NAME);
-    TM_SHELL_ROW("console", "uart=USART1 baud=1000000 transport=dma");
+    TM_SHELL_ROW("console", "uart=USART1 baud=115200 transport=dma");
     TM_SHELL_ROW("hint", "next='help'");
     TM_SHELL_PROMPT();
 }

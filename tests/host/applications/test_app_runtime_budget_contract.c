@@ -32,8 +32,8 @@ static void test_shell_stack_budget_matches_profile_contract(void)
 
 static void test_motor_task_stack_budget_is_explicit(void)
 {
-    TEST_ASSERT(TM_MOTOR_TASK_STACK_BYTES == (256U * 4U));
-    TEST_ASSERT(TM_MOTOR_SAFE_TASK_STACK_BYTES == (128U * 4U));
+    TEST_ASSERT(TM_MOTOR_TASK_STACK_BYTES == (512U * 4U));
+    TEST_ASSERT(TM_MOTOR_SAFE_TASK_STACK_BYTES == (256U * 4U));
 }
 
 int main(void)

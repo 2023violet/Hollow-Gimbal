@@ -8,6 +8,7 @@
 /* Includes ------------------------------------------------------------------------------------- */
 #include "app_shell_common.h"
 #include <errno.h>
+#include <math.h>
 #include <string.h>
 #include "tm_format.h"
 
@@ -61,6 +62,8 @@ const char *app_shell_ctrl_mode_name(uint8_t mode)
         return "vel";
     case CTRL_MODE_POS:
         return "pos";
+    case CTRL_MODE_VVEL:
+        return "vvel";
     default:
         return "unknown";
     }
@@ -152,6 +155,10 @@ int app_shell_parse_ctrl_mode(const char *text, enum foc_ctrl_mode *mode_out)
     }
     if (strcmp(text, "pos") == 0) {
         *mode_out = CTRL_MODE_POS;
+        return 0;
+    }
+    if (strcmp(text, "vvel") == 0) {
+        *mode_out = CTRL_MODE_VVEL;
         return 0;
     }
 
@@ -286,6 +293,10 @@ int app_shell_format_float(char *buffer, size_t buffer_size, float value, uint8_
     size_t   written;
 
     if ((buffer == NULL) || (buffer_size == 0U)) {
+        return -EINVAL;
+    }
+
+    if (!isfinite(value)) {
         return -EINVAL;
     }
 

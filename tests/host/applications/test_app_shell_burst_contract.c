@@ -18,6 +18,7 @@
 #include "foc_motion_runtime.h"
 #include "foc_param.h"
 #include "host_rtos.h"
+#include "motor_fault_runtime.h"
 #include "motor_runtime.h"
 #include "motor_fsm.h"
 #include "motor_calibration_runtime.h"
@@ -47,6 +48,8 @@ static size_t                        g_print_frame_count   = 0U;
 static size_t                        g_print_payload_total = 0U;
 static size_t                        g_prompt_payload      = 0U;
 static bool                          g_reset_called        = false;
+
+void host_runtime_stub_set_fault_context(const struct motor_fault_context *context, bool valid);
 
 static const struct shell_cmd_entry g_shell_entries[] = {
     {
@@ -174,6 +177,7 @@ static void test_env_reset(void)
     shell_init();
     shell_set_print(shell_capture);
     g_reset_called = false;
+    host_runtime_stub_set_fault_context(NULL, false);
 
     _motor_ins.axis_state                    = AXIS_STATE_IDLE;
     _motor_ins.ctrl_mode                     = CTRL_MODE_VEL;
@@ -225,6 +229,28 @@ static void test_env_reset(void)
     g_runtime_motor.meas_data.driver_temp        = 39.0f;
     g_runtime_motor.foc_calc.i_q                 = 2.500f;
     g_runtime_motor.foc_calc.i_d                 = -1.125f;
+    g_runtime_motor.meas_data.ia_raw             = 1001.0f;
+    g_runtime_motor.meas_data.ib_raw             = 1002.0f;
+    g_runtime_motor.meas_data.ic_raw             = 1003.0f;
+    g_runtime_motor.meas_data.ia_offset          = 1000.0f;
+    g_runtime_motor.meas_data.ib_offset          = 1000.0f;
+    g_runtime_motor.meas_data.ic_offset          = 1000.0f;
+    g_runtime_motor.meas_data.a                  = 0.01f;
+    g_runtime_motor.meas_data.b                  = -0.02f;
+    g_runtime_motor.meas_data.c                  = 0.03f;
+    g_runtime_motor.meas_data.v_bus_raw          = 3000.0f;
+    g_runtime_motor.meas_data.theta_elec         = 1.11f;
+    g_runtime_motor.ctrl_state.theta_sim         = 2.22f;
+    g_runtime_motor.ctrl_state.we_volt_now       = 3.33f;
+    g_runtime_motor.ctrl_state.we_volt_ramp      = 4.44f;
+    g_runtime_motor.foc_calc.v_d                 = 0.11f;
+    g_runtime_motor.foc_calc.v_q                 = 0.22f;
+    g_runtime_motor.foc_calc.v_alpha             = 0.33f;
+    g_runtime_motor.foc_calc.v_beta              = 0.44f;
+    g_runtime_motor.foc_calc.dtc_a               = 0.45f;
+    g_runtime_motor.foc_calc.dtc_b               = 0.55f;
+    g_runtime_motor.foc_calc.dtc_c               = 0.65f;
+    g_runtime_motor.foc_calc.sector              = 4U;
     g_runtime_motor.enc_pri.config               = &enc_cfg;
     g_runtime_motor.enc_pri.state.calib_valid    = true;
     g_runtime_motor.enc_pri.state.angle_mech_rad = 0.456f;
@@ -334,6 +360,77 @@ static void test_fault_snapshot_unavailable_reports_error(void)
     TEST_ASSERT(reserved_bytes <= SHELL_TX_RING_SIZE);
 }
 
+static void test_fault_status_without_context_is_complete(void)
+{
+    size_t reserved_bytes;
+
+    test_env_reset();
+    g_runtime_motor.fault_code = 0U;
+    shell_process_line("fault status", (uint16_t)strlen("fault status"));
+
+    TEST_ASSERT(strstr(g_output, "cmd=status result=ok active=0 mask=0x00000000") != NULL);
+    TEST_ASSERT(strstr(g_output, "name=none") != NULL);
+    TEST_ASSERT(strstr(g_output, "valid=0") != NULL);
+    TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
+
+    reserved_bytes = g_print_payload_total + (2U * g_print_frame_count) + g_prompt_payload;
+    TEST_ASSERT(reserved_bytes <= SHELL_TX_RING_SIZE);
+}
+
+static void test_fault_context_status_fits_burst_budget(void)
+{
+    struct motor_fault_context context;
+    size_t                     reserved_bytes;
+
+    memset(&context, 0, sizeof(context));
+    context.sequence    = 7U;
+    context.fault_code  = FAULT_OVER_CURR;
+    context.axis_state  = (uint8_t)AXIS_STATE_RUNNING;
+    context.ctrl_mode   = (uint8_t)CTRL_MODE_VOLT;
+    context.sector      = 4U;
+    context.ia_raw      = 2100.0f;
+    context.ib_raw      = 2200.0f;
+    context.ic_raw      = 2300.0f;
+    context.v_bus_raw   = 3000.0f;
+    context.ia          = 0.21f;
+    context.ib          = -0.03f;
+    context.ic          = 0.02f;
+    context.v_bus       = 12.0f;
+    context.theta_sim   = 2.0f;
+    context.theta_elec  = 1.0f;
+    context.we_volt_now = 3.0f;
+    context.we_volt_ramp = 4.0f;
+    context.vd          = 0.1f;
+    context.vq          = 0.2f;
+    context.v_alpha     = 0.3f;
+    context.v_beta      = 0.4f;
+    context.dtc_a       = 0.45f;
+    context.dtc_b       = 0.55f;
+    context.dtc_c       = 0.65f;
+
+    test_env_reset();
+    host_runtime_stub_set_fault_context(&context, true);
+    shell_process_line("fault status", (uint16_t)strlen("fault status"));
+
+    TEST_ASSERT(strstr(g_output, "seq=7") != NULL);
+    TEST_ASSERT(strstr(g_output, "raw=2100/2200/2300") != NULL);
+    TEST_ASSERT(strstr(g_output, "d=0.45/0.55/0.65") != NULL);
+    reserved_bytes = g_print_payload_total + (2U * g_print_frame_count) + g_prompt_payload;
+    TEST_ASSERT(reserved_bytes <= SHELL_TX_RING_SIZE);
+}
+
+static void test_obs_all_includes_openloop_context(void)
+{
+    test_env_reset();
+    shell_process_line("obs all", (uint16_t)strlen("obs all"));
+
+    TEST_ASSERT(strstr(g_output, "raw=1001/1002/1003") != NULL);
+    TEST_ASSERT(strstr(g_output, "off=1000/1000/1000") != NULL);
+    TEST_ASSERT(strstr(g_output, "theta=2.22/2.47") != NULL);
+    TEST_ASSERT(strstr(g_output, "duty=0.45/0.55/0.65") != NULL);
+    TEST_ASSERT(strstr(g_output, SHELL_PROMPT) != NULL);
+}
+
 static void test_sys_status_uses_expanded_shell_counters(void)
 {
     size_t reserved_bytes;
@@ -383,6 +480,9 @@ int main(void)
     test_obs_snapshot_unavailable_reports_error();
     test_state_snapshot_unavailable_reports_error();
     test_fault_snapshot_unavailable_reports_error();
+    test_fault_status_without_context_is_complete();
+    test_fault_context_status_fits_burst_budget();
+    test_obs_all_includes_openloop_context();
     test_sys_status_uses_expanded_shell_counters();
 
     puts("[test_app_shell_burst_contract] passed");

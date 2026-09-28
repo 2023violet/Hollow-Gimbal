@@ -7,6 +7,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+#include <string.h>
 
 #include "app_shell_common.h"
 
@@ -59,10 +61,22 @@ static void test_parse_rejects_non_decimal_or_garbage_forms(void)
     TEST_ASSERT(app_shell_parse_float_arg("0x1.8", &value) != 0);
 }
 
+static void test_format_rejects_non_finite_values(void)
+{
+    char buffer[16];
+
+    TEST_ASSERT(app_shell_format_float_or_dash(buffer, sizeof(buffer), NAN, 3U) != NULL);
+    TEST_ASSERT(strcmp(buffer, "-") == 0);
+
+    TEST_ASSERT(app_shell_format_float_or_dash(buffer, sizeof(buffer), INFINITY, 3U) != NULL);
+    TEST_ASSERT(strcmp(buffer, "-") == 0);
+}
+
 int main(void)
 {
     test_parse_accepts_decimal_surface();
     test_parse_rejects_non_decimal_or_garbage_forms();
+    test_format_rejects_non_finite_values();
 
     puts("[test_app_shell_common_contract] passed");
     return 0;

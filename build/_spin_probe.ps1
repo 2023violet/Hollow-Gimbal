@@ -12,6 +12,7 @@ param(
     [string]$StartCmd = "state start",
     [string]$MidCmd = "",
     [int]$MidCmdAtSec = 0,
+    [int]$LeadInSec = 0,
     [string]$PortName = "COM3",
     [int]$BaudRate = 115200
 )
@@ -59,7 +60,13 @@ try {
     }
 
     if ($StartCmd -ne "") {
-        Write-Output "--- TX: $StartCmd"
+        if ($LeadInSec -gt 0) {
+            Write-Output ""
+            Write-Output (">>> {0}s 后加驱，退开表笔和手指 <<<" -f $LeadInSec)
+            Start-Sleep -Seconds $LeadInSec
+        }
+        [Console]::Beep(880, 900)
+        Write-Output "--- TX: $StartCmd  *** DRIVE ON ***"
         Write-Output (Send-Cmd $Sp $StartCmd)
     }
 

@@ -3,6 +3,7 @@
  * @brief   Host contract tests for calibration runtime owner seams
  */
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,9 +50,39 @@ static void test_refresh_and_gain_helpers_accept_motor(void)
     TEST_ASSERT(motor.ctrl_config.pos_pid.config.kp > 0.0f);
 }
 
+static void test_current_gain_helper_accepts_null(void)
+{
+    foc_curr_gain_calc(NULL);
+}
+
+static void test_current_gain_helper_falls_back_for_invalid_bandwidth(void)
+{
+    const float invalid_values[] = {0.0f, -1.0f, NAN, INFINITY};
+    const float expected_iq_kp = DEFAULT_LS * FOC_HZ_TO_RADS(DEFAULT_CURR_BW_HZ);
+    const float expected_id_kp = expected_iq_kp * DEFAULT_D_AXIS_BW_RATIO;
+
+    for (size_t i = 0U; i < sizeof(invalid_values) / sizeof(invalid_values[0]); ++i) {
+        struct motor_dev motor;
+
+        memset(&motor, 0, sizeof(motor));
+        motor.hw_config.ls = DEFAULT_LS;
+        motor.hw_config.rs = DEFAULT_RS;
+        motor.ctrl_config.curr_bandwidth = invalid_values[i];
+
+        foc_curr_gain_calc(&motor);
+
+        TEST_ASSERT(fabsf(motor.ctrl_config.iq_pid.config.kp - expected_iq_kp) < 1.0e-6f);
+        TEST_ASSERT(fabsf(motor.ctrl_config.id_pid.config.kp - expected_id_kp) < 1.0e-6f);
+        TEST_ASSERT(isfinite(motor.ctrl_config.iq_pid.config.ki));
+        TEST_ASSERT(isfinite(motor.ctrl_config.id_pid.config.ki));
+    }
+}
+
 int main(void)
 {
     test_refresh_and_gain_helpers_accept_motor();
+    test_current_gain_helper_accepts_null();
+    test_current_gain_helper_falls_back_for_invalid_bandwidth();
     puts("[test_motor_calibration_runtime_contract] passed");
     return 0;
 }

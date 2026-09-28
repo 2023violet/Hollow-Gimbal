@@ -14,6 +14,9 @@
 #include "pll_enc.h"
 #include "foc_config.h"
 #include "wk_gpio.h"
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+#include "encoder_bench_trace.h"
+#endif
 #if ENCODER_SPI_DMA_ENABLE
 #include "wk_dma.h"
 #endif

@@ -98,7 +98,8 @@ enum motor_fsm_event {
  * @brief  Initialize the motor axis FSM.
  *
  * Wires motor->axis_fsm to the static state/transition tables and fires the
- * IDLE enter-callback (resets PIDs, enables PWM at 0 % duty).
+ * IDLE enter-callback.  Product firmware enables the 0 % duty active clamp;
+ * bench firmware keeps PWM disabled until EV_CMD_START is accepted.
  *
  * Must be called once after all motor structures are fully initialised.
  *

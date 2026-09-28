@@ -17,9 +17,15 @@
 #include "foc_calib_enc.h"
 #include "foc_ctrl.h"
 #include "motor_calibration_runtime.h"
+#if defined(THEMIS_HOST_TEST)
+#include "../../tests/host/support/motor_drv.h"
+#else
 #include "motor_drv.h"
+#endif
 #include "core_time.h"
 #include "stat_welford.h"
+
+#include <math.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +36,48 @@ static void foc_calib_rs(struct motor_dev *motor);
 static void foc_calib_ls(struct motor_dev *motor);
 static void foc_calib_flux(struct motor_dev *motor);
 static void foc_calib_js(struct motor_dev *motor);
+
+static bool foc_calib_stat_valid(const struct stat_welford *stat)
+{
+    float mean;
+    float stddev;
+
+    if (!stat_welford_ready(stat, CALIB_CURR_MIN_SAMPLES)) {
+        return false;
+    }
+
+    mean  = stat_welford_mean(stat);
+    stddev = stat_welford_stddev(stat);
+
+    return isfinite(mean) && isfinite(stddev) &&
+           (mean >= CALIB_CURR_RAW_MIN) && (mean <= CALIB_CURR_RAW_MAX) &&
+           (stddev <= CALIB_CURR_MAX_STDDEV);
+}
+
+static bool foc_calib_phase_span_valid(const struct stat_welford *stat_a,
+                                       const struct stat_welford *stat_b,
+                                       const struct stat_welford *stat_c)
+{
+    float min_mean = stat_welford_mean(stat_a);
+    float max_mean = min_mean;
+    float mean_b = stat_welford_mean(stat_b);
+    float mean_c = stat_welford_mean(stat_c);
+
+    if (mean_b < min_mean) {
+        min_mean = mean_b;
+    }
+    if (mean_c < min_mean) {
+        min_mean = mean_c;
+    }
+    if (mean_b > max_mean) {
+        max_mean = mean_b;
+    }
+    if (mean_c > max_mean) {
+        max_mean = mean_c;
+    }
+
+    return (max_mean - min_mean) <= CALIB_CURR_MAX_SPAN;
+}
 
 /* Public Functions ----------------------------------------------------------------------------- */
 
@@ -82,35 +130,100 @@ void foc_calib_loop(struct motor_dev *motor)
  */
 void foc_calib_curr(struct motor_dev *motor)
 {
-    // struct stat_welford stat_a;
+    struct stat_welford stat_a;
     struct stat_welford stat_b;
     struct stat_welford stat_c;
+    bool                 samples_valid = true;
+    uint32_t             previous_sample_seq;
 
-    // stat_welford_init(&stat_a);
+    if (motor == NULL) {
+        return;
+    }
+
+    stat_welford_init(&stat_a);
     stat_welford_init(&stat_b);
     stat_welford_init(&stat_c);
+    motor->meas_data.adc_calib_sample_count = 0U;
+    motor->meas_data.adc_calib_fresh_count = 0U;
+    motor->meas_data.adc_calib_ia_stddev = 0.0f;
+    motor->meas_data.adc_calib_ib_stddev = 0.0f;
+    motor->meas_data.adc_calib_ic_stddev = 0.0f;
+    motor->meas_data.adc_calib_valid = false;
+    motor->meas_data.adc_calib_clamp_used = false;
+
+    /* The DRV8311H SOx outputs are valid only while their low-side SenseFET
+     * path is biased. Discharge first, then restore the zero-duty complementary
+     * low-side clamp before sampling; sampling with all outputs disabled can
+     * average three stable but invalid CSA voltages. */
+    pwm_out_disable();
+    core_time_delay_ms(CALIB_CURR_DISCHARGE_MS);
+    pwm_out_enable();
+    motor->meas_data.adc_calib_clamp_used = true;
+    core_time_delay_ms(CALIB_CURR_SETTLE_MS);
+    previous_sample_seq = motor->meas_data.injected_sample_seq;
 
     for (uint16_t i = 0; i < CALIB_CURR_DUR; i++) {
         core_time_delay_us(1000);
 
-        stat_welford_push(&stat_c, (float)motor->meas_data.ic_raw);
-        stat_welford_push(&stat_b, (float)motor->meas_data.ib_raw);
-        // stat_welford_push(&stat_a, (float)motor->meas_data.ia_raw);
+        if (motor->meas_data.injected_sample_seq == previous_sample_seq) {
+            samples_valid = false;
+            break;
+        }
+        previous_sample_seq = motor->meas_data.injected_sample_seq;
+        motor->meas_data.adc_calib_fresh_count++;
+        motor->meas_data.adc_calib_sample_count++;
+
+        if (stat_welford_push(&stat_c, (float)motor->meas_data.ic_raw) != 0) {
+            samples_valid = false;
+        }
+        if (stat_welford_push(&stat_b, (float)motor->meas_data.ib_raw) != 0) {
+            samples_valid = false;
+        }
+        if (stat_welford_push(&stat_a, (float)motor->meas_data.ia_raw) != 0) {
+            samples_valid = false;
+        }
+    }
+
+    if (stat_welford_ready(&stat_a, 2U) && stat_welford_ready(&stat_b, 2U) &&
+        stat_welford_ready(&stat_c, 2U)) {
+        motor->meas_data.adc_calib_ia_stddev = stat_welford_stddev(&stat_a);
+        motor->meas_data.adc_calib_ib_stddev = stat_welford_stddev(&stat_b);
+        motor->meas_data.adc_calib_ic_stddev = stat_welford_stddev(&stat_c);
+    }
+
+    if (!samples_valid || !foc_calib_stat_valid(&stat_a) ||
+        !foc_calib_stat_valid(&stat_b) || !foc_calib_stat_valid(&stat_c) ||
+        !foc_calib_phase_span_valid(&stat_a, &stat_b, &stat_c)) {
+        motor->fault_code |= FAULT_CALIBRATION_FAILED;
+        pwm_out_disable();
+        return;
     }
 
     switch (motor->hw_config.phase_order) {
     case PHASE_ORDER_ABC:
         motor->meas_data.ic_offset = stat_welford_mean(&stat_c);
         motor->meas_data.ib_offset = stat_welford_mean(&stat_b);
-        // motor->meas_data.ia_offset = stat_welford_mean(&stat_a);
+        motor->meas_data.ia_offset = stat_welford_mean(&stat_a);
         break;
     case PHASE_ORDER_ACB:
         motor->meas_data.ic_offset = stat_welford_mean(&stat_b);
         motor->meas_data.ib_offset = stat_welford_mean(&stat_c);
-        // motor->meas_data.ia_offset = stat_welford_mean(&stat_a);
+        motor->meas_data.ia_offset = stat_welford_mean(&stat_a);
         break;
+    default:
+        motor->fault_code |= FAULT_CALIBRATION_FAILED;
+        pwm_out_disable();
+        return;
     }
 
+    motor->meas_data.adc_calib_valid = true;
+
+    /* The zero-duty low-side clamp was enabled before sampling. A fault raised
+     * during the sampling window must turn it back off. */
+    if (motor->fault_code != FAULT_NONE) {
+        pwm_out_disable();
+        return;
+    }
     motor_calibration_runtime_after_current_offsets(motor);
 }
 
@@ -336,17 +449,10 @@ static void foc_calib_ls(struct motor_dev *motor)
     case LS_CALC: {
         float dt_total = DEFAULT_LS_TS * DEFAULT_LS_CYCLE;
 
-#if 0
-        float dId_by_dt_plus  = ids[0] / dt_total;
-        float dId_by_dt_minus = ids[1] / dt_total;
-        float dIq_by_dt_plus  = iqs[0] / dt_total;
-        float dIq_by_dt_minus = iqs[1] / dt_total;
-#else
         float dId_by_dt_plus = ids[1] / dt_total;
         float dId_by_dt_minus = ids[0] / dt_total;
         float dIq_by_dt_plus = iqs[1] / dt_total;
         float dIq_by_dt_minus = iqs[0] / dt_total;
-#endif
 
         float Ld_plus =
             (DEFAULT_VD_PLUS - motor->hw_config.rs * ids[1] * DEFAULT_LS_TS) / dId_by_dt_plus;
@@ -394,10 +500,9 @@ static void foc_calib_ls(struct motor_dev *motor)
  *         Using Vq (not the voltage amplitude |Vs|) avoids cross-axis
  *         coupling from the Vd component.
  *
- *         Speed constraints (Vbus = 24 V, ��m �� 0.057 Wb):
- *           ��e_base = Vbus / ��m �� 420 rad/s  (field-weakening onset)
- *           CALIB_FLUX_WE_HIGH must stay below this limit; 350 rad/s
- *           provides a 17 % safety margin.
+ *         Speed constraints (2804 motor, Vbus = 12 V, λm ≈ 0.0035 Wb):
+ *           ωe_base ≈ Vbus / λm ≈ 3428 rad/s  (field-weakening onset)
+ *           CALIB_FLUX_WE_HIGH = 1000 rad/s stays well below this limit.
  *
  * @param  motor  Motor instance pointer
  */

@@ -21,6 +21,8 @@
 #include "motor_fsm.h"
 #include "traj_trap.h"
 
+#include <math.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -71,16 +73,26 @@ void foc_calib_runtime_refresh(struct motor_dev *motor)
         return;
     }
 
+    /* Rebind bandwidth-derived current-loop PI gains so paths that rely on
+     * the inner loop (I-f open-loop spin, closed-current mode) work from a
+     * fresh boot without requiring a prior `cal motor ls` run. */
+    foc_curr_gain_calc(motor);
+
     _motor_calibration_update_constants(motor);
 }
 
 void foc_curr_gain_calc(struct motor_dev *motor)
 {
     float kp, ki_cont;
-    float bandwidth_hz = motor->ctrl_config.curr_bandwidth;
+    float bandwidth_hz;
 
     if (motor == NULL) {
         return;
+    }
+
+    bandwidth_hz = motor->ctrl_config.curr_bandwidth;
+    if ((!isfinite(bandwidth_hz)) || (bandwidth_hz <= 0.0f)) {
+        bandwidth_hz = DEFAULT_CURR_BW_HZ;
     }
 
     float Lq = motor->hw_config.l_q > 1e-6f ? motor->hw_config.l_q : motor->hw_config.ls;

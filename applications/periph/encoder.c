@@ -35,8 +35,9 @@
 /** PWM switching period (seconds), e.g. 50e-6 at 20 kHz */
 #define _PLL_TS           (PWM_DT)
 
-/** PLL / encoder update rate (Hz), e.g. 20000.0f */
-#define _PLL_SAMPLE_RATE  (PWM_FREQ)
+/** PLL / encoder update rate (Hz). encoder_update runs in the 5 kHz
+ *  motor soft-IRQ (TMR5), not the 20 kHz ADC ISR, on soft-float SoCs. */
+#define _PLL_SAMPLE_RATE  (VEL_LOOP_FREQ_HZ)
 
 /* Private functions ---------------------------------------------------------------------------- */
 
@@ -109,6 +110,26 @@ static bool _encoder_read_raw(struct encoder_dev *enc, uint16_t *data)
 
 #endif
 
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+static void _encoder_bench_trace_update(const struct encoder_dev *enc,
+                                        int32_t corrected_count,
+                                        uint8_t error_flags)
+{
+    struct encoder_bench_input input;
+
+    if (enc == NULL) {
+        return;
+    }
+
+    input.raw_word = enc->state.raw_value;
+    input.angle_mech_rad = enc->state.angle_mech_rad;
+    input.angle_elec_rad = enc->state.angle_elec_rad;
+    input.velocity_rads = enc->state.velocity_rads;
+    input.total_enc = enc->state.total_enc;
+    encoder_bench_trace_update(&input, corrected_count, error_flags);
+}
+#endif
+
 /* Public functions ----------------------------------------------------------------------------- */
 
 /**
@@ -129,6 +150,10 @@ void encoder_init(struct encoder_dev *enc, struct encoder_config *cfg)
     memset(&enc->state, 0, sizeof(struct encoder_pll_state));
     memset(enc->state.enc_table, 0, sizeof(enc->state.enc_table));
 
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+    encoder_bench_trace_clear();
+#endif
+
 #if ENCODER_SPI_DMA_ENABLE
     enc->dma_rx_buffer = 0x0000U;
     enc->dma_tx_buffer = 0x0000U;
@@ -137,6 +162,24 @@ void encoder_init(struct encoder_dev *enc, struct encoder_config *cfg)
 
     /* Ensure CS is de-asserted at power-on */
     gpio_bits_set(enc->config->cs_port, enc->config->cs_pin);
+
+    /* Force the CS pin to plain GPIO output.
+     *
+     * SPI1_GMUX_0001 maps PA15 as the SPI1 NSS (hardware) pin, which leaves it
+     * in mux mode; with software CS (SWCSEN=1) the NSS pin function is not
+     * needed, so we reconfigure it as a push-pull GPIO output so the encoder
+     * chip-select can actually be driven. */
+    {
+        gpio_init_type gpio_init_struct;
+        gpio_default_para_init(&gpio_init_struct);
+        gpio_init_struct.gpio_drive_strength = GPIO_DRIVE_STRENGTH_STRONGER;
+        gpio_init_struct.gpio_out_type = GPIO_OUTPUT_PUSH_PULL;
+        gpio_init_struct.gpio_mode = GPIO_MODE_OUTPUT;
+        gpio_init_struct.gpio_pins = enc->config->cs_pin;
+        gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
+        gpio_init(enc->config->cs_port, &gpio_init_struct);
+        gpio_bits_set(enc->config->cs_port, enc->config->cs_pin);
+    }
 
     /* ── Configure PLL ────────────────────────────────────────────────────
      * sample_rate_hz MUST be in Hz (e.g. 20000.0f = 20 kHz).
@@ -187,6 +230,9 @@ void encoder_update(struct encoder_dev *enc)
         enc->spi_error = true;
         gpio_bits_reset(enc->config->cs_port, enc->config->cs_pin);
         _encoder_dma_start(enc);
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+        _encoder_bench_trace_update(enc, -1, ENCODER_BENCH_TRACE_ERROR_SPI);
+#endif
         return;
     }
 #else
@@ -194,6 +240,9 @@ void encoder_update(struct encoder_dev *enc)
         enc->spi_error = false;
     } else {
         enc->spi_error = true;
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+        _encoder_bench_trace_update(enc, -1, ENCODER_BENCH_TRACE_ERROR_SPI);
+#endif
         return;
     }
 #endif
@@ -247,6 +296,9 @@ void encoder_update(struct encoder_dev *enc)
      * precomputed dt (= 1/sample_rate_hz), eliminating any possible time-base
      * mismatch between the PLL and its velocity LPF.                         */
     if (pll_enc_update(&enc->pll_enc_ins, cnt) != 0) {
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+        _encoder_bench_trace_update(enc, cnt, ENCODER_BENCH_TRACE_ERROR_PLL);
+#endif
 #if ENCODER_SPI_DMA_ENABLE
         gpio_bits_reset(enc->config->cs_port, enc->config->cs_pin);
         _encoder_dma_start(enc);
@@ -276,6 +328,10 @@ void encoder_update(struct encoder_dev *enc)
 
     enc->state.velocity_rads = pll_enc_get_velocity_rads(&enc->pll_enc_ins);
     enc->state.total_enc     = pll_enc_get_total_enc(&enc->pll_enc_ins);
+
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+    _encoder_bench_trace_update(enc, cnt, 0U);
+#endif
 
 #if ENCODER_SPI_DMA_ENABLE
     gpio_bits_reset(enc->config->cs_port, enc->config->cs_pin);

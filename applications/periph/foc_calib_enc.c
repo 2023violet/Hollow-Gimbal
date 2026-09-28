@@ -101,7 +101,10 @@ void foc_calib_enc(struct motor_dev *motor)
     ctx->raw     = motor->enc_pri.state.raw_value;
     ctx->bit     = ENCODER_BITS;
 
-    foc_ctrl_volt(motor, ctx->vd_ref, 0.0f, ctx->pe_set);
+    /* I-f drag: closed-loop current amplitude following the planned
+     * electrical angle. Voltage drag hunted badly on this low-friction
+     * rotor and polluted the LUT/offset samples. */
+    foc_ctrl_curr(motor, 0.0f, CALIB_ENC_IF_IQ, ctx->pe_set);
 
     switch (motor->calib_state.enc_state) {
     case ENC_IDLE:
@@ -178,44 +181,55 @@ static void _state_pp_start(struct motor_dev *motor, struct foc_enc_calib_ctx *c
     memset(ctx->lut, 0, sizeof(ctx->lut)); /* Critical Clear */
 
     if (++ctx->cnt_i < CALIB_ALIGN_DURATION) {
-        ctx->vd_ref = CALIB_VOLTAGE;
-        ctx->pe_set = 0.0f;
-        ctx->pe_acc = CALIB_ACCEL;
+        ctx->vd_ref    = CALIB_VOLTAGE;
+        ctx->pe_set    = 0.0f;
+        ctx->pe_acc    = CALIB_ACCEL;
         ctx->pos_start = ctx->pos;
         motor->enc_pri.config->dir = DIR_CCW;
+
+        /* Sweep target: one FULL mechanical revolution worth of electrical
+         * angle (poles * 2*pi). The previous port capped the sweep at 2*pi,
+         * which forced pn = 1 regardless of the real machine. */
+        ctx->pn = (uint8_t)motor->enc_pri.config->pole_pairs;
+        if (ctx->pn == 0U) {
+            ctx->pn = 1U;
+        }
     } else {
-        if (ctx->pe_set < FOC_2PI) {
+        float pe_target = (float)ctx->pn * FOC_2PI;
+
+        if (ctx->pe_set < pe_target) {
             ctx->pe_set += ctx->pe_acc;
-            if (ctx->pe_set > FOC_2PI) {
-                ctx->pe_set = FOC_2PI;
+            if (ctx->pe_set > pe_target) {
+                ctx->pe_set = pe_target;
             }
         }
 
-        if (ctx->pe_set > CALIB_CHECK_ANGLE_MIN) {
-            if (ctx->pe_set < CALIB_CHECK_ANGLE_MAX) {
-                ctx->pos_dir_end = ctx->pos;
-            }
+        /* Direction witness window: mid-sweep, well away from both ends */
+        if ((ctx->pe_set > pe_target * 0.45f) && (ctx->pe_set < pe_target * 0.55f)) {
+            ctx->pos_dir_end = ctx->pos;
+        }
 
-            if (fabsf(foc_wrap_pm_pi(ctx->pos_start - ctx->pos)) < CALIB_CHECK_POS_TH ||
-                (ctx->pe_set >= FOC_2PI && (ctx->cnt_i > CALIB_ALIGN_DURATION + 2000U))) {
-                motor->calib_state.enc_state = ENC_PP_CALC;
-            }
+        if ((ctx->pe_set >= pe_target) &&
+            (fabsf(foc_wrap_pm_pi(ctx->pos_start - ctx->pos)) < CALIB_CHECK_POS_TH)) {
+            motor->calib_state.enc_state = ENC_PP_CALC;
+        }
+
+        /* Settle timeout: sweep duration (~22k steps for 7 pp) plus hold */
+        if (ctx->cnt_i > (CALIB_ALIGN_DURATION + (uint32_t)ctx->pn * 20000U + 20000U)) {
+            motor->calib_state.enc_state = ENC_PP_CALC;
         }
     }
 }
 
 static void _state_pp_calc(struct motor_dev *motor, struct foc_enc_calib_ctx *ctx)
 {
-    int32_t pole_pairs = foc_round_i32(ctx->pe_set / FOC_2PI);
+    uint8_t pole_pairs = ctx->pn;
 
-    if (pole_pairs <= 0) {
-        pole_pairs = 1;
-    } else if (pole_pairs > UINT8_MAX) {
-        pole_pairs = UINT8_MAX;
+    if (pole_pairs == 0U) {
+        pole_pairs = 1U;
     }
 
-    ctx->pn = (uint8_t)pole_pairs;
-    motor->enc_pri.config->pole_pairs = ctx->pn;
+    motor->enc_pri.config->pole_pairs = pole_pairs;
     float pos_dif                     = ctx->pos_dir_end - ctx->pos_start;
     pos_dif                           = foc_wrap_pm_pi(pos_dif);
 #if 1

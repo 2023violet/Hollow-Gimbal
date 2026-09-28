@@ -41,6 +41,8 @@
  */
 
 /* Includes ------------------------------------------------------------------------------------- */
+#include "config/tm_core_config.h"
+
 #if defined(THEMIS_HOST_TEST)
 #include "../../tests/host/support/motor_fsm.h"
 #include "../../tests/host/support/motor_task.h"
@@ -286,7 +288,12 @@ static void _on_idle_enter(void *user_data)
     }
 
     /* Enable PWM at 0% ！ active low-side clamp (safe idle) */
+#if (TM_BENCH_DIAG != 0U)
+    /* Bench bring-up: IDLE must not energize the bridge. */
+    pwm_out_disable();
+#else
     pwm_out_enable();
+#endif
 }
 
 /**
@@ -322,6 +329,11 @@ static void _on_running_enter(void *user_data)
 
     motor->axis_state = AXIS_STATE_RUNNING;
 
+#if (TM_BENCH_DIAG != 0U)
+    /* Bench bring-up enables the bridge only after START is accepted. */
+    pwm_out_enable();
+#endif
+
     if (motor->ctrl_mode == CTRL_MODE_POS) {
         motor->ctrl_state.pos_set    = motor->meas_data.out_pos_rad;
         motor->ctrl_state.target_pos = motor->meas_data.out_pos_rad;
@@ -347,6 +359,12 @@ static void _on_running_enter(void *user_data)
 static void _on_fault_enter(void *user_data)
 {
     struct motor_dev *motor = (struct motor_dev *)user_data;
+#if (TM_BENCH_DIAG != 0U)
+    /* Keep motion telemetry available after a controlled bench stop. */
+    float theta_sim    = motor->ctrl_state.theta_sim;
+    float we_volt_now  = motor->ctrl_state.we_volt_now;
+    float we_volt_ramp = motor->ctrl_state.we_volt_ramp;
+#endif
 
     /* Step 1: sync axis_state ！ ISR sees FAULT immediately */
     motor->axis_state = AXIS_STATE_FAULT;
@@ -356,9 +374,16 @@ static void _on_fault_enter(void *user_data)
 
     /* Step 3: reset PIDs and zero all setpoints */
     motor_calib_prepare_entry(motor);
+#if (TM_BENCH_DIAG != 0U)
+    /* The bridge is already disabled; restore read-only motion telemetry. */
+    motor->ctrl_state.theta_sim    = theta_sim;
+    motor->ctrl_state.we_volt_now  = we_volt_now;
+    motor->ctrl_state.we_volt_ramp = we_volt_ramp;
 
+#endif
     /* Step 4: zero all live FOC variables ！ no stale duty cycle output */
-    memset(&motor->foc_calc, 0, sizeof(struct foc_vars));
+    /* Keep the last FOC values for post-stop diagnostics.  axis_state is */
+    /* already FAULT and PWM is disabled, so no stale duty can be applied. */
 }
 
 /* Private callback implementations ！ action callbacks ------------------------------------------ */
@@ -393,6 +418,10 @@ static bool _action_start(void *user_data)
  */
 static bool _action_calib_motor(void *user_data)
 {
+#if (FOC_ENERGIZED_CALIB_ENABLE == 0U)
+    (void)user_data;
+    return false;
+#else
     struct motor_dev *motor = (struct motor_dev *)user_data;
 
     motor_calib_prepare_entry(motor);
@@ -404,6 +433,7 @@ static bool _action_calib_motor(void *user_data)
     motor->axis_state = AXIS_STATE_CALIB;
 
     return true;
+#endif
 }
 
 /**
@@ -415,6 +445,10 @@ static bool _action_calib_motor(void *user_data)
  */
 static bool _action_calib_enc(void *user_data)
 {
+#if (FOC_ENERGIZED_CALIB_ENABLE == 0U)
+    (void)user_data;
+    return false;
+#else
     struct motor_dev *motor = (struct motor_dev *)user_data;
 
     motor_calib_prepare_entry(motor);
@@ -434,6 +468,7 @@ static bool _action_calib_enc(void *user_data)
     motor->axis_state = AXIS_STATE_CALIB;
 
     return true;
+#endif
 }
 
 /**
@@ -463,6 +498,15 @@ static bool _action_calib_abort(void *user_data)
      * one more step and re-arm a calib sub-state that we just cleared.
      */
     motor->axis_state = AXIS_STATE_IDLE;
+
+    /* Clear every calibration sub-state before the FSM enters IDLE. The
+     * encoder abort path restores the committed payload below, but payload
+     * restoration does not reset the in-progress calibration state machine. */
+    motor->calib_state.rs_state   = RS_IDLE;
+    motor->calib_state.ls_state   = LS_IDLE;
+    motor->calib_state.flux_state = FX_IDLE;
+    motor->calib_state.js_state   = JS_IDLE;
+    motor->calib_state.enc_state  = ENC_IDLE;
 
     if (restore_last_committed_enc) {
         int st = motor_calibration_runtime_restore_encoder_after_abort(motor);

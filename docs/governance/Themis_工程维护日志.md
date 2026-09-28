@@ -2323,3 +2323,19 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
   AGENTS/README 的 DAP-Link 事实均已在场并实测可达；`./run.sh build` PASS，host CTest 45/45 PASS。
 - `[新发现]` 仓库无 `.gitignore`，`build/` 下 281 个产物（含 obj/su/ninja 日志与 5 个探针脚本）
   被 git 跟踪；工作树含 155 项未提交的源码/测试/脚本/文档改动。提交分组与忽略策略待用户决定。
+
+## 2026-09-28 接手落地：分组提交与构建产物脱管
+
+- `[决定]` 用户确认两项处置：按逻辑分组提交保存工作；加入忽略规则并把 `build/` 移出索引。
+- `[git]` 新增 `.gitignore`：`/build/*`（带 `!build/_*.ps1` 例外，5 个台面探针脚本保持跟踪）、
+  `build-rel/`、`Testing/`、`tmp/`（台面证据留在本地）、`.superpowers/`、`.zcode/`、
+  以及误生成的 `state show` 文件；`git rm -r --cached build` 脱管 281 个产物，本地文件未删。
+- `[提交]` 未提交工作按主责分 8 组落到本地 main：忽略规则、采样链（CCR4=3740 波峰采样 +
+  CC4 软件触发 + deadtime=0，含 `work/project` WorkBench 侧同步）、控制（duty 钳位 + VVEL
+  + VOFA/串口策略）、标定与 bench 设施（LUT 标定 + 映射 + 板上记录 + 看门狗）、补入遗漏
+  契约用例、台面 runner 与门禁、文档收尾、板级参考件入库（`docs/pcb docs`，含 AVDD 判决
+  所依据的网表）。`git status` 现为空，**未 push**。
+- `[限制]` 分组按文件主责归类，同一文件含多主题时未做逐 hunk 切分（如 `motor_drv.c`
+  同时带 bench 映射与 VVEL 分支），故中间提交不保证各自可编译；HEAD 整体状态另行复验。
+- `[待决]` 提交信息中 `THEMIS_BENCH_FORCE_ENCALIB` 为笔误，实际开关名
+  `THEMIS_BENCH_FORCE_ENERGIZED_CALIB`；因该提交未推送，是否改写待用户定。

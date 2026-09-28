@@ -1,7 +1,0 @@
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:57:6:pll_enc_init	24	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:99:5:pll_enc_update	64	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:221:7:pll_enc_get_velocity_rads	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:232:7:pll_enc_get_angle_mech_rad	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:250:7:pll_enc_get_angle_elec_rad	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:261:7:pll_enc_get_total_enc	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/pll_enc.c:269:6:pll_enc_set_bandwidth	16	static

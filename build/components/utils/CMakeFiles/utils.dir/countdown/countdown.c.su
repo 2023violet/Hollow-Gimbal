@@ -1,4 +1,0 @@
-D:/study/Software/Hollow-Gimbal/components/utils/countdown/countdown.c:11:5:countdown_init	0	static
-D:/study/Software/Hollow-Gimbal/components/utils/countdown/countdown.c:22:5:countdown_start	0	static
-D:/study/Software/Hollow-Gimbal/components/utils/countdown/countdown.c:33:6:countdown_stop	0	static
-D:/study/Software/Hollow-Gimbal/components/utils/countdown/countdown.c:43:6:countdown_tick	8	static

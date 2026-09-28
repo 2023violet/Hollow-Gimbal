@@ -1,5 +1,0 @@
-D:/study/Software/Hollow-Gimbal/components/utils/stat_welford/stat_welford.c:25:5:stat_welford_init	0	static
-D:/study/Software/Hollow-Gimbal/components/utils/stat_welford/stat_welford.c:38:5:stat_welford_push	24	static
-D:/study/Software/Hollow-Gimbal/components/utils/stat_welford/stat_welford.c:75:7:stat_welford_mean	0	static
-D:/study/Software/Hollow-Gimbal/components/utils/stat_welford/stat_welford.c:84:7:stat_welford_var	8	static
-D:/study/Software/Hollow-Gimbal/components/utils/stat_welford/stat_welford.c:107:7:stat_welford_stddev	8	static

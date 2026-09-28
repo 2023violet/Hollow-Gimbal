@@ -1,9 +1,0 @@
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:55:13:_integrate_const_jerk	40	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:159:13:_build_boundaries	88	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:86:13:_build_speed_transition	72	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:140:14:_distance_for_peak_velocity	64	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:211:5:traj_scurve_init	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:222:5:traj_scurve_config_set	16	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:237:5:traj_scurve_plan	176	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:355:5:traj_scurve_eval	48	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_scurve.c:403:5:traj_scurve_step_update	16	static

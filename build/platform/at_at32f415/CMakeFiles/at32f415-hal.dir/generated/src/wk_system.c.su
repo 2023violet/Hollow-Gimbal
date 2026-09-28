@@ -1,3 +1,0 @@
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_system.c:41:13:wk_delay_us	0	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_system.c:60:13:wk_delay_ms	8	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/wk_system.c:82:13:wk_timebase_init	40	static

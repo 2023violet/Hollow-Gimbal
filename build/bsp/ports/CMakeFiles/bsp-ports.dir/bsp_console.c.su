@@ -1,8 +1,0 @@
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:165:13:_bsp_console_buffer_args_are_valid	0	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:170:13:_bsp_console_thread_mode_is_valid	8	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:53:5:bsp_console_shell_rx_start	16	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:73:10:bsp_console_shell_rx_position	0	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:87:6:bsp_console_shell_irq_ack_idle	8	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:94:6:bsp_console_shell_irq_idle_pending	8	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:103:5:bsp_console_write_poll	32	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_console.c:141:5:bsp_console_write_dma	16	static

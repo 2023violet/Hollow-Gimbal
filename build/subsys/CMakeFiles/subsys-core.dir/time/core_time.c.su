@@ -1,5 +1,0 @@
-D:/study/Software/Hollow-Gimbal/subsys/time/core_time.c:50:13:_core_time_delay_ticks	0	static
-D:/study/Software/Hollow-Gimbal/subsys/time/core_time.c:84:5:core_time_init	0	static
-D:/study/Software/Hollow-Gimbal/subsys/time/core_time.c:123:6:core_time_delay_us	8	static
-D:/study/Software/Hollow-Gimbal/subsys/time/core_time.c:132:6:core_time_delay_ms	16	static
-D:/study/Software/Hollow-Gimbal/subsys/time/core_time.c:161:7:core_time_perf_get_us	16	static

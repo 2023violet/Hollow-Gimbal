@@ -1,4 +1,0 @@
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/cmsis/cm4/core_support/core_cm4.h:1861:26:NVIC_EncodePriority	4	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/at32f415_wk_config.c:87:6:wk_system_clock_config	8	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/at32f415_wk_config.c:154:6:wk_periph_clock_config	8	static
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/generated/src/at32f415_wk_config.c:195:6:wk_nvic_config	8	static

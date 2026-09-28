@@ -1,0 +1,35 @@
+# --- Build outputs ---
+# `/build/*` (not `build/`) so the bench probe scripts can stay tracked below.
+/build/*
+!/build/_*.ps1
+build-rel/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+*.o
+*.obj
+*.a
+*.su
+*.i
+*.s
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+
+# --- Verification scratch ---
+Testing/
+
+# --- Bench evidence: kept on the workbench, referenced by name in docs ---
+tmp/
+
+# --- Assistant / editor scratch ---
+.superpowers/
+.zcode/
+state show
+.DS_Store
+Thumbs.db
+*.user

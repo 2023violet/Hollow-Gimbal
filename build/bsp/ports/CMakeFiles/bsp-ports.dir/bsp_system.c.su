@@ -1,3 +1,0 @@
-D:/study/Software/Hollow-Gimbal/platform/at/at32f415/vendor/cmsis/cm4/core_support/core_cm4.h:1938:34:__NVIC_SystemReset	0	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_system.c:55:12:_bsp_system_reset_context_is_valid	8	static
-D:/study/Software/Hollow-Gimbal/bsp/ports/bsp_system.c:38:5:bsp_system_reset	8	static

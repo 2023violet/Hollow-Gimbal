@@ -1,7 +1,0 @@
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:25:13:_motion_runtime_reset_soft_limits	0	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:35:6:foc_process_input_task	24	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:102:6:foc_cmd_passthrough	24	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:137:6:foc_cmd_vel_ramp	24	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:152:6:foc_cmd_torque_ramp	32	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:170:6:foc_cmd_pos_traj	48	static
-D:/study/Software/Hollow-Gimbal/applications/runtime/foc_motion_runtime.c:215:6:foc_cmd_voltage_set	0	static

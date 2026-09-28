@@ -1,5 +1,0 @@
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c:69:5:traj_trap_init	8	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c:82:5:traj_trap_config_set	16	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c:212:5:traj_trap_eval	24	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c:130:5:traj_trap_plan	56	static
-D:/study/Software/Hollow-Gimbal/applications/algo/traj_trap.c:260:5:traj_trap_step_update	16	static

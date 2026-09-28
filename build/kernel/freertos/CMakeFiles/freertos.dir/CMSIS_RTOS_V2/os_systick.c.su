@@ -1,9 +1,0 @@
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:38:16:OS_Tick_Setup	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:64:13:OS_Tick_Enable	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:74:13:OS_Tick_Disable	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:84:13:OS_Tick_AcknowledgeIRQ	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:89:16:OS_Tick_GetIRQn	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:94:17:OS_Tick_GetClock	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:99:17:OS_Tick_GetInterval	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:104:17:OS_Tick_GetCount	0	static
-D:/study/Software/Hollow-Gimbal/kernel/freertos/CMSIS_RTOS_V2/os_systick.c:111:17:OS_Tick_GetOverflow	0	static

@@ -1,5 +1,0 @@
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:90:6:motor_task_init	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:200:13:_motor_safe_task_entry	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:160:13:_motor_task_entry	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:106:6:ADC1_IRQHandler	8	static
-D:/study/Software/Hollow-Gimbal/applications/tasks/motor_task.c:136:6:TMR5_GLOBAL_IRQHandler	8	static

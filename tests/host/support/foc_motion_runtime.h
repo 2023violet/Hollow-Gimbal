@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 /* Includes ------------------------------------------------------------------------------------- */
 #include "foc_common.h"
 
@@ -27,6 +29,13 @@ void foc_cmd_pos_traj(struct motor_dev *motor,
                       float             max_vel,
                       float             max_acc,
                       float             max_decel);
+void foc_cmd_voltage_set(struct motor_dev *motor, float vd_set, float vq_set, float we_ramp);
+void foc_cmd_voltage_if(struct motor_dev *motor, float iq_amp, float we);
+bool foc_cmd_if_to_vel_handoff(struct motor_dev *motor, float vel_rpm);
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
+bool foc_cmd_bench_velocity_step(struct motor_dev *motor, float vel_rpm);
+#endif
+void foc_cmd_phase_volt(struct motor_dev *motor, int phase, float volt);
 
 #ifdef __cplusplus
 }

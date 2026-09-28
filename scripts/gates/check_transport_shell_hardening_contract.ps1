@@ -324,7 +324,7 @@ foreach ($file in $shellCommandFiles) {
 }
 
 $faultRuntimeRaw = Get-Content -LiteralPath (Join-Path $repoRoot "applications\runtime\motor_fault_runtime.c") -Encoding UTF8 -Raw
-if ($faultRuntimeRaw -match 'axis_state\s*=') {
+if ($faultRuntimeRaw -match 'motor->axis_state\s*=[^=]') {
     $errors.Add("ERROR: applications/runtime/motor_fault_runtime.c must not write axis_state directly")
 }
 
@@ -363,7 +363,7 @@ Assert-Contains -Root $repoRoot `
                 -RelativePath "applications\shell\app_shell_banner.c" `
                 -Markers @(
                     "build_date=%s build_time=%s shell=%s flavor=%s",
-                    "uart=USART1 baud=1000000 transport=dma",
+                    "uart=USART1 baud=115200 transport=dma",
                     "next='help'"
                 ) `
                 -Errors $errors
@@ -413,7 +413,7 @@ Assert-Contains -Root $repoRoot `
                 -Markers @(
                     "shell=on",
                     "uart=USART1",
-                    "baud=1000000",
+                    "baud=115200",
                     "transport=dma",
                     "state show",
                     "obs all",

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 struct core_time_perf {
     unsigned dummy;
 };
@@ -26,5 +28,8 @@ static inline float core_time_perf_get_us(const struct core_time_perf *perf)
     (void)perf;
     return 1000.0f;
 }
+
+void core_time_delay_us(uint32_t us);
+void core_time_delay_ms(uint32_t ms);
 
 /* ---------------------------------------- end of file ----------------------------------------- */

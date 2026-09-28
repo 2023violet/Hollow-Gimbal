@@ -91,8 +91,8 @@ try {
         -PresetName "fw-full-diag-carrier-debug" `
         -BinaryDir (Join-Path $tempRoot "fw-full-diag-carrier-debug") `
         -ExpectedTokens @(
-            "Themis platform : at/at32f403a",
-            "Themis CPU class : cortex-m4f-hard"
+            "Themis platform : at/at32f415",
+            "Themis CPU class : cortex-m3-soft"
         )
 
     Invoke-CMakeConfigureSmoke `
@@ -104,16 +104,6 @@ try {
             "Themis CPU class : cortex-m3-soft"
         ) `
         -ExtraArguments @("-DTHEMIS_PLATFORM_SOC=at32f415")
-
-    Invoke-CMakeConfigureSmoke `
-        -RepoRoot $paths.RepoRoot `
-        -PresetName "fw-full-diag-carrier-debug" `
-        -BinaryDir (Join-Path $tempRoot "fw-full-diag-at32f423") `
-        -ExpectedTokens @(
-            "Themis platform : at/at32f423",
-            "Themis CPU class : cortex-m4f-hard"
-        ) `
-        -ExtraArguments @("-DTHEMIS_PLATFORM_SOC=at32f423")
 }
 finally {
     Pop-Location

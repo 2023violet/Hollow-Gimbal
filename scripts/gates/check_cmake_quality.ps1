@@ -72,7 +72,7 @@ function Get-ThemisCMakeFiles
         "components/protocol/CMakeLists.txt",
         "components/utils/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
-        "platform/at/at32f403a/CMakeLists.txt",
+        "platform/at/at32f415/CMakeLists.txt",
         "platform/template/cortex_m4_ref/CMakeLists.txt",
         "subsys/CMakeLists.txt",
         "tests/CMakeLists.txt",
@@ -159,7 +159,17 @@ function Get-CMakeFormatCommand
         return $null
     }
 
-    & $python.Source -c "import cmakelang.format" 2>$null
+    # The probe imports cmakelang to test availability; a failed import writes
+    # a traceback to stderr, which PowerShell 5.1 turns into a terminating
+    # error under $ErrorActionPreference="Stop". Relax EAP so the designed
+    # "formatter absent -> skip enforcement" path stays reachable.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $python.Source -c "import cmakelang.format" 2>$null
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
     if ($LASTEXITCODE -eq 0) {
         return @($python.Source, "-m", "cmakelang.format")
     }

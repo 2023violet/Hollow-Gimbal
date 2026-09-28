@@ -228,7 +228,7 @@ Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson
 Assert-ValueEquals -ActualValue (Get-PresetCacheVariable -PresetList $presetJson.configurePresets `
                                                         -Preset $fwBasePreset `
                                                         -VariableName "THEMIS_PLATFORM_SOC") `
-                   -ExpectedValue "at32f403a" `
+                   -ExpectedValue "at32f415" `
                    -Message "fw-base must own the live platform SoC baseline."
 
 $fwBaseToolchain = Get-PresetProperty -PresetList $presetJson.configurePresets `

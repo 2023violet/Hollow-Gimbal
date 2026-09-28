@@ -55,7 +55,18 @@ function Invoke-ChildScript
     )
 
     Write-Host ("[quality_gate] run: " + $ScriptPath)
-    & $ScriptPath @ParameterMap
+    # Run each child in a separate powershell process: `& script.ps1` executes
+    # in-process, which leaves $LASTEXITCODE holding the child's last NATIVE
+    # command exit code (e.g. an optional-tool probe) instead of the child's
+    # own result. A child process makes $LASTEXITCODE the real child verdict.
+    # Diagnostics on the child's stderr must not become terminating errors.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @ParameterMap
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Child script failed: $ScriptPath"
     }
@@ -107,7 +118,13 @@ function Invoke-DiffCheck
         ":(exclude).codex_encrypted_work/**",
         ":(exclude)build/**",
         ":(exclude)build-arm/**",
-        ":(exclude)build-host/**"
+        ":(exclude)build-host/**",
+        # Vendor-generated sources carry tool-emitted trailing whitespace and
+        # are not hand-reviewable code; keep them out of the whitespace gate.
+        ":(exclude)platform/at/at32f415/generated/**",
+        # work/ is out of scope per AGENTS.md (retired scratch/backup area).
+        ":(exclude)work/**",
+        ":(exclude)tmp/**"
     )
 
     Write-Host "[quality_gate] run: git diff --check"

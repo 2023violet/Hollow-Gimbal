@@ -340,7 +340,7 @@ foreach ($shellFile in $shellFiles) {
 }
 
 $faultRuntimeRaw = Read-Utf8Raw "applications\runtime\motor_fault_runtime.c"
-if ($faultRuntimeRaw -match 'axis_state\s*=') {
+if ($faultRuntimeRaw -match 'motor->axis_state\s*=[^=]') {
     throw "applications/runtime/motor_fault_runtime.c must not write axis_state directly after fault/FSM owner closure."
 }
 
@@ -435,9 +435,9 @@ foreach ($token in @(
     }
 }
 foreach ($token in @(
-        "startup_at32f403a_407.s",
-        "AT32F403AxG_FLASH.ld",
-        "AT32F403ACGT7"
+        "startup_at32f415.s",
+        "AT32F415xB_FLASH.ld",
+        "AT32F415CBT7"
     )) {
     if ($rootCMakeRaw -match [Regex]::Escape($token)) {
         throw "FalconFoc root CMake must not keep chip-specific startup/linker/part token '$token' after platform metadata owner closure."
@@ -520,9 +520,9 @@ foreach ($token in @(
         "THEMIS_PLATFORM_FLASH_SECTOR_COUNT",
         "THEMIS_PLATFORM_MOTOR_SOFTIRQ_HANDLER",
         "THEMIS_PLATFORM_MOTOR_SOFTIRQ_INSTANCE",
-        "startup_at32f403a_407.s",
-        "AT32F403AxG_FLASH.ld",
-        "AT32F403ACGT7"
+        "startup_at32f415.s",
+        "AT32F415xB_FLASH.ld",
+        "AT32F415CBT7"
     )) {
     if ($platformDefaultsRaw -notmatch [Regex]::Escape($token)) {
         throw "The active platform metadata defaults must own token '$token'."

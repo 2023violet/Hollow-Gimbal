@@ -92,9 +92,9 @@ if ($metadataHelperRaw -notmatch 'ThemisPlatformDefaults\.cmake') {
 }
 
 foreach ($forbiddenRootToken in @(
-        'startup_at32f403a_407\.s',
-        'AT32F403AxG_FLASH\.ld',
-        'AT32F403ACGT7'
+        'startup_at32f415\.s',
+        'AT32F415x._FLASH\.ld',
+        'AT32F415C[BR]T7'
     )) {
     if ($rootCMake -match $forbiddenRootToken) {
         throw "Top-level CMakeLists.txt must not keep chip-specific startup/linker/part facts after platform metadata owner closure."
@@ -114,7 +114,7 @@ if ($rootCMake -match 'add_subdirectory\s*\(\s*drivers/') {
     throw "FalconFoc-lite must not add a drivers/ backend layer."
 }
 
-$realPlatformDir = Join-Path $paths.RepoRoot "platform\at\at32f403a"
+$realPlatformDir = Join-Path $paths.RepoRoot "platform\at\at32f415"
 $templatePlatformDir = Join-Path $paths.RepoRoot "platform\template\cortex_m4_ref"
 
 Assert-PathExists -Path (Join-Path $realPlatformDir "CMakeLists.txt") `
@@ -123,9 +123,9 @@ Assert-PathExists -Path (Join-Path $realPlatformDir "ThemisPlatformDefaults.cmak
                   -Message "Missing active FalconFoc-lite platform metadata defaults."
 Assert-PathExists -Path (Join-Path $realPlatformDir "generated\src\main.c") `
                   -Message "Missing active FalconFoc-lite generated entry source."
-Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\startup_at32f403a_407.s") `
+Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\startup_at32f415.s") `
                   -Message "Missing active FalconFoc-lite startup source."
-Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\linker\AT32F403AxG_FLASH.ld") `
+Assert-PathExists -Path (Join-Path $realPlatformDir "vendor\cmsis\cm4\device_support\startup\gcc\linker\AT32F415xB_FLASH.ld") `
                   -Message "Missing active FalconFoc-lite linker script."
 
 Assert-PathExists -Path (Join-Path $templatePlatformDir "CMakeLists.txt") `
@@ -218,13 +218,13 @@ function Assert-PlatformManifestStyle
     }
 }
 
-Assert-PlatformCpuClassBinding -PlatformName "at32f403a" `
+Assert-PlatformCpuClassBinding -PlatformName "at32f415" `
                                -DefaultsPath (Join-Path $realPlatformDir "ThemisPlatformDefaults.cmake")
-Assert-PlatformManifestStyle -PlatformName "at32f403a" `
+Assert-PlatformManifestStyle -PlatformName "at32f415" `
                              -ManifestPath (Join-Path $realPlatformDir "CMakeLists.txt")
 
 $preparedPlatformDirs = @(Get-ChildItem -Path (Join-Path $paths.RepoRoot "platform\at") -Directory |
-    Where-Object { $_.Name -ne "at32f403a" })
+    Where-Object { $_.Name -ne "at32f415" })
 
 foreach ($platformDir in $preparedPlatformDirs) {
     Assert-PathExists -Path (Join-Path $platformDir.FullName "CMakeLists.txt") `

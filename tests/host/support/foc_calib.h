@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 void foc_calib_init(struct motor_dev *motor);
+void foc_calib_curr(struct motor_dev *motor);
 void foc_pid_init(struct motor_dev *motor);
 void foc_lpf_init(struct motor_dev *motor);
 

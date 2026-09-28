@@ -377,8 +377,8 @@ printf 'openocd:%s\n' "$*" >> "${THEMIS_MOCK_LOG}"
     if ($firstConfigureLine -notmatch '-DTHEMIS_PLATFORM_VENDOR=at') {
         throw "First ./run.sh all must keep the live platform vendor default at 'at'."
     }
-    if ($firstConfigureLine -notmatch '-DTHEMIS_PLATFORM_SOC=at32f403a') {
-        throw "First ./run.sh all must keep the live platform SoC default at 'at32f403a'."
+    if ($firstConfigureLine -notmatch '-DTHEMIS_PLATFORM_SOC=at32f415') {
+        throw "First ./run.sh all must keep the live platform SoC default at 'at32f415'."
     }
     if ($firstConfigureLine -notmatch '-DTHEMIS_FIRMWARE_TARGET_NAME=falcon-foc-at32') {
         throw "First ./run.sh all must keep the canonical firmware target name aligned with the live preset baseline."

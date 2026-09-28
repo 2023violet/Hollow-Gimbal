@@ -5,7 +5,7 @@
 # - avoid stale retired UI/resource paths that no longer exist in this product tree
 
 set(_falconfoc_host_platform_generated_inc
-    "${CMAKE_SOURCE_DIR}/platform/at/at32f403a/generated/inc"
+    "${CMAKE_SOURCE_DIR}/platform/at/at32f415/generated/inc"
 )
 
 themis_add_host_test(
@@ -248,6 +248,7 @@ themis_add_host_test(
   "tests/host/support"
   "include"
   "include/config"
+  WRAP_SYSTEM_FAILURE
   FOLDER
   "themis/tests"
 )
@@ -307,7 +308,9 @@ themis_add_host_test(
   "applications"
   "applications/shell"
   "applications/runtime"
+  "applications/config"
   "applications/algo"
+  "applications/periph"
   "applications/config"
   "components/utils/fsm"
   "kernel/freertos/CMSIS_RTOS_V2"
@@ -422,6 +425,7 @@ themis_add_host_test(
   "applications/shell"
   "applications/runtime"
   "applications/algo"
+  "applications/periph"
   "applications/config"
   "components/utils/fsm"
   "subsys/shell"
@@ -486,6 +490,7 @@ themis_add_host_test(
   "tests/host/applications/test_app_shell_diag_contract.c"
   "applications/shell/app_shell_output_helpers.c"
   "applications/shell/app_shell_cmd_diag.c"
+  "applications/periph/motor_bench_mapping.c"
   PRIVATE_INCLUDE_DIRS
   "tests/host/support"
   "tests/host/support/full_diag_config"
@@ -493,13 +498,19 @@ themis_add_host_test(
   "applications/shell"
   "applications/runtime"
   "applications/algo"
+  "applications/periph"
   "applications/config"
   "components/utils/fsm"
   "subsys/shell"
   FOLDER
   "themis/tests"
 )
-target_compile_definitions(test_app_shell_diag_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1)
+target_compile_definitions(
+  test_app_shell_diag_contract
+  PRIVATE
+  TM_BUILD_PROFILE_FULL_DIAG=1
+  TM_BENCH_DIAG=1
+)
 
 themis_add_host_test(
   NAME
@@ -541,6 +552,9 @@ themis_add_host_test(
   "tests/host/applications/test_motor_runtime_contract.c"
   "tests/host/support/host_rtos.c"
   "tests/host/support/runtime_host_stubs.c"
+  "applications/periph/encoder_bench_trace.c"
+  "applications/periph/motor_bench_mapping.c"
+  "applications/runtime/motor_bench_watchdog.c"
   "applications/runtime/motor_runtime.c"
   "applications/algo/traj_trap.c"
   "subsys/runtime/tm_runtime.c"
@@ -548,6 +562,7 @@ themis_add_host_test(
   "tests/host/support"
   "applications"
   "applications/runtime"
+  "applications/config"
   "applications/algo"
   "applications/periph"
   "components/utils/fsm"
@@ -561,6 +576,7 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_motor_runtime_contract PRIVATE m)
 endif()
+target_compile_definitions(test_motor_runtime_contract PRIVATE TM_BENCH_DIAG=1)
 
 themis_add_host_test(
   NAME
@@ -569,6 +585,30 @@ themis_add_host_test(
   ${CMAKE_SOURCE_DIR}
   SOURCES
   "tests/host/applications/test_motor_fault_runtime_contract.c"
+  "applications/runtime/motor_fault_runtime.c"
+  "applications/periph/encoder_bench_trace.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/runtime"
+  "applications/algo"
+  "applications/periph"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_motor_fault_runtime_contract PRIVATE m)
+endif()
+target_compile_definitions(test_motor_fault_runtime_contract PRIVATE TM_BENCH_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_motor_fault_context_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_fault_context_contract.c"
   "applications/runtime/motor_fault_runtime.c"
   PRIVATE_INCLUDE_DIRS
   "tests/host/support"
@@ -579,9 +619,469 @@ themis_add_host_test(
   FOLDER
   "themis/tests"
 )
+
+themis_add_host_test(
+  NAME
+  test_motor_bench_trace_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_bench_trace_contract.c"
+  "applications/runtime/motor_fault_runtime.c"
+  "applications/shell/app_shell_output_helpers.c"
+  "applications/shell/app_shell_cmd_diag.c"
+  "applications/periph/motor_bench_mapping.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "tests/host/support/full_diag_config"
+  "include"
+  "include/config"
+  "applications"
+  "applications/shell"
+  "applications"
+  "applications/runtime"
+  "applications/algo"
+  "applications/periph"
+  "applications/config"
+  "components/utils/fsm"
+  "subsys/shell"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(
+  test_motor_bench_trace_contract
+  PRIVATE
+  TM_BUILD_PROFILE_FULL_DIAG=1
+  TM_BENCH_DIAG=1
+)
 if(NOT MSVC)
-  target_link_libraries(test_motor_fault_runtime_contract PRIVATE m)
+  target_link_libraries(test_motor_bench_trace_contract PRIVATE m)
 endif()
+
+themis_add_host_test(
+  NAME
+  test_motor_bench_mapping_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_bench_mapping_contract.c"
+  "applications/periph/motor_bench_mapping.c"
+  PRIVATE_INCLUDE_DIRS
+  "applications/periph"
+  "applications/algo"
+  "include"
+  "include/config"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_encoder_bench_trace_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_encoder_bench_trace_contract.c"
+  "applications/periph/encoder_bench_trace.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/periph"
+  "applications/algo"
+  "include"
+  "include/config"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_encoder_bench_trace_contract PRIVATE TM_BENCH_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_motor_fsm_bench_pwm_boundary_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_fsm_bench_pwm_boundary_contract.c"
+  "applications/tasks/motor_fsm.c"
+  "components/utils/fsm/fsm.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(
+  test_motor_fsm_bench_pwm_boundary_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  FOC_ENERGIZED_CALIB_ENABLE=0
+)
+
+themis_add_host_test(
+  NAME
+  test_motor_task_bench_cadence_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_task_bench_cadence_contract.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/config"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_motor_task_bench_cadence_contract PRIVATE TM_BENCH_DIAG=1)
+
+themis_add_host_test(
+  NAME
+  test_motor_bench_watchdog_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_bench_watchdog_contract.c"
+  "applications/runtime/motor_bench_watchdog.c"
+  PRIVATE_INCLUDE_DIRS
+  "applications/config"
+  "applications/runtime"
+  "include"
+  "include/config"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_motor_bench_watchdog_contract PRIVATE TM_BENCH_DIAG=1)
+
+if(NOT MSVC)
+  target_link_libraries(test_motor_fault_context_contract PRIVATE m)
+endif()
+
+themis_add_host_test(
+  NAME
+  test_foc_calib_curr_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_calib_curr_contract.c"
+  "applications/periph/foc_calib.c"
+  "components/utils/stat_welford/stat_welford.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "applications/runtime"
+  "components/utils/fsm"
+  "components/utils/stat_welford"
+  FOLDER
+  "themis/tests"
+)
+target_compile_definitions(test_motor_fsm_abort_restore PRIVATE FOC_ENERGIZED_CALIB_ENABLE=1)
+
+themis_add_host_test(
+  NAME
+  test_motor_fsm_calibration_gate_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_motor_fsm_calibration_gate_contract.c"
+  "applications/tasks/motor_fsm.c"
+  "components/utils/fsm/fsm.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_calib_curr_contract PRIVATE m)
+endif()
+target_link_options(test_foc_calib_curr_contract PRIVATE "-Wl,--gc-sections")
+
+themis_add_host_test(
+  NAME
+  test_foc_vbus_guard_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_vbus_guard_contract.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bringup_model_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_bringup_model_contract.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_voltage_openloop_model_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_voltage_openloop_model_contract PRIVATE m)
+  target_compile_options(
+    test_foc_voltage_openloop_model_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_include_directories(
+  test_foc_voltage_openloop_model_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bench_fixed_duty_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_bench_fixed_duty_contract PRIVATE m)
+  target_compile_options(
+    test_foc_bench_fixed_duty_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_compile_definitions(
+  test_foc_bench_fixed_duty_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  TM_BENCH_FIXED_DUTY_TEST=1
+)
+target_include_directories(
+  test_foc_bench_fixed_duty_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bench_raw_sixstep_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_bench_raw_sixstep_contract PRIVATE m)
+  target_compile_options(
+    test_foc_bench_raw_sixstep_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_compile_definitions(
+  test_foc_bench_raw_sixstep_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  TM_BENCH_RAW_SIXSTEP_TEST=1
+)
+target_include_directories(
+  test_foc_bench_raw_sixstep_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bench_raw_sine_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_bench_raw_sine_contract PRIVATE m)
+  target_compile_options(
+    test_foc_bench_raw_sine_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_compile_definitions(
+  test_foc_bench_raw_sine_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  TM_BENCH_RAW_SINE_TEST=1
+)
+target_include_directories(
+  test_foc_bench_raw_sine_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bench_raw_sine_match_sixstep_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_bench_raw_sine_match_sixstep_contract PRIVATE m)
+  target_compile_options(
+    test_foc_bench_raw_sine_match_sixstep_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_compile_definitions(
+  test_foc_bench_raw_sine_match_sixstep_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  TM_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST=1
+)
+target_include_directories(
+  test_foc_bench_raw_sine_match_sixstep_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_foc_bench_raw_sine_20_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_foc_voltage_openloop_model_contract.c"
+  "applications/periph/foc_ctrl.c"
+  "applications/algo/foc_core.c"
+  "components/algorithm/pid/pid.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/algo"
+  "applications/periph"
+  "components/algorithm/pid"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_foc_bench_raw_sine_20_contract PRIVATE m)
+  target_compile_options(
+    test_foc_bench_raw_sine_20_contract PRIVATE
+    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+  )
+endif()
+target_compile_definitions(
+  test_foc_bench_raw_sine_20_contract
+  PRIVATE
+  TM_BENCH_DIAG=1
+  TM_BENCH_RAW_SINE_20_TEST=1
+)
+target_include_directories(
+  test_foc_bench_raw_sine_20_contract BEFORE PRIVATE
+  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+  "${CMAKE_SOURCE_DIR}/bsp"
+)
+
+themis_add_host_test(
+  NAME
+  test_if_to_vel_handoff_contract
+  BASE_DIR
+  ${CMAKE_SOURCE_DIR}
+  SOURCES
+  "tests/host/applications/test_if_to_vel_handoff_contract.c"
+  "applications/runtime/foc_motion_runtime.c"
+  "applications/algo/traj_trap.c"
+  PRIVATE_INCLUDE_DIRS
+  "tests/host/support"
+  "applications"
+  "applications/runtime"
+  "applications/algo"
+  "components/utils/fsm"
+  FOLDER
+  "themis/tests"
+)
+if(NOT MSVC)
+  target_link_libraries(test_if_to_vel_handoff_contract PRIVATE m)
+endif()
+target_compile_definitions(test_if_to_vel_handoff_contract PRIVATE TM_BENCH_DIAG=1)
 
 themis_add_host_test(
   NAME
@@ -604,6 +1104,7 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_motion_runtime_contract PRIVATE m)
 endif()
+target_compile_definitions(test_foc_motion_runtime_contract PRIVATE TM_BENCH_DIAG=1)
 
 themis_add_host_test(
   NAME
@@ -637,6 +1138,7 @@ foreach(
         test_app_shell_common_contract
         test_app_shell_burst_contract
         test_motor_fsm_abort_restore
+        test_motor_fsm_calibration_gate_contract
         test_motor_fsm_fault_clear_contract
         test_app_shell_state_contract
         test_app_shell_store_contract
@@ -645,7 +1147,13 @@ foreach(
         test_foc_param_restore_contract
         test_motor_runtime_contract
         test_motor_fault_runtime_contract
+        test_motor_fault_context_contract
+        test_foc_calib_curr_contract
+        test_foc_vbus_guard_contract
+        test_foc_bringup_model_contract
+        test_foc_voltage_openloop_model_contract
         test_foc_motion_runtime_contract
+        test_if_to_vel_handoff_contract
         test_motor_calibration_runtime_contract
 )
   target_include_directories(

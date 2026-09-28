@@ -17,7 +17,7 @@ param(
 
     [switch]$SkipReboot,
 
-    [int]$BaudRate = 1000000,
+    [int]$BaudRate = 115200,
 
     [int]$ReadSliceMs = 50,
 
@@ -374,7 +374,7 @@ THEMIS_PRODUCT_FLAVOR=carrier-demo \
                     "shell=on",
                     "flavor=carrier-demo",
                     "uart=USART1",
-                    "baud=1000000",
+                    "baud=115200",
                     "transport=dma"
                 )
             Add-CheckResult -Results $checks -Name "post-reboot banner" -Passed $passed -Detail "expect shell-on carrier banner"

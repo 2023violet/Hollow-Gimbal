@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include "foc_config.h"
 #include "pll_enc.h"
+#include "../../../applications/periph/encoder_bench_trace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,7 @@ extern gpio_type g_host_gpioa;
 #define SPI1        (&g_host_spi1)
 #define GPIOA       (&g_host_gpioa)
 #define GPIO_PINS_4 (4U)
+#define GPIO_PINS_15 (15U)
 
 struct encoder_config {
     spi_type  *spi_instance;

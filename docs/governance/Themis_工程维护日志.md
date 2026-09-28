@@ -2368,3 +2368,38 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
   → 速度估计链在旋转工况下不可用，闭环整定（阶梯第 4 步）前必须先解决。
 - `[工具]` `build/_spin_probe.ps1` 加 `-LeadInSec` 与加驱/断驱蜂鸣打点；
   新增 `build/_duty_cycle_probe.ps1`（多档驻留循环、可听窗口、转子锁死不旋转）。
+
+## 2026-09-29 时基判决：FOC 步进实测 3,334Hz 而代码按 5,000Hz 累加 dt
+
+- `[起因]` 开环 I-f 两轮实测转速均为指令的 2/3（we=21.99→20.0rpm、we=11→9.7rpm，
+  比值 0.667/0.647 与速度无关），且 `obs` 的 `vel_rpm` 在平稳旋转中乱跳。
+  先排除三个猜测：`pll_enc_get_total_enc = pos_estimate_int / cpr`（`ENCODER_CPR`
+  = 2^16）说明位置与 dt 无关、可信；`DEFAULT_POLE_PAIRS=7` 与
+  `DEFAULT_GEAR_RATIO=1.0` 不提供比例因子；duty 钳位不是限速原因。
+- `[实板测量]`
+  ① `diag adc show` 的 `seq`（即 `motor_drv.c` 中每次注入完成自增的
+  `injected_sample_seq`）以 **13,337/s** 递增，六个 2.3s 间隔全部一致；
+  ② `motor_task.c` 的 ADC ISR 再按 `TM_MOTOR_FOC_ADC_DIVIDER(4)` 分频 →
+  FOC 步进 = 13,337/4 = **3,334 Hz**，与 FOC trace `sequence=67,468`（约 20s
+  RUNNING）得到的 **3,373 Hz** 相互印证；
+  ③ SysTick LOAD（0xE000E014）= **149,999**，配实测 tick **999.18 Hz** →
+  内核实际约 **149.9 MHz**，与 `TMR_CLK_HZ = 150000000` 一致。
+- `[判决]` 不是时钟树失效，而是**控制环的 dt 与实际步进频率不符**：代码按
+  `PWM_FREQ_HZ = 5000` 累加角度与积分，真实步进只有 3,334 Hz（比值 0.667），
+  所以 I-f / 电压模式的旋转磁场只跑到指令的 **2/3** 速——这正是转速缺口、
+  以及"电流/速度读数与指令对不上"的直接来源。位置计数不依赖 dt 因而正确，
+  速度估计依赖 dt 因而失真，两者表现与实测完全吻合。
+- `[待确认]` `wk_tmr.c` 的 `tmr_base_init(TMR1, 3749, 0)`（SWD 读回 pr=0xEA5=3749、
+  CCR4=0xE9C=3740 证实配置生效）在 150 MHz 定时器域下应得 40 kHz，代码与文档
+  按 20 kHz 记载，而实测注入触发为 13.33 kHz —— 三者互不相容，多出的 /2 与 /3
+  出在定时器时钟倍率或 TMR1 重复计数器（rpr）上。寄存器块已 dump（0x40012C00 起），
+  需要按 `at32f415.h` 的 tmr 结构偏移逐字段对齐后定论，不影响上面的判决。
+- `[范围]` 该 dt 偏差影响所有由 FOC 步进派生的量：I-f/电压模式角度累加、电流环
+  与速度环带宽、`CALIB_*` 用 `PWM_FREQ_HZ` 换算的时长、bench 看门狗与能量预算的
+  真实秒数。修复前任何 rpm、带宽、PID 数值都不是真实物理量。
+- `[下一步]` ①把真实节拍做成可读量（用已有的 `injected_sample_seq` 对 ms tick 求导，
+  在 `diag bench status` 打印实测 Hz），杜绝再次靠常量猜；②让常量与现实一致
+  （`PWM_FREQ_HZ`/`VEL_LOOP_FREQ_HZ`/`TM_MOTOR_FOC_ADC_DIVIDER` 三者对齐到目标节拍）；
+  ③用 `build/_if_pitch_probe.ps1` 复测，期望实测 rpm 等于指令 rpm。
+- `[工具]` 新增 `build/_if_pitch_probe.ps1`（极低速 I-f + 最小二乘拟合，直接输出
+  反推极对数），本轮用它取到 0.667/0.647 两个独立速度点。

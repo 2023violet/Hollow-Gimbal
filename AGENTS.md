@@ -27,7 +27,7 @@ If touching these areas, read the matching local entry too:
   - `docs/application/README.md`
 - `bsp/`
   - `docs/architecture/Themis_BSP层定位、边界与优化路线图.md`
-- `platform/at/at32f403a/`
+- `platform/at/at32f415/`
   - `docs/boot/Themis_启动与初始化流程.md`
 - `scripts/` or `tests/`
   - `scripts/README.md`
@@ -43,8 +43,8 @@ boundary.
 
 Current live product facts:
 
-- MCU line: `AT32F403A`
-- live platform owner: `platform/at/at32f403a`
+- MCU line: `AT32F415`
+- live platform owner: `platform/at/at32f415`
 - live board owner: `bsp/board`
 - live thin control-plane port owner: `bsp/ports`
 - live product owner: `applications/`
@@ -61,7 +61,7 @@ Current hard boundary:
 
 ## 3. Layer Rules
 
-### `platform/at/at32f403a`
+### `platform/at/at32f415`
 
 Owns:
 
@@ -169,15 +169,15 @@ For real code changes, verify with the current live lanes when applicable:
 - firmware build:
   - `./run.sh build`
 - host tests:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/host/run_host_tests.ps1 -RepoRoot D:/study/Software/FalconFoc_AT32`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/host/run_host_tests.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal`
 - quality gate:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot D:/study/Software/FalconFoc_AT32 -Scope all`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal -Scope all`
 
 Board facts currently documented in live docs:
 
-- debugger: `J-Link`
+- debugger: `DAP-Link` (OpenOCD V2.0.6, `tools/openocd/openocd_daplink.cfg`)
 - console policy: `USART1 console-first`
-- verified serial port witness in docs: `COM54`
+- current bench serial witness: `COM3 @ 115200`
 
 ## 8. Explicit Prohibitions
 

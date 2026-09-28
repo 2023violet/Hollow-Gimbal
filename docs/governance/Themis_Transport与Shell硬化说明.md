@@ -50,9 +50,9 @@ USART1 IRQ/DMA
 当前正式串口策略如下：
 
 - debugger=`J-Link`
-- port=`COM54`
+- port=`COM3`
 - uart=`USART1`
-- baud=`1000000`
+- baud=`115200`
 - policy=`console-first`
 
 补充约束如下：

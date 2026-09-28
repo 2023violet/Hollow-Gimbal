@@ -21,7 +21,7 @@ RT-Thread and Zephyr.
 
 ## Architecture | 架构
 
-- `platform/at/at32f403a`
+- `platform/at/at32f415`
   - single source of truth for SoC bring-up, startup, linker, vendor headers,
     and generated code
 - `bsp/board`
@@ -53,24 +53,25 @@ Formal architecture rule:
 - memory report:
   - `./run.sh memory`
 - diag/cal board witness:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/board/run_diag_carrier_witness.ps1 -RepoRoot D:/study/Software/FalconFoc_AT32`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/board/run_diag_carrier_witness.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal`
 - host tests:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/host/run_host_tests.ps1 -RepoRoot D:/study/Software/FalconFoc_AT32`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/host/run_host_tests.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal`
 - quality gate:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot D:/study/Software/FalconFoc_AT32 -Scope all`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal -Scope all`
 
 The current live board-debug lane is documented around:
 
-- debugger: `J-Link`
+- debugger: `DAP-Link` (OpenOCD V2.0.6, `tools/openocd/openocd_daplink.cfg`)
 - console policy: `USART1 console-first`
-- verified serial witness in docs: `COM54`
-- verified shell probe baud: `1000000`
-- formal diag/cal witness flow: `scripts/run_diag_carrier_witness.ps1`
+- current bench serial witness: `COM3 @ 115200`
+- formal board flows: `scripts/flows/board/`
 
 ## Documentation | 文档
 
 - main docs entry:
   - [docs/README.md](./docs/README.md)
+- current-source Code Wiki (AT32F415):
+  - [docs/code-wiki/README.md](./docs/code-wiki/README.md)
 - no-`dev/drv` architecture decision:
   - [docs/architecture/Themis_FalconFoc无devdrv模式与FOC直控分层方案.md](./docs/architecture/Themis_FalconFoc%E6%97%A0devdrv%E6%A8%A1%E5%BC%8F%E4%B8%8EFOC%E7%9B%B4%E6%8E%A7%E5%88%86%E5%B1%82%E6%96%B9%E6%A1%88.md)
 - startup chain:

@@ -1,5 +1,11 @@
 # Themis Windows 主机开发与调试操作规范
 
+> **项目范围提示（2026-09-26）**：本文早期内容混入了 `TEC_Thermostat_Water_Bath`
+> 项目的路径、镜像名和脚本名，不能作为 Hollow-Gimbal 的现役操作入口。当前项目以
+> 根目录 `README.md`、`AGENTS.md`、`docs/code-wiki/AI-handoff-2026-08-31.md`
+> 和 `scripts/flows/board/` 为准；本文件保留作历史 Windows 工作流参考，待后续专项
+> 重写，不应直接复制其中的命令。
+
 ## 1. 文档目标
 
 这份文档用于固定：

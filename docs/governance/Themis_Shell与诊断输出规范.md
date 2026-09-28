@@ -21,10 +21,11 @@ Contract tag: `FalconFoc-lite shell-output-policy`
 - `applications/shell/*`
   - 产品命令 vocabulary、banner、help 文案、输出策略
 
-当前共享串口策略如下：
+当前 bench 共享串口策略如下（旧 COM54/1 Mbit/s 记录仅属历史 witness）：
 
 - uart=`USART1`
-- port=`COM54`
+- port=`COM3`
+- baud=`115200`
 - policy=`console-first`
 - active telemetry=`debug-only`
 
@@ -96,7 +97,7 @@ summary line 放不下时，后续只允许 detail row：
 
 ## 4. 共享串口约束
 
-对当前 `COM54 @ 1000000` 共享控制台，必须额外遵守：
+对当前 `COM3 @ 115200` 共享控制台，必须额外遵守：
 
 - 不允许把输出建立在 `128` 列宽终端假设上
 - runtime-visible shell 文本保持 `ASCII` 安全

@@ -270,6 +270,30 @@ void USART1_IRQHandler(void)
 }
 
 /**
+  * @brief  this function handles USART2 handler.
+  * @param  none
+  * @retval none
+  */
+void USART2_IRQHandler(void)
+{
+  /* add user code begin USART2_IRQ 0 */
+
+  /* add user code end USART2_IRQ 0 */
+
+  if(usart_interrupt_flag_get(USART2, USART_IDLEF_FLAG) != RESET)
+  {
+    /* add user code begin USART2_USART_IDLEF_FLAG */
+    /* clear flag */
+    usart_flag_clear(USART2, USART_IDLEF_FLAG);
+    /* add user code end USART2_USART_IDLEF_FLAG */ 
+  }
+
+  /* add user code begin USART2_IRQ 1 */
+
+  /* add user code end USART2_IRQ 1 */
+}
+
+/**
   * @brief  this function handles TMR5 handler.
   * @param  none
   * @retval none

@@ -160,6 +160,21 @@ void UsageFault_Handler(void)
 }
 
 /**
+  * @brief  this function handles svcall exception.
+  * @param  none
+  * @retval none
+  */
+void SVC_Handler(void)
+{
+  /* add user code begin SVCall_IRQ 0 */
+
+  /* add user code end SVCall_IRQ 0 */
+  /* add user code begin SVCall_IRQ 1 */
+
+  /* add user code end SVCall_IRQ 1 */
+}
+
+/**
   * @brief  this function handles debug monitor exception.
   * @param  none
   * @retval none
@@ -173,6 +188,22 @@ void DebugMon_Handler(void)
 
   /* add user code end DebugMonitor_IRQ 1 */
 }
+
+/**
+  * @brief  this function handles pendsv_handler exception.
+  * @param  none
+  * @retval none
+  */
+void PendSV_Handler(void)
+{
+  /* add user code begin PendSV_IRQ 0 */
+
+  /* add user code end PendSV_IRQ 0 */
+  /* add user code begin PendSV_IRQ 1 */
+
+  /* add user code end PendSV_IRQ 1 */
+}
+
 
 /**
   * @brief  this function handles systick handler.
@@ -236,6 +267,30 @@ void USART1_IRQHandler(void)
   /* add user code begin USART1_IRQ 1 */
 
   /* add user code end USART1_IRQ 1 */
+}
+
+/**
+  * @brief  this function handles USART2 handler.
+  * @param  none
+  * @retval none
+  */
+void USART2_IRQHandler(void)
+{
+  /* add user code begin USART2_IRQ 0 */
+
+  /* add user code end USART2_IRQ 0 */
+
+  if(usart_interrupt_flag_get(USART2, USART_IDLEF_FLAG) != RESET)
+  {
+    /* add user code begin USART2_USART_IDLEF_FLAG */
+    /* clear flag */
+    usart_flag_clear(USART2, USART_IDLEF_FLAG);
+    /* add user code end USART2_USART_IDLEF_FLAG */ 
+  }
+
+  /* add user code begin USART2_IRQ 1 */
+
+  /* add user code end USART2_IRQ 1 */
 }
 
 /**

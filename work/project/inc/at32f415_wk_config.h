@@ -70,8 +70,8 @@ extern "C" {
 #define DMA1_CHANNEL3_MEMORY_BASE_ADDR   0
 //#define DMA1_CHANNEL3_PERIPHERAL_BASE_ADDR   0
 
-//#define DMA1_CHANNEL4_BUFFER_SIZE   0
-//#define DMA1_CHANNEL4_MEMORY_BASE_ADDR   0
+#define DMA1_CHANNEL4_BUFFER_SIZE   0
+#define DMA1_CHANNEL4_MEMORY_BASE_ADDR   0
 //#define DMA1_CHANNEL4_PERIPHERAL_BASE_ADDR   0
 
 //#define DMA1_CHANNEL5_BUFFER_SIZE   0
@@ -118,12 +118,24 @@ extern "C" {
 /* Private defines -------------------------------------------------------------*/
 #define VBUS_PIN    GPIO_PINS_1
 #define VBUS_GPIO_PORT    GPIOA
-#define ID_PAD_PIN    GPIO_PINS_2
-#define ID_PAD_GPIO_PORT    GPIOA
-#define IB_PIN    GPIO_PINS_4
+#define IC_PIN    GPIO_PINS_4
+#define IC_GPIO_PORT    GPIOA
+#define IB_PIN    GPIO_PINS_5
 #define IB_GPIO_PORT    GPIOA
-#define IA_PIN    GPIO_PINS_5
+#define IA_PIN    GPIO_PINS_6
 #define IA_GPIO_PORT    GPIOA
+#define INLC_PIN    GPIO_PINS_7
+#define INLC_GPIO_PORT    GPIOA
+#define INLB_PIN    GPIO_PINS_0
+#define INLB_GPIO_PORT    GPIOB
+#define INLA_PIN    GPIO_PINS_1
+#define INLA_GPIO_PORT    GPIOB
+#define INHC_PIN    GPIO_PINS_8
+#define INHC_GPIO_PORT    GPIOA
+#define INHB_PIN    GPIO_PINS_9
+#define INHB_GPIO_PORT    GPIOA
+#define INHA_PIN    GPIO_PINS_10
+#define INHA_GPIO_PORT    GPIOA
 #define SPI1_CS_PIN    GPIO_PINS_15
 #define SPI1_CS_GPIO_PORT    GPIOA
 

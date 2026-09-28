@@ -40,6 +40,30 @@ function(themis_build_axes_declare_cache)
   option(THEMIS_ENABLE_BOARD_BENCH
          "Expose real-board benchmark command surface in non-full-diag firmware images." OFF
   )
+  option(THEMIS_ENABLE_BENCH_DIAG
+         "Build the dedicated real-board diagnostic image with VOFA and energized calibration disabled." OFF
+  )
+  option(THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST
+         "Build the bench-only fixed 40/50/60 percent PWM isolation test." OFF
+  )
+  option(THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST
+         "Build the bench-only 1 Hz electrical raw six-step PWM test." OFF
+  )
+  option(THEMIS_ENABLE_BENCH_RAW_SINE_TEST
+         "Build the bench-only 1 Hz electrical raw sine PWM test." OFF
+  )
+  option(THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST
+         "Build the bench-only 1 Hz raw sine PWM test matched to six-step vector magnitude." OFF
+  )
+  option(THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST
+         "Build the bench-only 1 Hz electrical raw sine PWM test at 20 percent duty amplitude." OFF
+  )
+  set(THEMIS_MOTOR_BENCH_RUN_BUDGET_MS
+      "50"
+      CACHE STRING
+      "Bench-only motor run budget in milliseconds (50, 200, or 400)."
+  )
+  set_property(CACHE THEMIS_MOTOR_BENCH_RUN_BUDGET_MS PROPERTY STRINGS 50 200 400)
 endfunction()
 
 function(themis_build_axes_validate)
@@ -68,6 +92,51 @@ function(themis_build_axes_validate)
     message(
       FATAL_ERROR "At least one of THEMIS_BUILD_FIRMWARE or THEMIS_BUILD_HOST_TESTS must be ON."
     )
+  endif()
+
+  if(NOT THEMIS_MOTOR_BENCH_RUN_BUDGET_MS MATCHES "^(50|200|400|1000|30000)$")
+    message(FATAL_ERROR
+            "THEMIS_MOTOR_BENCH_RUN_BUDGET_MS must be 50/200/400/1000/30000. "
+            "Got '${THEMIS_MOTOR_BENCH_RUN_BUDGET_MS}'."
+    )
+  endif()
+  if(NOT THEMIS_ENABLE_BENCH_DIAG AND
+     NOT THEMIS_MOTOR_BENCH_RUN_BUDGET_MS STREQUAL "50")
+    message(FATAL_ERROR
+            "A non-50 ms motor bench budget requires THEMIS_ENABLE_BENCH_DIAG=ON."
+    )
+  endif()
+  if(THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST AND NOT THEMIS_ENABLE_BENCH_DIAG)
+    message(FATAL_ERROR
+            "THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST requires THEMIS_ENABLE_BENCH_DIAG=ON.")
+  endif()
+  if(THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST AND NOT THEMIS_ENABLE_BENCH_DIAG)
+    message(FATAL_ERROR
+            "THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST requires THEMIS_ENABLE_BENCH_DIAG=ON.")
+  endif()
+  if(THEMIS_ENABLE_BENCH_RAW_SINE_TEST AND NOT THEMIS_ENABLE_BENCH_DIAG)
+    message(FATAL_ERROR
+            "THEMIS_ENABLE_BENCH_RAW_SINE_TEST requires THEMIS_ENABLE_BENCH_DIAG=ON.")
+  endif()
+  if(THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST AND NOT THEMIS_ENABLE_BENCH_DIAG)
+    message(FATAL_ERROR
+            "THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST requires THEMIS_ENABLE_BENCH_DIAG=ON.")
+  endif()
+  if(THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST AND NOT THEMIS_ENABLE_BENCH_DIAG)
+    message(FATAL_ERROR
+            "THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST requires THEMIS_ENABLE_BENCH_DIAG=ON.")
+  endif()
+  if((THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST AND THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST) OR
+     (THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_TEST) OR
+     (THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SINE_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SINE_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST) OR
+     (THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST AND THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST))
+    message(FATAL_ERROR
+            "Only one raw PWM bench test may be enabled at a time.")
   endif()
 
   string(TOLOWER "${THEMIS_DEVDRV_PROFILE}" _themis_devdrv_profile)

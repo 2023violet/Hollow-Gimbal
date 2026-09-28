@@ -68,6 +68,7 @@ void DebugMon_Handler(void);
 
 // void ADC1_IRQHandler(void);
 // void USART1_IRQHandler(void);
+void USART2_IRQHandler(void);
 // void TMR5_GLOBAL_IRQHandler(void);
 
 /* add user code begin exported functions */

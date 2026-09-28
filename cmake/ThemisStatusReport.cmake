@@ -27,6 +27,7 @@ function(themis_emit_status_report)
   message(STATUS "Themis libc float printf : ${THEMIS_ENABLE_LIBC_FLOAT_PRINTF}")
   message(STATUS "Themis libc float scanf : ${THEMIS_ENABLE_LIBC_FLOAT_SCANF}")
   message(STATUS "Themis board bench : ${THEMIS_ENABLE_BOARD_BENCH}")
+  message(STATUS "Themis bench diag : ${THEMIS_ENABLE_BENCH_DIAG}")
   message(STATUS "Themis metadata lane : ${_themis_metadata_entry_lane}")
 
   if(THEMIS_BUILD_FIRMWARE)

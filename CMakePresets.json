@@ -98,6 +98,96 @@
         "THEMIS_DEVDRV_PROFILE": "full-diag",
         "THEMIS_PRODUCT_FLAVOR": "carrier-demo"
       }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-debug",
+      "inherits": "fw-full-diag-carrier-debug",
+      "displayName": "Themis FW full-diag + carrier-demo bench",
+      "description": "Dedicated real-board diagnostic image with VOFA and energized calibration disabled.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_DIAG": true
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-200ms-debug",
+      "inherits": "fw-full-diag-carrier-bench-debug",
+      "displayName": "Themis FW full-diag + carrier-demo bench 200 ms",
+      "description": "Dedicated longer-window bench image; still disables VOFA and energized calibration.",
+      "cacheVariables": {
+        "THEMIS_MOTOR_BENCH_RUN_BUDGET_MS": "200"
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-400ms-debug",
+      "inherits": "fw-full-diag-carrier-bench-debug",
+      "displayName": "Themis FW full-diag + carrier-demo bench 400 ms",
+      "description": "Dedicated one-electrical-cycle-scale bench image; still disables VOFA and energized calibration.",
+      "cacheVariables": {
+        "THEMIS_MOTOR_BENCH_RUN_BUDGET_MS": "400"
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-1000ms-debug",
+      "inherits": "fw-full-diag-carrier-bench-debug",
+      "displayName": "Themis FW full-diag + carrier-demo bench 1000 ms",
+      "description": "Slow-ramp open-loop drag window (I-f pull-in to 30 rpm); still disables VOFA and energized calibration.",
+      "cacheVariables": {
+        "THEMIS_MOTOR_BENCH_RUN_BUDGET_MS": "1000"
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-debug",
+      "displayName": "Themis FW full-diag + carrier-demo bench 30 s",
+      "description": "Endurance drag window for continuous-rotation verification; still disables VOFA and energized calibration.",
+      "cacheVariables": {
+        "THEMIS_MOTOR_BENCH_RUN_BUDGET_MS": "30000"
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-fixed-duty-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-30s-debug",
+      "displayName": "Themis FW bench fixed PWM duty isolation",
+      "description": "Bench-only fixed 40/50/60 percent PWM test with the normal 30 second energy limit.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST": true
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-raw-sixstep-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-30s-debug",
+      "displayName": "Themis FW bench raw six-step PWM isolation",
+      "description": "Bench-only 1 Hz electrical six-step PWM test with the normal 30 second energy limit.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST": true
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-raw-sine-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-30s-debug",
+      "displayName": "Themis FW bench raw sine PWM isolation",
+      "description": "Bench-only 1 Hz electrical sine PWM test with the normal 30 second energy limit.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_RAW_SINE_TEST": true
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-raw-sine-match-sixstep-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-30s-debug",
+      "displayName": "Themis FW bench raw sine matched to six-step magnitude",
+      "description": "Bench-only 1 Hz electrical sine PWM test matched to the raw six-step vector magnitude.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST": true
+      }
+    },
+    {
+      "name": "fw-full-diag-carrier-bench-raw-sine-20-30s-debug",
+      "inherits": "fw-full-diag-carrier-bench-30s-debug",
+      "displayName": "Themis FW bench raw sine 20 percent duty",
+      "description": "Bench-only 1 Hz electrical sine PWM test at 20 percent duty amplitude.",
+      "cacheVariables": {
+        "THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST": true
+      }
     }
   ],
   "buildPresets": [
@@ -124,6 +214,46 @@
     {
       "name": "build-fw-full-diag-carrier-debug",
       "configurePreset": "fw-full-diag-carrier-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-200ms-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-200ms-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-400ms-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-400ms-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-1000ms-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-1000ms-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-30s-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-fixed-duty-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-fixed-duty-30s-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-raw-sixstep-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-raw-sixstep-30s-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-raw-sine-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-raw-sine-30s-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-raw-sine-match-sixstep-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-raw-sine-match-sixstep-30s-debug"
+    },
+    {
+      "name": "build-fw-full-diag-carrier-bench-raw-sine-20-30s-debug",
+      "configurePreset": "fw-full-diag-carrier-bench-raw-sine-20-30s-debug"
     }
   ],
   "testPresets": [

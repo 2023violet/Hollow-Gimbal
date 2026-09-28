@@ -26,6 +26,16 @@ function(themis_define_contract_targets repo_root)
               ${THEMIS_DEVDRV_PROFILE_COMPILE_DEFINITION}
               ${THEMIS_PRODUCT_FLAVOR_COMPILE_DEFINITION}
               $<$<BOOL:${THEMIS_ENABLE_BOARD_BENCH}>:TM_ENABLE_BOARD_BENCH=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>:TM_BENCH_DIAG=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>:TM_FEATURE_VOFA=0>
+              $<$<AND:$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>,$<NOT:$<BOOL:${THEMIS_BENCH_FORCE_ENERGIZED_CALIB}>>>:FOC_ENERGIZED_CALIB_ENABLE=0>
+              $<$<AND:$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>,$<BOOL:${THEMIS_BENCH_FORCE_ENERGIZED_CALIB}>>:FOC_ENERGIZED_CALIB_ENABLE=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>:TM_MOTOR_BENCH_RUN_BUDGET_MS=${THEMIS_MOTOR_BENCH_RUN_BUDGET_MS}>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_FIXED_DUTY_TEST}>:TM_BENCH_FIXED_DUTY_TEST=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_RAW_SIXSTEP_TEST}>:TM_BENCH_RAW_SIXSTEP_TEST=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_RAW_SINE_TEST}>:TM_BENCH_RAW_SINE_TEST=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST}>:TM_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST=1>
+              $<$<BOOL:${THEMIS_ENABLE_BENCH_RAW_SINE_20_TEST}>:TM_BENCH_RAW_SINE_20_TEST=1>
   )
   target_compile_options(
     themis_build_contract
@@ -62,6 +72,10 @@ function(themis_define_contract_targets repo_root)
       $<$<AND:$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-Os>
       $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:C,GNU,Clang>>:-O2>
       $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-O2>
+      # AT32F415 has no FPU.  The dedicated bench image keeps Debug symbols
+      # but must optimize the soft-float ISR enough for bounded Shell stops.
+      $<$<AND:$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>,$<CONFIG:Debug>,$<COMPILE_LANG_AND_ID:C,GNU,Clang>>:-O2>
+      $<$<AND:$<BOOL:${THEMIS_ENABLE_BENCH_DIAG}>,$<CONFIG:Debug>,$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>>:-O2>
   )
   set_target_properties(themis_build_contract PROPERTIES FOLDER "themis/contracts")
 

@@ -86,64 +86,60 @@
   */
 void wk_system_clock_config(void)
 {
-  /* reset crm */
-  crm_reset();
+    /* reset crm */
+    crm_reset();
 
-  /* config flash psr register */
-  flash_psr_set(FLASH_WAIT_CYCLE_4);
+    /* config flash psr register */
+    flash_psr_set(FLASH_WAIT_CYCLE_4);
 
-  /* enable lick */
-  crm_clock_source_enable(CRM_CLOCK_SOURCE_LICK, TRUE);
+    /* enable lick */
+    crm_clock_source_enable(CRM_CLOCK_SOURCE_LICK, TRUE);
 
-  /* wait till lick is ready */
-  while(crm_flag_get(CRM_LICK_STABLE_FLAG) != SET)
-  {
-  }
+    /* wait till lick is ready */
+    while (crm_flag_get(CRM_LICK_STABLE_FLAG) != SET) {
+    }
 
-  /* enable hick */
-  crm_clock_source_enable(CRM_CLOCK_SOURCE_HICK, TRUE);
+    /* enable hick */
+    crm_clock_source_enable(CRM_CLOCK_SOURCE_HICK, TRUE);
 
-  /* wait till hick is ready */
-  while(crm_flag_get(CRM_HICK_STABLE_FLAG) != SET)
-  {
-  }
+    /* wait till hick is ready */
+    while (crm_flag_get(CRM_HICK_STABLE_FLAG) != SET) {
+    }
 
-  /* config pll clock resource */
-  crm_pll_config2(CRM_PLL_SOURCE_HICK, 150, 1, CRM_PLL_FR_4);
+    /* config pll clock resource */
+    crm_pll_config2(CRM_PLL_SOURCE_HICK, 150, 1, CRM_PLL_FR_4);
 
-  /* enable pll */
-  crm_clock_source_enable(CRM_CLOCK_SOURCE_PLL, TRUE);
+    /* enable pll */
+    crm_clock_source_enable(CRM_CLOCK_SOURCE_PLL, TRUE);
 
-  /* wait till pll is ready */
-  while(crm_flag_get(CRM_PLL_STABLE_FLAG) != SET)
-  {
-  }
+    /* wait till pll is ready */
+    while (crm_flag_get(CRM_PLL_STABLE_FLAG) != SET) {
+    }
 
-  /* config ahbclk */
-  crm_ahb_div_set(CRM_AHB_DIV_1);
+    /* config ahbclk */
+    crm_ahb_div_set(CRM_AHB_DIV_1);
 
-  /* config apb2clk, the maximum frequency of APB2 clock is 75 MHz  */
-  crm_apb2_div_set(CRM_APB2_DIV_2);
+    /* config apb2clk, the maximum frequency of APB2 clock is 75 MHz  */
+    crm_apb2_div_set(CRM_APB2_DIV_2);
 
-  /* config apb1clk, the maximum frequency of APB1 clock is 75 MHz  */
-  crm_apb1_div_set(CRM_APB1_DIV_2);
+    /* config apb1clk, the maximum frequency of APB1 clock is 75 MHz  */
+    crm_apb1_div_set(CRM_APB1_DIV_2);
 
-  /* enable auto step mode */
-  crm_auto_step_mode_enable(TRUE);
+    /* enable auto step mode */
+    crm_auto_step_mode_enable(TRUE);
 
-  /* select pll as system clock source */
-  crm_sysclk_switch(CRM_SCLK_PLL);
+    /* select pll as system clock source */
+    crm_sysclk_switch(CRM_SCLK_PLL);
 
-  /* wait till pll is used as system clock source */
-  while(crm_sysclk_switch_status_get() != CRM_SCLK_PLL)
-  {
-  }
+    /* wait till pll is used as system clock source */
+    while (crm_sysclk_switch_status_get() != CRM_SCLK_PLL) {
+    }
 
-  /* disable auto step mode */
-  crm_auto_step_mode_enable(FALSE);
+    /* disable auto step mode */
+    crm_auto_step_mode_enable(FALSE);
 
-  /* update system_core_clock global variable */
-  system_core_clock_update();
+    /* update system_core_clock global variable */
+    system_core_clock_update();
 }
 
 /**
@@ -153,38 +149,41 @@ void wk_system_clock_config(void)
   */
 void wk_periph_clock_config(void)
 {
-  /* enable dma1 periph clock */
-  crm_periph_clock_enable(CRM_DMA1_PERIPH_CLOCK, TRUE);
+    /* enable dma1 periph clock */
+    crm_periph_clock_enable(CRM_DMA1_PERIPH_CLOCK, TRUE);
 
-  /* enable iomux periph clock */
-  crm_periph_clock_enable(CRM_IOMUX_PERIPH_CLOCK, TRUE);
+    /* enable iomux periph clock */
+    crm_periph_clock_enable(CRM_IOMUX_PERIPH_CLOCK, TRUE);
 
-  /* enable gpioa periph clock */
-  crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
+    /* enable gpioa periph clock */
+    crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
 
-  /* enable gpiob periph clock */
-  crm_periph_clock_enable(CRM_GPIOB_PERIPH_CLOCK, TRUE);
+    /* enable gpiob periph clock */
+    crm_periph_clock_enable(CRM_GPIOB_PERIPH_CLOCK, TRUE);
 
-  /* enable adc1 periph clock */
-  crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
+    /* enable adc1 periph clock */
+    crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
 
-  /* enable tmr1 periph clock */
-  crm_periph_clock_enable(CRM_TMR1_PERIPH_CLOCK, TRUE);
+    /* enable tmr1 periph clock */
+    crm_periph_clock_enable(CRM_TMR1_PERIPH_CLOCK, TRUE);
 
-  /* enable spi1 periph clock */
-  crm_periph_clock_enable(CRM_SPI1_PERIPH_CLOCK, TRUE);
+    /* enable spi1 periph clock */
+    crm_periph_clock_enable(CRM_SPI1_PERIPH_CLOCK, TRUE);
 
-  /* enable usart1 periph clock */
-  crm_periph_clock_enable(CRM_USART1_PERIPH_CLOCK, TRUE);
+    /* enable usart1 periph clock */
+    crm_periph_clock_enable(CRM_USART1_PERIPH_CLOCK, TRUE);
 
-  /* enable tmr11 periph clock */
-  crm_periph_clock_enable(CRM_TMR11_PERIPH_CLOCK, TRUE);
+    /* enable tmr11 periph clock */
+    crm_periph_clock_enable(CRM_TMR11_PERIPH_CLOCK, TRUE);
 
-  /* enable tmr3 periph clock */
-  crm_periph_clock_enable(CRM_TMR3_PERIPH_CLOCK, TRUE);
+    /* enable tmr3 periph clock */
+    crm_periph_clock_enable(CRM_TMR3_PERIPH_CLOCK, TRUE);
 
-  /* enable tmr5 periph clock */
-  crm_periph_clock_enable(CRM_TMR5_PERIPH_CLOCK, TRUE);
+    /* enable tmr5 periph clock */
+    crm_periph_clock_enable(CRM_TMR5_PERIPH_CLOCK, TRUE);
+
+    /* enable usart2 periph clock */
+    crm_periph_clock_enable(CRM_USART2_PERIPH_CLOCK, TRUE);
 }
 
 /**
@@ -194,18 +193,20 @@ void wk_periph_clock_config(void)
   */
 void wk_nvic_config(void)
 {
-  nvic_priority_group_config(NVIC_PRIORITY_GROUP_4);
+    nvic_priority_group_config(NVIC_PRIORITY_GROUP_4);
 
-  NVIC_SetPriority(MemoryManagement_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
-  NVIC_SetPriority(BusFault_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
-  NVIC_SetPriority(UsageFault_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
-  NVIC_SetPriority(SVCall_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
-  NVIC_SetPriority(DebugMonitor_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
-  NVIC_SetPriority(PendSV_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 15, 0));
-  NVIC_SetPriority(SysTick_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 15, 0));
-  nvic_irq_enable(ADC1_IRQn, 5, 0);
-  nvic_irq_enable(USART1_IRQn, 5, 0);
-  nvic_irq_enable(TMR5_GLOBAL_IRQn, 5, 0);
+    NVIC_SetPriority(MemoryManagement_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_SetPriority(BusFault_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_SetPriority(UsageFault_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_SetPriority(SVCall_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_SetPriority(DebugMonitor_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_SetPriority(PendSV_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 15, 0));
+    NVIC_SetPriority(SysTick_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 15, 0));
+    nvic_irq_enable(ADC1_IRQn, 5, 0);
+    nvic_irq_enable(TMR1_CH_IRQn, 4, 0); /* CC4 ISR: software-triggers the ADC injected group */
+    nvic_irq_enable(USART1_IRQn, 7, 0);
+    nvic_irq_enable(USART2_IRQn, 8, 0);
+    nvic_irq_enable(TMR5_GLOBAL_IRQn, 6, 0);
 }
 
 /* add user code begin 1 */

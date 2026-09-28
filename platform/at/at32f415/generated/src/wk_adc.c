@@ -57,17 +57,17 @@ void wk_adc1_init(void)
     gpio_init_struct.gpio_pins = VBUS_PIN;
     gpio_init(VBUS_GPIO_PORT, &gpio_init_struct);
 
-    /* configure the IN2 pin */
-    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
-    gpio_init_struct.gpio_pins = ID_PAD_PIN;
-    gpio_init(ID_PAD_GPIO_PORT, &gpio_init_struct);
-
     /* configure the IN4 pin */
+    gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
+    gpio_init_struct.gpio_pins = IC_PIN;
+    gpio_init(IC_GPIO_PORT, &gpio_init_struct);
+
+    /* configure the IN5 pin */
     gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
     gpio_init_struct.gpio_pins = IB_PIN;
     gpio_init(IB_GPIO_PORT, &gpio_init_struct);
 
-    /* configure the IN5 pin */
+    /* configure the IN6 pin */
     gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
     gpio_init_struct.gpio_pins = IA_PIN;
     gpio_init(IA_GPIO_PORT, &gpio_init_struct);
@@ -80,31 +80,30 @@ void wk_adc1_init(void)
     adc_base_struct.sequence_mode = TRUE;
     adc_base_struct.repeat_mode = FALSE;
     adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
-    adc_base_struct.ordinary_channel_length = 2;
+    adc_base_struct.ordinary_channel_length = 1;
     adc_base_config(ADC1, &adc_base_struct);
 
-    /* adc_ordinary_conversionmode-------------------------------------------- */
-    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_1, 1, ADC_SAMPLETIME_239_5);
-    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_2, 2, ADC_SAMPLETIME_239_5);
-
-    /* When "ADCx_ORDINARY_TRIG_SOFTWARE" is selected, user can only use software trigger. \
-  The software trigger function is adc_ordinary_software_trigger_enable(ADCx, TRUE); */
-    adc_ordinary_conversion_trigger_set(ADC1, ADC12_ORDINARY_TRIG_SOFTWARE, TRUE);
-
-    adc_ordinary_part_mode_enable(ADC1, FALSE);
-
-    adc_dma_mode_enable(ADC1, TRUE);
     /* adc_preempt_conversionmode--------------------------------------------- */
-    adc_preempt_channel_length_set(ADC1, 2);
+    adc_preempt_channel_length_set(ADC1, 4);
 
-    adc_preempt_channel_set(ADC1, ADC_CHANNEL_4, 1, ADC_SAMPLETIME_7_5);
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_1, 1, ADC_SAMPLETIME_7_5);
     adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_1, 0x0);
-    adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 2, ADC_SAMPLETIME_7_5);
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_4, 2, ADC_SAMPLETIME_7_5);
     adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_2, 0x0);
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 3, ADC_SAMPLETIME_7_5);
+    adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_3, 0x0);
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_6, 4, ADC_SAMPLETIME_7_5);
+    adc_preempt_offset_value_set(ADC1, ADC_PREEMPT_CHANNEL_4, 0x0);
 
     /* When "ADCx_PREEMPT_TRIG_SOFTWARE" is selected, user can only use software trigger. \
   The software trigger function is adc_preempt_software_trigger_enable(ADCx, TRUE); */
-    adc_preempt_conversion_trigger_set(ADC1, ADC12_PREEMPT_TRIG_TMR3CH4, TRUE);
+    /* SOFTWARE trigger from the TMR1 CC4 interrupt (CCR4, near the counter
+     * peak): the DRV8311H low-side sense-FET CSA output is only valid while
+     * the low side conducts, so the injected group must sample inside the PWM
+     * window.  The hardware TMR1CH4 trigger path sampled with an angle-
+     * dependent gain (2026-09-26 gain(theta) map), so the trigger is now
+     * issued by the application ISR where the timing is fully controlled. */
+    adc_preempt_conversion_trigger_set(ADC1, ADC12_PREEMPT_TRIG_SOFTWARE, TRUE);
 
     /* enable preempted channels conversion end interrupt */
     adc_interrupt_enable(ADC1, ADC_PCCE_INT, TRUE);

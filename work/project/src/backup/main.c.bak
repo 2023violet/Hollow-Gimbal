@@ -127,17 +127,6 @@ int main(void)
                         DMA1_CHANNEL2_BUFFER_SIZE);
   dma_channel_enable(DMA1_CHANNEL2, TRUE);
 
-  /* init dma1 channel3 */
-  wk_dma1_channel3_init();
-  /* config dma channel transfer parameter */
-  /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
-     and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
-  wk_dma_channel_config(DMA1_CHANNEL3, 
-                        (uint32_t)&ADC1->odt, 
-                        DMA1_CHANNEL3_MEMORY_BASE_ADDR, 
-                        DMA1_CHANNEL3_BUFFER_SIZE);
-  dma_channel_enable(DMA1_CHANNEL3, TRUE);
-
   /* init usart1 function. */
   wk_usart1_init();
 
@@ -152,6 +141,31 @@ int main(void)
 
   /* init tmr3 function. */
   wk_tmr3_init();
+
+  /* init usart2 function. */
+  wk_usart2_init();
+
+  /* init dma1 channel3 */
+  wk_dma1_channel3_init();
+  /* config dma channel transfer parameter */
+  /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
+     and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
+  wk_dma_channel_config(DMA1_CHANNEL3, 
+                        (uint32_t)&USART2->dt, 
+                        DMA1_CHANNEL3_MEMORY_BASE_ADDR, 
+                        DMA1_CHANNEL3_BUFFER_SIZE);
+  dma_channel_enable(DMA1_CHANNEL3, TRUE);
+
+  /* init dma1 channel4 */
+  wk_dma1_channel4_init();
+  /* config dma channel transfer parameter */
+  /* user need to modify define values DMAx_CHANNELy_XXX_BASE_ADDR 
+     and DMAx_CHANNELy_BUFFER_SIZE in at32xxx_wk_config.h */
+  wk_dma_channel_config(DMA1_CHANNEL4, 
+                        (uint32_t)&USART2->dt, 
+                        DMA1_CHANNEL4_MEMORY_BASE_ADDR, 
+                        DMA1_CHANNEL4_BUFFER_SIZE);
+  dma_channel_enable(DMA1_CHANNEL4, TRUE);
 
   /* add user code begin 2 */
 

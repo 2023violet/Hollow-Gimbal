@@ -73,13 +73,13 @@
   */
 void NMI_Handler(void)
 {
-  /* add user code begin NonMaskableInt_IRQ 0 */
+    /* add user code begin NonMaskableInt_IRQ 0 */
 
-  /* add user code end NonMaskableInt_IRQ 0 */
+    /* add user code end NonMaskableInt_IRQ 0 */
 
-  /* add user code begin NonMaskableInt_IRQ 1 */
+    /* add user code begin NonMaskableInt_IRQ 1 */
 
-  /* add user code end NonMaskableInt_IRQ 1 */
+    /* add user code end NonMaskableInt_IRQ 1 */
 }
 
 /**
@@ -89,18 +89,16 @@ void NMI_Handler(void)
   */
 void HardFault_Handler(void)
 {
-  /* add user code begin HardFault_IRQ 0 */
+    /* add user code begin HardFault_IRQ 0 */
 
-  /* add user code end HardFault_IRQ 0 */
-  /* go to infinite loop when hard fault exception occurs */
-  while (1)
-  {
-    /* add user code begin W1_HardFault_IRQ 0 */
+    /* add user code end HardFault_IRQ 0 */
+    /* go to infinite loop when hard fault exception occurs */
+    while (1) {
+        /* add user code begin W1_HardFault_IRQ 0 */
 
-    /* add user code end W1_HardFault_IRQ 0 */
-  }
+        /* add user code end W1_HardFault_IRQ 0 */
+    }
 }
-
 
 /**
   * @brief  this function handles memory manage exception.
@@ -109,16 +107,15 @@ void HardFault_Handler(void)
   */
 void MemManage_Handler(void)
 {
-  /* add user code begin MemoryManagement_IRQ 0 */
+    /* add user code begin MemoryManagement_IRQ 0 */
 
-  /* add user code end MemoryManagement_IRQ 0 */
-  /* go to infinite loop when memory manage exception occurs */
-  while (1)
-  {
-    /* add user code begin W1_MemoryManagement_IRQ 0 */
+    /* add user code end MemoryManagement_IRQ 0 */
+    /* go to infinite loop when memory manage exception occurs */
+    while (1) {
+        /* add user code begin W1_MemoryManagement_IRQ 0 */
 
-    /* add user code end W1_MemoryManagement_IRQ 0 */
-  }
+        /* add user code end W1_MemoryManagement_IRQ 0 */
+    }
 }
 
 /**
@@ -128,16 +125,15 @@ void MemManage_Handler(void)
   */
 void BusFault_Handler(void)
 {
-  /* add user code begin BusFault_IRQ 0 */
+    /* add user code begin BusFault_IRQ 0 */
 
-  /* add user code end BusFault_IRQ 0 */
-  /* go to infinite loop when bus fault exception occurs */
-  while (1)
-  {
-    /* add user code begin W1_BusFault_IRQ 0 */
+    /* add user code end BusFault_IRQ 0 */
+    /* go to infinite loop when bus fault exception occurs */
+    while (1) {
+        /* add user code begin W1_BusFault_IRQ 0 */
 
-    /* add user code end W1_BusFault_IRQ 0 */
-  }
+        /* add user code end W1_BusFault_IRQ 0 */
+    }
 }
 
 /**
@@ -147,16 +143,15 @@ void BusFault_Handler(void)
   */
 void UsageFault_Handler(void)
 {
-  /* add user code begin UsageFault_IRQ 0 */
+    /* add user code begin UsageFault_IRQ 0 */
 
-  /* add user code end UsageFault_IRQ 0 */
-  /* go to infinite loop when usage fault exception occurs */
-  while (1)
-  {
-    /* add user code begin W1_UsageFault_IRQ 0 */
+    /* add user code end UsageFault_IRQ 0 */
+    /* go to infinite loop when usage fault exception occurs */
+    while (1) {
+        /* add user code begin W1_UsageFault_IRQ 0 */
 
-    /* add user code end W1_UsageFault_IRQ 0 */
-  }
+        /* add user code end W1_UsageFault_IRQ 0 */
+    }
 }
 
 /**
@@ -181,12 +176,12 @@ void UsageFault_Handler(void)
   */
 void DebugMon_Handler(void)
 {
-  /* add user code begin DebugMonitor_IRQ 0 */
+    /* add user code begin DebugMonitor_IRQ 0 */
 
-  /* add user code end DebugMonitor_IRQ 0 */
-  /* add user code begin DebugMonitor_IRQ 1 */
+    /* add user code end DebugMonitor_IRQ 0 */
+    /* add user code begin DebugMonitor_IRQ 1 */
 
-  /* add user code end DebugMonitor_IRQ 1 */
+    /* add user code end DebugMonitor_IRQ 1 */
 }
 
 // /**
@@ -203,7 +198,6 @@ void DebugMon_Handler(void)
 
 //   /* add user code end PendSV_IRQ 1 */
 // }
-
 
 // /**
 //   * @brief  this function handles systick handler.
@@ -237,7 +231,7 @@ void DebugMon_Handler(void)
 //     /* add user code begin ADC1_ADC_PCCE_FLAG */
 //     /* clear flag */
 //     adc_flag_clear(ADC1, ADC_PCCE_FLAG);
-//     /* add user code end ADC1_ADC_PCCE_FLAG */ 
+//     /* add user code end ADC1_ADC_PCCE_FLAG */
 //   }
 
 //   /* add user code begin ADC1_IRQ 1 */
@@ -261,13 +255,36 @@ void DebugMon_Handler(void)
 //     /* add user code begin USART1_USART_IDLEF_FLAG */
 //     /* clear flag */
 //     usart_flag_clear(USART1, USART_IDLEF_FLAG);
-//     /* add user code end USART1_USART_IDLEF_FLAG */ 
+//     /* add user code end USART1_USART_IDLEF_FLAG */
 //   }
 
 //   /* add user code begin USART1_IRQ 1 */
 
 //   /* add user code end USART1_IRQ 1 */
 // }
+
+/**
+  * @brief  this function handles USART2 handler.
+  * @param  none
+  * @retval none
+  */
+void USART2_IRQHandler(void)
+{
+    /* add user code begin USART2_IRQ 0 */
+
+    /* add user code end USART2_IRQ 0 */
+
+    if (usart_interrupt_flag_get(USART2, USART_IDLEF_FLAG) != RESET) {
+        /* add user code begin USART2_USART_IDLEF_FLAG */
+        /* clear flag */
+        usart_flag_clear(USART2, USART_IDLEF_FLAG);
+        /* add user code end USART2_USART_IDLEF_FLAG */
+    }
+
+    /* add user code begin USART2_IRQ 1 */
+
+    /* add user code end USART2_IRQ 1 */
+}
 
 // /**
 //   * @brief  this function handles TMR5 handler.

@@ -306,7 +306,7 @@ endfunction()
 function(themis_add_host_test)
   cmake_parse_arguments(
     ARG
-    ""
+    "WRAP_SYSTEM_FAILURE"
     "NAME;BASE_DIR;FOLDER"
     "SOURCES;GLOBS;PRIVATE_DEPS;PRIVATE_INCLUDE_DIRS"
     ${ARGN}
@@ -380,7 +380,15 @@ function(themis_add_host_test)
   endif()
 
   source_group(TREE "${ARG_BASE_DIR}" FILES ${_sources})
-  add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+  if(ARG_WRAP_SYSTEM_FAILURE)
+    # Keep WILL_FAIL usable for tests that intentionally terminate through a
+    # platform assertion/abort. Running the executable directly can make
+    # CTest classify the child termination as a system-level failure before
+    # WILL_FAIL inverts the exit status.
+    add_test(NAME ${ARG_NAME} COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:${ARG_NAME}>)
+  else()
+    add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+  endif()
 endfunction()
 
 function(themis_add_firmware)

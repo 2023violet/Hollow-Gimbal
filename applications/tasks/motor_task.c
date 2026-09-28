@@ -16,6 +16,7 @@
 #include "motor_task.h"
 
 #include "../runtime/foc_motion_runtime.h"
+#include "../runtime/motor_bench_watchdog.h"
 #include "../runtime/motor_calibration_runtime.h"
 #include "../runtime/motor_fault_runtime.h"
 #include "../runtime/motor_runtime.h"
@@ -54,6 +55,10 @@ extern "C" {
 static osThreadId_t motor_task_handle = NULL;
 static osThreadId_t motor_safe_task_handle = NULL;
 
+#if (TM_BENCH_DIAG != 0U)
+static uint32_t bench_run_ticks = 0U;
+#endif
+
 static const osThreadAttr_t motor_task_attr = {
     .name = "motor_task",
     .stack_size = TM_MOTOR_TASK_STACK_BYTES,
@@ -68,12 +73,11 @@ static const osThreadAttr_t safe_task_attr = {
 
 #if (TASK_PERF_ENABLE == 1)
 static struct core_time_perf adc_iqr_perf;
-static struct core_time_perf tim6_iqr_perf;
+static struct core_time_perf motor_iqr_perf;
 static struct core_time_perf motor_task_perf;
 static struct core_time_perf safe_task_perf;
 
 static uint32_t adc_time_us = 0;
-static uint32_t tim6_time_us = 0;
 static uint32_t motor_time_us = 0;
 static uint32_t safe_time_us = 0;
 #endif
@@ -84,6 +88,7 @@ struct motor_dev _motor_ins;
 
 static void _motor_task_entry(void *argument);
 static void _motor_safe_task_entry(void *argument);
+static void _motor_stage_hw_snapshot(void);
 
 /* Public functions ----------------------------------------------------------------------------- */
 
@@ -95,6 +100,9 @@ void motor_task_init(void)
 
     motor_runtime_init(&_motor_ins);
     motor_runtime_attach(&_motor_ins);
+#if (TM_BENCH_DIAG != 0U)
+    motor_bench_watchdog_reset();
+#endif
 
     motor_task_handle = osThreadNew(_motor_task_entry, NULL, &motor_task_attr);
     motor_safe_task_handle = osThreadNew(_motor_safe_task_entry, NULL, &safe_task_attr);
@@ -103,23 +111,82 @@ INIT_EXPORT(motor_task_init, EXPORT_LEVEL_APP);
 
 /* Public Functions ----------------------------------------------------------------------------- */
 
+/* Software-trigger handshake between the TMR1 CC4 ISR (sampling instant) and
+ * the ADC1 ISR (conversion complete).  The CC4 ISR fires twice per PWM period
+ * (up- and down-crossing of CCR4); the gate guarantees exactly one injected
+ * sequence per period. */
+static volatile uint8_t _adc_sw_trig_armed = 1U;
+
+void TMR1_CH_IRQHandler(void)
+{
+    if (tmr_interrupt_flag_get(TMR1, TMR_C4_INT) == RESET) {
+        return;
+    }
+    tmr_flag_clear(TMR1, TMR_C4_FLAG);
+
+    if (_adc_sw_trig_armed != 0U) {
+        _adc_sw_trig_armed = 0U;
+        /* Fire the injected group from software at the CCR4 instant (counter
+         * peak).  The hardware TMR1CH4 trigger path sampled with an angle-
+         * dependent gain on this board (2026-09-26 gain(theta) map); this
+         * keeps the same bench-validated timing under full code control. */
+        adc_preempt_software_trigger_enable(ADC1, TRUE);
+    }
+}
+
 void ADC1_IRQHandler(void)
 {
+    static uint8_t foc_tick_div = 0U;
+
     if (adc_interrupt_flag_get(ADC1, ADC_PCCE_FLAG) == RESET) {
         return;
     }
     adc_flag_clear(ADC1, ADC_PCCE_FLAG);
 
+    _adc_sw_trig_armed = 1U;
+
     adc_read_phases(&_motor_ins);
+    _motor_stage_hw_snapshot();
+    foc_fault_check_fast(&_motor_ins);
+    if (_motor_ins.fault_code != FAULT_NONE) {
+        return;
+    }
+#if (TM_BENCH_DIAG != 0U)
+    if (_motor_ins.axis_state == AXIS_STATE_RUNNING) {
+        if (bench_run_ticks < TM_MOTOR_BENCH_MAX_RUN_TICKS) {
+            bench_run_ticks++;
+        }
+        if (bench_run_ticks >= TM_MOTOR_BENCH_MAX_RUN_TICKS) {
+            foc_fault_bench_timeout(&_motor_ins);
+            return;
+        }
+        if (motor_runtime_bench_watchdog_tick(&_motor_ins)) {
+            foc_fault_bench_timeout(&_motor_ins);
+            return;
+        }
+    } else {
+        bench_run_ticks = 0U;
+        (void)motor_runtime_bench_watchdog_tick(&_motor_ins);
+    }
+#endif
 #if (TASK_PERF_ENABLE == 1)
     core_time_perf_start(&adc_iqr_perf);
 #endif
-    encoder_update(&_motor_ins.enc_pri);
 #if (TASK_PERF_ENABLE == 1)
     core_time_perf_stop(&adc_iqr_perf);
     adc_time_us = (uint32_t)core_time_perf_get_us(&adc_iqr_perf);
     (void)(adc_time_us);
 #endif
+
+    /* Soft-float SoC (AT32F415, no FPU): leave enough idle CPU budget for
+     * Shell and safety tasks between full FOC steps.  Product cadence stays
+     * 10 kHz; the bench image uses 5 kHz and derives its control dt from the
+     * same compile-time contract. */
+    foc_tick_div++;
+    if (foc_tick_div < TM_MOTOR_FOC_ADC_DIVIDER) {
+        return;
+    }
+    foc_tick_div = 0U;
 
     switch (_motor_ins.axis_state) {
     case AXIS_STATE_CALIB:
@@ -127,6 +194,9 @@ void ADC1_IRQHandler(void)
         break;
     case AXIS_STATE_RUNNING:
         foc_current_loop_step(&_motor_ins);
+#if (TM_BENCH_DIAG != 0U)
+        motor_bench_trace_update(&_motor_ins);
+#endif
         break;
     default:
         break;
@@ -141,21 +211,40 @@ void THEMIS_PLATFORM_MOTOR_SOFTIRQ_HANDLER(void)
     tmr_flag_clear(THEMIS_PLATFORM_MOTOR_SOFTIRQ_INSTANCE, TMR_OVF_FLAG);
 
 #if (TASK_PERF_ENABLE == 1)
-    core_time_perf_start(&tim6_iqr_perf);
+    core_time_perf_start(&motor_iqr_perf);
 #endif
+
+    encoder_update(&_motor_ins.enc_pri);
 
     if (_motor_ins.axis_state == AXIS_STATE_RUNNING) {
         foc_outer_loop_step(&_motor_ins);
     }
 
 #if (TASK_PERF_ENABLE == 1)
-    core_time_perf_stop(&tim6_iqr_perf);
-    tim6_time_us = (uint32_t)core_time_perf_get_us(&tim6_iqr_perf);
-    (void)(tim6_time_us);
+    core_time_perf_stop(&motor_iqr_perf);
+    motor_time_us = (uint32_t)core_time_perf_get_us(&motor_iqr_perf);
+    (void)(motor_time_us);
 #endif
 }
 
 /* Private Helpers ------------------------------------------------------------------------------ */
+
+static void _motor_stage_hw_snapshot(void)
+{
+    struct motor_hw_snapshot hw = {0};
+    hw.tmr1_ists      = TMR1->ists;
+    hw.tmr1_cval      = TMR1->cval;
+    hw.tmr1_pr        = TMR1->pr;
+    hw.tmr1_ccr1      = TMR1->c1dt;
+    hw.tmr1_ccr2      = TMR1->c2dt;
+    hw.tmr1_ccr3      = TMR1->c3dt;
+    hw.tmr1_ccr4      = TMR1->c4dt;
+    hw.tmr1_cctrl     = TMR1->cctrl;
+    hw.tmr1_brk       = TMR1->brk;
+    hw.tmr1_count_dir = (uint8_t)TMR1->ctrl1_bit.cnt_dir;
+    hw.adc_sts        = ADC1->sts;
+    motor_fault_runtime_stage_hw_snapshot(&hw);
+}
 
 static void _motor_task_entry(void *argument)
 {
@@ -223,13 +312,16 @@ static void _motor_safe_task_entry(void *argument)
     vofa_bind(5, &_motor_ins.meas_data.out_vel_rpm, VOFA_FLOAT);
     vofa_bind(6, &_motor_ins.meas_data.out_pos_turns, VOFA_FLOAT);
 #endif
+    // vofa_bind(0, &_motor_ins.enc_pri.state.angle_mech_rad, VOFA_FLOAT);
+    // vofa_bind(1, &_motor_ins.enc_pri.state.velocity_rads, VOFA_FLOAT);
+    // vofa_bind(2, &_motor_ins.enc_pri.state.total_enc, VOFA_FLOAT);
 
     for (;;) {
 #if (TASK_PERF_ENABLE == 1)
         core_time_perf_start(&safe_task_perf);
 #endif
 
-        adc_read_ordinary(&_motor_ins);
+        // adc_read_ordinary(&_motor_ins);
         motor_runtime_handle_deferred_save(&_motor_ins);
 
 #if (TASK_PERF_ENABLE == 1)

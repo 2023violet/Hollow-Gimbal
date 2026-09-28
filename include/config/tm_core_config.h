@@ -72,6 +72,15 @@ extern "C" {
 #define TM_FEATURE_VOFA (1U)
 #endif
 
+#if !defined(TM_BENCH_DIAG)
+#define TM_BENCH_DIAG (0U)
+#endif
+
+#if (TM_BENCH_DIAG != 0U)
+#undef TM_FEATURE_VOFA
+#define TM_FEATURE_VOFA (0U)
+#endif
+
 #if !defined(TM_FEATURE_IPC)
 #define TM_FEATURE_IPC (0U)
 #endif
@@ -165,7 +174,7 @@ extern "C" {
 /* Shell Budget -------------------------------------------------------------------------------- */
 
 #if !defined(TM_SHELL_TASK_STACK_BYTES)
-#define TM_SHELL_TASK_STACK_BYTES (512U * 4U)
+#define TM_SHELL_TASK_STACK_BYTES (192U * 4U)
 #endif
 
 #if !defined(TM_SHELL_TASK_QUEUE_DEPTH)
@@ -173,7 +182,11 @@ extern "C" {
 #endif
 
 #if !defined(TM_APP_TASK_STACK_SHELL_BYTES)
+#if defined(TM_BENCH_DIAG) && (TM_BENCH_DIAG != 0U)
 #define TM_APP_TASK_STACK_SHELL_BYTES (512U * 4U)
+#else
+#define TM_APP_TASK_STACK_SHELL_BYTES (384U * 4U)
+#endif
 #endif
 
 /* Core Limits --------------------------------------------------------------------------------- */

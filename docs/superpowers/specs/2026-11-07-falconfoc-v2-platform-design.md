@@ -12,8 +12,9 @@
 
 - 独立的 FOC 控制核心库
 - 面向 MCU 和功率级的硬件端口层
-- 无 FreeRTOS 依赖的确定性运行时
-- 第一版自有 CAN-FD 控制协议
+- Core 无 FreeRTOS 依赖，V2 reference device 使用确定性的裸机混合运行时
+- 第一版自有 UART 二进制控制协议
+- 后续可复用同一命令语义适配 CAN 2.0、CAN-FD 或其他传输
 - 主机端 Python/C++/Rust 工具
 - 可追溯的校准、参数和实机证据体系
 - AT32F415 作为第一个 reference device
@@ -27,7 +28,8 @@
 - 不把当前 `applications/` 目录直接改名后继续堆功能
 - 不把 Shell 作为产品控制协议
 - 不在控制核心中保留 FreeRTOS、CMSIS-RTOS2、动态内存或 MCU 头文件
-- 不在第一版实现完整 CANopen 或 EtherCAT 协议栈
+- 不在第一阶段删除或替换已经验证可用的 Legacy FreeRTOS runtime
+- 不把 CANopen、EtherCAT 或 CAN-FD 作为 V2 第一版门槛
 - 不承诺一次性覆盖所有电机、所有采样拓扑和所有无感算法
 - 不将 AT32F415 的 ADC、PWM、相序、采样窗口和时钟常量写入通用核心
 - 不把历史实机结论直接升级为通用控制常量
@@ -75,10 +77,11 @@ falconfoc-protocol
     └── versioning
 
 falconfoc-transport
-    ├── canfd
-    ├── uart_debug
-    ├── usb_cdc
-    └── future_adapters
+    ├── uart
+    ├── future_can2
+    ├── future_canfd
+    ├── future_usb
+    └── future_ethernet
 
 firmware
     └── at32f415_reference
@@ -92,6 +95,8 @@ tools
 ```
 
 当前仓库保留为迁移宿主。新的目录和 API 必须先建立独立边界，再逐步迁移现有实现。迁移完成前，旧实现仅作为 reference firmware 和 compatibility source。
+
+当前 Board1 的外部通信事实是 USART。AT32F415 芯片具备经典 CAN 2.0B Active 控制器，但当前 PCB 没有可用的 CAN 外部链路，芯片也不具备原生 CAN-FD 控制器。因此 V2 的第一条真实传输只能是 UART。
 
 ## 4. 控制核心契约
 
@@ -115,11 +120,11 @@ tools
   - 传感器角度
   - 传感器速度
   - 采样质量和有效标记
-- `foc_command_t`
+- `validated_motion_command_t`
   - 控制模式
   - 位置、速度、电流或转矩目标
   - 限速、限流和加速度限制
-  - 命令序列号和有效期
+  - Device 层已经完成的有效性和超时判断
 - `foc_outputs_t`
   - 三相占空比
   - 使能请求
@@ -160,7 +165,7 @@ void foc_get_snapshot(const struct foc_context *ctx,
                       struct foc_snapshot *snapshot);
 ```
 
-`foc_fast_tick()` 不能调用协议、日志、Flash、阻塞 IO、动态内存或不确定时延的服务。
+`foc_fast_tick()` 不能调用协议、日志、Flash、阻塞 IO、动态内存或不确定时延的服务。UART 帧序列号、CRC、节点地址和传输错误不进入 Core。数据流必须经过 `protocol_message -> device_request -> validated_motion_command -> foc_core` 的边界。
 
 ### 4.3 时间契约
 
@@ -241,9 +246,11 @@ void foc_get_snapshot(const struct foc_context *ctx,
 
 核心只依赖逻辑存储接口。A/B、CRC、Flash sector、磨损均衡和升级策略属于 device/runtime 层。
 
-## 6. 无 FreeRTOS 运行时
+## 6. V2 reference runtime
 
-新架构不保留 FreeRTOS。
+当前 Legacy 固件继续保留 FreeRTOS。V2 Core 不依赖 FreeRTOS，V2 reference device 默认采用硬实时中断、前台事件驱动超级循环、静态协作调度和显式状态机的混合模型。未来可以增加 FreeRTOS runtime adapter，但不能改变 Core、Device service 和 Protocol 的语义。
+
+具体执行域、资源所有权、调度器、邮箱、时间源、故障动作和实施禁令见 [Runtime ADR R1](2026-11-08-falconfoc-v2-runtime-adr-r1.md)。
 
 ### 6.1 Fast path
 
@@ -277,7 +284,7 @@ Fast path 禁止：
 - 速度环和位置环
 - 校准状态机
 - 参数保存任务
-- CAN-FD 收发
+- UART 收发和后续 transport adapter mailbox
 - 诊断快照
 - trace buffer 管理
 - 看门狗和能力状态
@@ -293,35 +300,52 @@ Fast path 禁止：
 
 它不提供线程、阻塞队列、优先级反转、堆分配或隐式并发语义。
 
-## 7. CAN-FD 自有协议 v1
+## 7. Falcon Protocol v1 over UART
 
-第一版协议采用固定 64 字节 CAN-FD 数据帧和扩展 CAN ID。协议与控制核心解耦，CAN-FD 是第一条 transport。
+第一版协议使用当前 Board1 已有的 UART/USART 链路。协议定义消息语义和版本，UART 只负责字节流传输。未来的 CAN 2.0、CAN-FD、USB 或 Ethernet adapter 复用命令语义，但不要求所有 transport 拥有相同的时序和可靠性特征。
 
-### 7.1 CAN ID 建议
+### 7.1 UART transport contract
+
+- USART1，当前默认 115200 8N1
+- DMA RX 环形缓冲
+- DMA TX 有界发送队列
+- USART IDLE、DMA half-transfer、DMA transfer-complete 或有界轮询共同推进接收消费
+- 接收消费必须支持连续数据流，不能只依赖 IDLE 间隙
+- RX 溢出必须可检测并产生 transport fault
+- 控制命令、故障事件、状态遥测和调试日志使用不同队列策略
+
+### 7.2 UART frame format
+
+V1 使用有界长度二进制消息。候选帧格式为 COBS 加 `0x00` 分隔符，并在逻辑 payload 内包含 CRC16。
 
 ```text
-28             24 23        16 15       8 7        0
-+----------------+------------+----------+----------+
-| priority       | message    | source   | target   |
-| 4 bits         | class 8 bit| 8 bits   | 8 bits   |
-+----------------+------------+----------+----------+
+version
+message_type
+flags
+sequence
+payload_length
+payload
+crc16
 ```
 
-第一版必须固定：
+协议必须定义：
 
 - 小端编码
-- 最大 64 字节 payload
-- 消息版本字段
-- 节点 ID
+- 字段类型和单位
+- 消息版本
 - 序列号
-- flags
-- opcode
-- payload length
-- ACK/NACK 规则
-- command timeout
-- fault event 规则
+- payload 长度
+- CRC16
+- ACK/NACK
+- 重复请求处理
+- 请求超时
+- 串口失联处理
+- 重同步策略
+- 最大输入帧长度
 
-### 7.2 v1 消息类别
+当前 115200 8N1 的理论字节预算约为 11520 B/s。持续遥测必须有带宽预算，遥测过载时允许丢弃旧样本，但不能丢弃 stop、disable、fault 和失联语义。
+
+### 7.3 v1 message classes
 
 第一版只实现必要集合：
 
@@ -342,12 +366,12 @@ Fast path 禁止：
 - `ACK`
 - `NACK`
 
-### 7.3 实时控制命令
+### 7.4 实时控制命令
 
 `COMMAND_SETPOINT` 必须包含：
 
 - command sequence
-- command timestamp 或 freshness window
+- freshness window
 - mode
 - position target
 - velocity target
@@ -358,9 +382,9 @@ Fast path 禁止：
 - feedforward term
 - stop behavior
 
-设备在 command timeout 后必须进入预定义的安全状态。安全状态不能依赖主机继续发送文本命令。
+Device 在 command timeout 后必须进入预定义的安全状态。安全状态不能依赖主机继续发送文本命令。
 
-### 7.4 协议设计约束
+### 7.5 协议设计约束
 
 - 控制命令和诊断数据分开。
 - 控制命令使用固定字段，避免动态字符串解析。
@@ -370,7 +394,18 @@ Fast path 禁止：
 - 所有错误都返回稳定的错误码和 fault detail。
 - 协议 v1 的 schema 必须有版本号和生成工具。
 
-第一版不追求兼容 CANopen。后续可以提供 CANopen、EtherCAT 或 VESC 风格的 adapter，但不允许这些协议反向污染核心对象模型。
+第一版不实现 CANopen、EtherCAT 或 CAN-FD。后续可以提供 CAN 2.0、CAN-FD、CANopen、EtherCAT 或 VESC 风格的 adapter，但不允许这些协议反向污染核心对象模型。
+
+### 7.6 安全语义
+
+协议命令必须区分：
+
+- `STOP`，停止运动目标并按配置处理输出保持
+- `DISABLE`，强制关闭功率输出
+- `BRAKE`，进入明确声明的制动策略
+- `FAULT_CLEAR`，只清除允许清除的故障，不自动重新使能功率级
+
+串口失联、RX 溢出、帧损坏、序列号异常和命令过期都必须进入明确的安全状态。协议入口的检查不能替代最终执行点的安全检查。
 
 ## 8. 控制能力分期
 
@@ -386,7 +421,7 @@ Fast path 禁止：
 - Hall 输入
 - 过流、过压、欠压、超速、过温和传感器故障
 - 基础参数保存
-- CAN-FD 控制协议
+- UART 二进制控制协议
 
 ### V2.1 能力
 
@@ -433,6 +468,8 @@ Fast path 禁止：
 
 任何参数改变控制坐标系、采样比例、极对数、相序或传感器解释方式时，都必须使旧校准失效或明确进入迁移流程。
 
+Flash 保存必须在最终写入前再次确认轴状态、功率输出状态和调度上下文。参数入口已经通过安全检查，不能作为最终写入点的唯一依据。擦除、写入和恢复失败都必须可观测并进入安全错误路径。
+
 ## 10. 测试体系
 
 ### 10.1 Core host tests
@@ -456,7 +493,12 @@ Fast path 禁止：
 - 超时
 - ACK/NACK
 - 重复帧
-- 节点地址错误
+- 连续 UART 流重同步
+- COBS 解码错误
+- CRC 错误
+- RX 溢出
+- 遥测过载
+- 节点地址错误或 transport 不适用
 
 ### 10.3 Port tests
 
@@ -499,7 +541,7 @@ Fast path 禁止：
 
 ## 11. 迁移阶段
 
-### Phase 0 资产冻结
+### G0 资产冻结
 
 交付：
 
@@ -515,26 +557,63 @@ Fast path 禁止：
 - 所有证据都有来源和固件身份。
 - 不允许对 legacy baseline 做破坏性清理。
 
-### Phase 1 新目录和构建骨架
+### G1 硬件和时间事实纠正
+
+交付：
+
+- UART 外部链路事实
+- AT32F415 CAN 2.0B 与 CAN-FD 能力表
+- Cortex-M4、DSP、无 FPU 事实确认
+- 当前 CPU class 和 FreeRTOS port 的事实记录
+- ADC/PWM/encoder/fault 能力清单
+- 当前采样频率、控制频率和执行时间测量计划
+
+验收：
+
+- 不修改 legacy 默认 CPU 配置，不把 CPU class 或 FreeRTOS port 迁移作为 V2 门禁。
+- 可选建立 Cortex-M4 DSP 编译优化实验，只有在 WCET、代码尺寸和行为回归均有数据后才形成独立决策。
+- 记录 CMSIS-DSP 定义、GCC `-mcpu`、软浮点 ABI 和 FreeRTOS 旧 port 的现状。
+- 形成当前板支持和不支持的能力表。
+
+### G2 最小 Core 和构建骨架
 
 交付：
 
 - `core`
-- `port`
-- `runtime`
-- `protocol`
-- `transport`
-- `firmware`
-- `tools`
-- `tests`
+- Core 数据结构和显式 timing/sample/output contract
+- Clarke/Park
+- SVPWM
+- 电压开环
+- 电压和占空比限幅
+- Core host tests
+- 最小 reference device 构建目标
 
 验收：
 
 - core 可以在主机编译。
 - core 不包含 MCU、RTOS、Shell 和 Flash 依赖。
-- firmware 可以单独链接 reference device。
+- 电压开环模型、SVPWM 边界和限幅测试通过。
+- Core API 已足够支撑 G3 的 ADC 到 PWM 纵向链。
 
-### Phase 2 时间和运行时重建
+### G3 AT32F415 第一条板级纵向链
+
+交付：
+
+- 新 Core
+- AT32F415 port
+- 采样输入
+- 控制计算
+- PWM 输出
+- timing snapshot
+
+验收：
+
+- ADC 到 Core 到 PWM 的最小链路在当前板上运行。
+- 实际采样时间、控制时间、输出更新时间和漏样可以读取。
+- 不依赖 UART 命令完成 fast path。
+- 先通过 G3-SAFE 门禁，再允许任何真实 PWM 输出或带电机测试。
+
+### G4 裸机运行时和安全
 
 交付：
 
@@ -550,75 +629,48 @@ Fast path 禁止：
 - 控制核心使用显式 dt。
 - 实际 tick 序号和周期可观测。
 - 不存在通过 ISR 服务延迟隐式改变控制频率的握手。
+- H0 电流控制域与 H1 传感器/运动外环域各自独占内部状态。
+- 前台调度器具备单轮预算、job 最大迟到、饥饿计数和调度超限事件。
+- 命令、传感器和遥测分别使用规定的一致性发布规则。
 
-### Phase 3 迁移基础 FOC
+### G5 基础有感 FOC
 
 交付：
 
-- math
-- Clarke/Park
-- SVPWM
 - current loop
-- voltage open loop
+- encoder sample publication
+- sensor quality
+- velocity loop
+- position loop
+- calibration state
 - fault boundaries
 
 验收：
 
-- 新核心 host tests 通过。
-- 新核心与现有数学模型输出在允许误差内一致。
-- 不依赖 `motor_dev`、Shell 或 FreeRTOS。
+- 有感电流、速度和位置控制在指定板卡和电机上完成有界验证。
+- 不依赖 `motor_dev`、Shell 或 FreeRTOS。Legacy Device 可以继续通过 FreeRTOS 运行，但 Core API 不得暴露 RTOS 类型。
 
-### Phase 4 AT32F415 port
-
-交付：
-
-- PWM port
-- ADC port
-- timer port
-- encoder port
-- board profile
-- fault port
-
-验收：
-
-- 采样 rank、相序、PWM 通道和时钟全部由 profile 声明。
-- 静态 port contract 通过。
-- 当前板的安全关闭行为通过。
-
-### Phase 5 CAN-FD protocol v1
+### G6 UART Protocol v1、参数和校准
 
 交付：
 
-- frame schema
+- UART frame schema
 - encoder/decoder
-- node addressing
+- host CLI
 - command timeout
 - status and fault frames
 - parameter operations
-- Python CLI
+- calibration jobs
+- versioned persistence
 
 验收：
 
 - 不使用固件文本 Shell 完成启停、速度、电流和故障操作。
-- 主机可以发现节点、读取能力、发送 setpoint、读取状态和清除故障。
-- 丢帧、重复帧和超时都有确定行为。
-
-### Phase 6 参数和校准迁移
-
-交付：
-
-- versioned schema
-- motor/sensor/power-stage groups
-- calibration jobs
-- persistent storage adapter
-- invalidation rules
-
-验收：
-
+- 主机可以通过 UART 发现设备、读取能力、发送 setpoint、读取状态和清除故障。
+- 连续数据流、损坏帧、重同步、RX 溢出、重复帧和超时都有确定行为。
 - 更换电机或板卡后旧校准不会静默生效。
-- 保存、加载、升级和损坏恢复有 host tests 和 port tests。
 
-### Phase 7 当前板实机复验
+### G7 当前板实机复验
 
 顺序：
 
@@ -638,7 +690,7 @@ Fast path 禁止：
 - 独立相电流、PWM 波形和故障边界有证据。
 - 旧板经验只用于验证，不进入核心硬编码。
 
-### Phase 8 第二个 reference device
+### G8 第二参考平台和后续 transport
 
 第二个设备应故意选择与 AT32F415 不同的条件，例如：
 
@@ -652,7 +704,7 @@ Fast path 禁止：
 - 核心 API 不因第二个平台增加条件编译污染。
 - 两个平台都能运行相同的 core host model 和 protocol vectors。
 
-### Phase 9 开源发布
+### G9 开源 Beta
 
 交付：
 
@@ -697,7 +749,7 @@ Fast path 禁止：
 
 - 产品 Shell
 - Shell 字符串作为控制 API
-- FreeRTOS task ownership
+- Legacy FreeRTOS task ownership
 - 旧 `motor_dev` 巨型状态对象
 - 与旧路径绑定的静态文档 contract
 - 仅验证文件形状的测试
@@ -726,6 +778,8 @@ Fast path 禁止：
 
 ## 14. 当前执行顺序
 
-第一轮只做 Phase 0、Phase 1 和 Phase 2。完成时间基线、目录边界和无 RTOS runtime 后，再迁移 FOC 算法。CAN-FD 协议在 runtime mailbox 和状态快照稳定后进入，不提前把协议字段写进控制核心。
+第一轮只做 G0、G1 和 G2。完成 legacy 基线、硬件资源与时间事实、运行时 ADR 和最小 Core 后，再做 G3 当前板纵向链路。UART 协议在 Device mailbox 和状态快照稳定后进入，不提前把协议字段写进控制核心。
 
-当前设计不会改变 live FalconFoc 启动链，也不会删除现有代码。旧实现只有在新核心、AT32F415 port、CAN-FD v1 和实机复验全部通过后，才进入删除或归档评审。
+当前设计不会改变 live FalconFoc 启动链，也不会删除现有代码。旧实现只有在新核心、AT32F415 port、UART Protocol v1 和实机复验全部通过后，才进入删除或归档评审。CAN 2.0、CAN-FD、CANopen 和 EtherCAT 适配不属于当前板的 V2 基础验收。
+
+2026-11-08 G0/G1 只读审计结果见 `docs/evidence/2026-11-08-*.md`。当前 Legacy 基线、host `45/45`、AT32F415 bench build、TMR/DMA/UART/IRQ 资源、H0/H1 所有权风险、UART 连续流风险和 G3-SAFE 前置条件均已记录。TMR2、SPI1 DMA 和 WDT/WWDT 仍是待决资源，不得在实施阶段自行占用。

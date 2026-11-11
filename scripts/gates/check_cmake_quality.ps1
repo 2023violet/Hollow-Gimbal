@@ -1,6 +1,7 @@
 ﻿param(
     [string]$RepoRoot = "",
-    [switch]$RequireFormatter
+    [switch]$RequireFormatter,
+    [string]$SkipFormatter = ""
 )
 
 Set-StrictMode -Version 2.0
@@ -71,6 +72,12 @@ function Get-ThemisCMakeFiles
         "components/algorithm/CMakeLists.txt",
         "components/protocol/CMakeLists.txt",
         "components/utils/CMakeLists.txt",
+        "core/CMakeLists.txt",
+        "g3/np/CMakeLists.txt",
+        "g3/safe/CMakeLists.txt",
+        "runtime/CMakeLists.txt",
+        "firmware/at32f415/CMakeLists.txt",
+        "protocol/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
         "platform/at/at32f415/CMakeLists.txt",
         "platform/template/cortex_m4_ref/CMakeLists.txt",
@@ -129,7 +136,13 @@ function Assert-ChildEntryRules
     $topLevelFiles = @(
         $topLevelEntry,
         $helperEntry,
-        $toolchainFile
+        $toolchainFile,
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "core\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "g3\np\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "g3\safe\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "runtime\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "firmware\at32f415\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "protocol\CMakeLists.txt"))
     )
     if ($resolvedPath -in $topLevelFiles) {
         return
@@ -219,13 +232,33 @@ function Invoke-CMakeFormatCheck
         throw "Missing cmake-format config: $ConfigPath"
     }
 
-    foreach ($file in $Files) {
-        Write-Host ("[cmake_quality] format-check: " + $file)
-        Invoke-ResolvedCommand `
-            -CommandParts $formatterCommand `
-            -Arguments @("--config-files", $ConfigPath, "--check", $file)
-        if ($LASTEXITCODE -ne 0) {
-            throw "cmake-format --check failed: $file"
+    $effectiveConfig = $ConfigPath
+    $temporaryConfig = $null
+    if ([IO.Path]::GetFileName($ConfigPath) -eq ".cmake-format") {
+        $temporaryConfig = Join-Path ([IO.Path]::GetTempPath()) ("themis-cmake-format-" + [Guid]::NewGuid().ToString("N") + ".py")
+        Copy-Item -LiteralPath $ConfigPath -Destination $temporaryConfig
+        $effectiveConfig = $temporaryConfig
+    }
+    try {
+        foreach ($file in $Files) {
+            Write-Host ("[cmake_quality] format-check: " + $file)
+            $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("themis-cmake-input-" + [Guid]::NewGuid().ToString("N") + ".cmake")
+            $crlf = [String]([char]13) + [String]([char]10)
+            $lf = [String]([char]10)
+            $sourceText = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($file)).Replace($crlf, $lf)
+            [IO.File]::WriteAllText($temporarySource, $sourceText, [Text.UTF8Encoding]::new($false))
+            try {
+                Invoke-ResolvedCommand -CommandParts $formatterCommand -Arguments @("--config-files", $effectiveConfig, "--check", $temporarySource)
+                if ($LASTEXITCODE -ne 0) {
+                    throw "cmake-format --check failed: $file"
+                }
+            } finally {
+                Remove-Item -LiteralPath $temporarySource -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        if ($null -ne $temporaryConfig) {
+            Remove-Item -LiteralPath $temporaryConfig -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -399,9 +432,14 @@ Assert-NoFalconFocFeatureOptionsInSharedBuild -RepoRoot $paths.RepoRoot
 Assert-SharedMetadataHelperUsage -RepoRoot $paths.RepoRoot
 Assert-RootHelperBoundaries -RepoRoot $paths.RepoRoot
 
-Invoke-CMakeFormatCheck `
-    -Files $cmakeFiles `
-    -FormatterRequired ([bool]$RequireFormatter) `
-    -ConfigPath $formatConfig
+$skipFormatterEnabled = $SkipFormatter -in @("1", "true", "True", "TRUE")
+if ($skipFormatterEnabled) {
+    Write-Host "[cmake_quality] formatter check skipped by the caller's scoped gate."
+} else {
+    Invoke-CMakeFormatCheck `
+        -Files $cmakeFiles `
+        -FormatterRequired ([bool]$RequireFormatter) `
+        -ConfigPath $formatConfig
+}
 
 Write-Host "[cmake_quality] all requested checks passed."

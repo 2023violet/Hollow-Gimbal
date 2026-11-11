@@ -1,0 +1,192 @@
+# FalconFOC UART V1
+
+Portable C11 byte framing with bounded storage. The codec reuses the repository
+COBS implementation. The existing CRC module implements MODBUS, so this module
+provides the specified CCITT-FALSE calculation.
+
+## Build and verify
+
+```powershell
+cmake -S protocol -B build/sw04-protocol -G Ninja -DCMAKE_C_COMPILER=clang
+cmake --build build/sw04-protocol
+ctest --test-dir build/sw04-protocol --output-on-failure
+```
+
+Fixed [vectors](tests/vectors.tsv) are shared with the Python tool. Columns are
+hex message ID, role, sequence, session, payload (a dash means empty), and the
+complete wire frame. The vectors include request and response layouts.
+
+## Wire format
+
+A wire frame is COBS of the raw frame followed by one zero byte. Integer fields
+and CRC use little-endian byte order. Floats in business payloads use IEEE-754
+binary32 LE. Readers use explicit byte operations. CRC is
+CRC-16/CCITT-FALSE, polynomial 0x1021, initial 0xFFFF, no reflection, xor-out
+zero. It covers all 16 header bytes and the payload. The standard check is
+`123456789 → 0x29B1`.
+
+| Raw offset | Size | Field |
+| --- | ---: | --- |
+| 0 | 2 | Magic 46 46 |
+| 2 | 1 | Version 01 |
+| 3 | 1 | Message ID |
+| 4 | 1 | Role 01 request, 02 response, 04 event. Combinations rejected. |
+| 5 | 1 | Reserved 00 |
+| 6 | 4 | Sequence |
+| 10 | 4 | Logical session |
+| 14 | 2 | Payload byte length |
+| 16 | 0–96 | Payload |
+| 16 + length | 2 | CRC16 |
+
+The largest raw frame is 114 bytes, COBS body 115 bytes and complete wire frame
+116 bytes. Empty delimiters do nothing. Oversize frames are discarded through a
+delimiter. COBS, CRC, version, magic, reserved and length failures cannot enter
+the command adapter. Unknown message IDs may receive UNKNOWN_COMMAND after
+integrity validation.
+
+## Sessions, sequence and results
+
+HELLO uses session zero and empty payload. A different HELLO sequence opens a new
+volatile session and revokes the old Runtime command. Repeating the current
+HELLO sequence returns the same session without extending a command lease. The
+CLI chooses a random initial sequence. Session IDs are boot-local counters and
+can repeat after reset. CRC and session checks provide no authentication.
+
+All other requests require the current session. The first sequence may be zero.
+Later sequences require a modulo delta strictly between zero and 2^31.
+Duplicate, old and ambiguous sequences return REPLAY. An admitted request
+consumes a sequence even when its business arguments are rejected. Framing
+errors, wrong sessions and requests dropped before admission consume no
+sequence. Responses echo the request type and sequence.
+
+The first response payload byte is its result.
+
+| Value | Name | Meaning |
+| --- | --- | --- |
+| 0 | OK | Read completed |
+| 1 | ACCEPTED | Runtime publication or asynchronous operation accepted |
+| 2 | APPLIED | Foreground-owned RAM policy write completed |
+| 3–7 | BAD_FRAME, BAD_CRC, UNSUPPORTED_VERSION, UNKNOWN_COMMAND, INVALID_ARGUMENT | Validation failure |
+| 8–11 | BAD_SESSION, REPLAY, BUSY, BAD_STATE | Request admission or state failure |
+| 12–14 | OUTPUT_LOCKED, NOT_SUPPORTED, INTERNAL_ERROR | Explicit device limitation or internal failure |
+
+Malformed frames are counted and discarded. Business errors use a one-byte
+response payload. Damaged bytes never extend a lease.
+
+## Message payloads
+
+All empty requests reject extra bytes. Lengths below include the response result.
+
+| ID | Message | Request payload | Response |
+| --- | --- | --- | --- |
+| 01 | HELLO | Empty, session 0 | 9-byte capability, new session in header |
+| 02 | CAPABILITY_READ | Empty | 9-byte capability |
+| 03 | STATUS_READ | Empty | 30-byte status |
+| 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), or mode u8 + reference f32 for velocity/position (5 bytes) | ACCEPTED + Runtime publication u32 (5 bytes) |
+| 11 | COMMAND_STOP | Empty | ACCEPTED, query status for H0 acknowledgement |
+| 12 / 13 | COMMAND_ARM / COMMAND_START | Empty | OUTPUT_LOCKED |
+| 20 | FAULT_READ | Empty | 30-byte status including faults and recovery result |
+| 21 | FAULT_CLEAR | Empty | ACCEPTED only for isolated command-timeout recovery |
+| 30 | PARAM_READ | ID u16 | 18-byte typed parameter |
+| 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
+| 32 | PARAM_SAVE | Empty | NOT_SUPPORTED |
+| 40 | TELEMETRY_READ | Empty | 63-byte status and telemetry |
+| 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
+
+Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
+and continuous mechanical rad. Setpoints must match the current Runtime mode.
+The reference firmware starts in CURRENT and exposes no remote mode switch in
+V1. Capability differentiates available algorithms from physical output.
+
+A validated setpoint is stamped once with the MCU time at completed validation.
+Runtime publication identities continue across wire sessions. STATUS returns the
+last H0-observed publication identity and timestamp. A matching identity with
+command-observed set establishes H0 command observation. Fault and pipeline
+results describe subsequent admission. Physical applied remains false.
+
+STOP revokes the reference before asking H0 to acknowledge INHIBIT. FAULT_CLEAR
+requests only isolated COMMAND_TIMEOUT recovery. H0 rechecks the fault mask,
+fresh ADC/angle data, Foreground progress, request age and software inhibition
+before invoking its existing clear operation. The clear result is queryable.
+Other fault masks return BAD_STATE. Recovery ends in DISABLED with old command
+and sample validity cleared.
+
+## Capability and status layout
+
+Capability response bytes are result, protocol version, three firmware version
+bytes, algorithm mode bitmask, physical mode bitmask, and capability u16.
+Current values are protocol 1, firmware 0.1.0, algorithms 7, physical modes 0,
+and capabilities 15. Capability bits are output lock, RAM policy parameters,
+polling telemetry and UART transport. No persistence or calibration claim is set.
+
+| Status offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | u8 | Result |
+| 1 / 2 | u8 / u8 | Safety state / Runtime mode |
+| 3 | u8 | Flags below |
+| 4 | u8 | Software output action |
+| 5 / 9 | u32 / u32 | Fault bits / MCU time in µs modulo 2^32 |
+| 13 | i32 | Pipeline result |
+| 17 | u8 | Recovery result NONE 0, PENDING 1, APPLIED 2, REJECTED 3 |
+| 18 / 22 / 26 | u32 | Sample source time / command source time / Runtime publication sequence |
+
+Status flag bits are LOCKED 0, software-output acknowledgement 1, fresh sensor 2,
+H0-observed command 3, inhibit pending 4, RAM dirty 5, Fast seen 6 and sample
+seen 7. Timestamp zero is legal, so the seen flags matter. Ages use the existing
+half-range Runtime rules. Software acknowledgement does not certify a physical
+bridge transition.
+
+TELEMETRY appends f32 d current at 30, f32 q current at 34, f32 mechanical
+position at 38, f32 velocity at 42, u32 sensor source time at 46, u32 CRC errors
+at 50, u32 dropped frames at 54, u32 RX overflow/error events at 58, and a validity byte
+at 62. Its bits are physical applied 0, calibrated current valid 1, sensor
+calibrated 2. These three bits are zero in this reference image. Current fields
+are zero and invalid. Position/velocity preserve their H0-consumed source time
+and are valid only when the fresh-sensor flag is set. Their calibration remains
+unverified.
+
+## Parameters
+
+A parameter response is result, ID u16, type u8, unit u8, attributes u8, minimum,
+maximum and value. The final three values occupy four bytes each and use the
+declared type. Types are u32 1 and f32 2. Units are dimensionless 0, A 1, rad 2,
+rad/s 3. Attribute bits are writable 0, applied to RAM 1 and calibration
+required 2.
+
+| ID | Parameter | Type | Range / initial value |
+| --- | --- | --- | --- |
+| 1 | Bytes examined per Foreground protocol poll | u32 | 8–32 / 24 |
+| 2 | Remote current-vector magnitude cap | f32 A | 0.05–2.5 / 2.5 |
+| 3 | Absolute remote position-reference cap | f32 rad | 1–1000 / 100 |
+| 16 | Pole pairs | u32, read only | Board1 nominal 7 |
+| 17 | Electrical offset | f32 rad, read only | Uncalibrated nominal 0 |
+| 18 | Velocity-reference limit | f32 rad/s, read only | Runtime configured 12 |
+
+Writes require a coherent DISABLED view with software inhibition acknowledged
+and no pending stop. The three writable policies belong to Foreground and take
+effect together with their successful response. Unknown IDs, incorrect types,
+NaN, Inf and range violations are rejected. Controller configurations remain
+read-only. Dirty means RAM changed since boot. A restart restores defaults.
+
+## UART service bounds
+
+Board1 uses remapped USART1 PB6 TX/PB7 RX, 115200 8N1. The SDK confirms DMA1
+CH1/CH2 as the Legacy RX/TX candidates. The V2 byte-IRQ implementation owns no DMA.
+Its IRQ handles at most one RX byte/error and one TX byte, at priority 2 below
+H0 priority 0 and H1 priority 1. Nominal full-duplex traffic can produce up to
+23,040 byte events per second. This is an event-rate bound, with MCU time cost
+still to be measured.
+
+The RX ring has 256 16-bit entries, including a gap sentinel. It drops corrupt
+or overflowing data through a delimiter, then queues the sentinel before any
+new bytes. Foreground resets framing at that sentinel. The TX buffer holds one
+complete 116-byte frame and stays immutable until the IRQ consumes it. A further
+STOP acknowledgement has a reserved metadata slot.
+
+Foreground runs Runtime supervision first, then consumes 8–32 bytes and at most
+one complete frame per poll. A busy TX slot rejects ordinary requests before
+admission and increments the drop counter. A valid STOP can use the reserve
+without blocking on the ordinary response. When both slots are occupied,
+further requests are unadmitted and counted. Hosts use stop-and-wait and can
+retry an unadmitted request. An admitted duplicate receives REPLAY, so it cannot
+repeat an action or renew a lease.

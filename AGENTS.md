@@ -20,6 +20,11 @@ Read these first, in order:
 10. `docs/governance/Themis_Transport与Shell硬化说明.md`
 11. `docs/governance/Themis_Shell与诊断输出规范.md`
 12. `docs/governance/Themis_工程维护日志.md`
+13. `docs/governance/Themis_代码规范指南.md`
+14. `docs/governance/Themis_Utils与通用组件代码规范指南.md`
+15. `docs/governance/Themis_C与H文件布局与注释书写规范.md`
+16. `docs/governance/Themis_CMake编写规范与质量门禁.md`
+17. `docs/governance/Themis_AI高质量编码必读清单.md`
 
 If touching these areas, read the matching local entry too:
 
@@ -35,6 +40,12 @@ If touching these areas, read the matching local entry too:
   - `include/README.md`
 - `components/`
   - `components/README.md`
+- `core/` or `g3/`
+  - the G2/G3-NP plan and the applicable portability and C/H layout rules
+- `protocol/`
+  - `protocol/README.md` for V1 wire layout and shared vectors
+- `firmware/at32f415/` or `tools/falconfoc-cli/`
+  - the local README and `protocol/README.md` for the locked firmware and Host tests
 
 ## 2. FalconFoc Boundary
 

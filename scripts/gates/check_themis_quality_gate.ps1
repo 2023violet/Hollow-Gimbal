@@ -1,6 +1,6 @@
 param(
     [string]$RepoRoot = "",
-    [ValidateSet("cmake", "components", "subsys", "bsp", "applications", "all")]
+    [ValidateSet("cmake", "falconfoc", "components", "subsys", "bsp", "applications", "all")]
     [string]$Scope = "all",
     [switch]$Summary,
     [switch]$RequireCMakeFormatter
@@ -138,13 +138,17 @@ function Invoke-CMakeQuality
 {
     param(
         [string]$ResolvedGitRoot,
-        [bool]$FormatterRequired
+        [bool]$FormatterRequired,
+        [bool]$SkipFormatter
     )
 
     $scriptPath = Join-Path $ResolvedGitRoot "scripts\\gates\\check_cmake_quality.ps1"
     $params = @{ RepoRoot = $ResolvedGitRoot }
     if ($FormatterRequired) {
         $params.RequireFormatter = $true
+    }
+    if ($SkipFormatter) {
+        $params.SkipFormatter = $true
     }
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap $params
 }
@@ -220,6 +224,14 @@ function Invoke-HostTests
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedGitRoot }
 }
 
+function Invoke-FalconFocSourceContract
+{
+    param([string]$ResolvedRepoRoot)
+
+    $scriptPath = Join-Path $ResolvedRepoRoot "scripts\gates\check_falconfoc_source_contract.ps1"
+    Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedRepoRoot }
+}
+
 function Write-ManualGateReminder
 {
     Write-Host "[quality_gate] automatic checks finished. Please still confirm:"
@@ -245,16 +257,28 @@ $gatePassed  = $false
 
 try {
     Invoke-DiffCheck -ResolvedGitRoot $paths.GitRoot
-    Invoke-CMakeQuality -ResolvedGitRoot $paths.GitRoot -FormatterRequired $requireFormatter
+    if ($Scope -in @("falconfoc", "all")) {
+        Invoke-FalconFocSourceContract -ResolvedRepoRoot $paths.RepoRoot
+    }
+    Invoke-CMakeQuality `
+        -ResolvedGitRoot $paths.GitRoot `
+        -FormatterRequired $requireFormatter `
+        -SkipFormatter ($Scope -eq "falconfoc")
     Invoke-CMakePresetContract -ResolvedGitRoot $paths.GitRoot
     Invoke-PlatformBackendContract -ResolvedGitRoot $paths.GitRoot
     Invoke-CMakeSmoke -ResolvedRepoRoot $paths.RepoRoot
-    Invoke-FirmwareCliContract -ResolvedRepoRoot $paths.RepoRoot
+    if ($Scope -eq "falconfoc") {
+        Write-Host "[quality_gate] skip firmware CLI contract for FalconFOC source scope."
+    } else {
+        Invoke-FirmwareCliContract -ResolvedRepoRoot $paths.RepoRoot
+    }
     Invoke-HostCacheGuardRegression -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot
     Invoke-TransportShellHardeningContract -ResolvedGitRoot $paths.GitRoot
 
     switch ($Scope) {
         "cmake" {
+        }
+        "falconfoc" {
         }
         "components" {
             Invoke-HostTests -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot

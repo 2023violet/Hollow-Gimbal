@@ -5,6 +5,9 @@ This repository keeps only the FalconFoc live script surface.
 Current official entry points:
 
 - quality gate: `scripts/check_themis_quality_gate.ps1`
+- FalconFOC Core, G3-NP, G3-SAFE, and Runtime source contract: `scripts/gates/check_falconfoc_source_contract.ps1`
+- FalconFOC G3-SAFE host project: `g3/safe/` with its independent CMake/CTest entry
+- FalconFOC current-control pipeline: `runtime/` with its independent CMake/CTest entry
 - host tests: `scripts/run_host_tests.ps1`
 - FOC peripheral static contract: `scripts/flows/host/check_foc_peripheral_contract.ps1`
 - dedicated bench firmware: CMake preset `build-fw-full-diag-carrier-bench-debug`
@@ -16,12 +19,15 @@ Current official entry points:
 - open-loop probe log analyzer (host-side): `scripts/flows/board/analyze_openloop_probe.py`
 - controlled bench pulse helper: `tmp/bench/20260828_235546/run_fixed_vector_pulse.ps1`
 - firmware CLI: `run.sh`, `memory.sh`
+- locked V2 AT32F415 cross-build and Host Board Port test: [reference firmware](../firmware/at32f415/README.md)
+- V2 binary UART protocol, shared vectors and CLI reproduction: [wire specification](../protocol/README.md) and [Host tool](../tools/falconfoc-cli/README.md)
 - Keil bridge: `scripts/build_project.ps1`
 
 Layout:
 
 - `scripts/gates/`: canonical gate implementations
   - includes `check_cmake_smoke.ps1` for preset-first host/live/prepared-inactive configure smoke
+  - `check_themis_quality_gate.ps1 -Scope falconfoc` includes the FalconFOC source-contract gate
 - `scripts/flows/host/`: canonical host flows
   - includes the no-board FOC peripheral contract check; it only reads source
     and generated configuration and never connects to a debugger or board

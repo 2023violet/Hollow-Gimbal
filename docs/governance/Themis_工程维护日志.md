@@ -2432,3 +2432,105 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
   服务后重arm，让注入严格由硬件边沿决定（服务超时则丢样而不是拖慢节拍）。
 - `[现场]` 临时改动全部还原（`git status` 为空），干净的 bench-30s 镜像已重新烧录并
   以 `inj_hz=13,350` 复验；板子停在无输出状态，3.3V 由飞控板供着。
+
+## 2026-11-08 FalconFOC V2 G0/G1 baseline and runtime gate freeze
+
+- `[架构]` 根据正式评审批准，V2 runtime 采用硬实时中断、前台事件驱动超级循环、静态协作调度、H0/H1 分层状态所有权和独立安全监督。Legacy 继续使用现有 FreeRTOS `ARM_CM3` port、soft-float ABI 和 `cortex-m3-soft` CPU class。
+- `[协议]` 当前 Board1 外部通信正式按 USART/UART 处理。Falcon Protocol v1 以 UART 为首发传输，CAN 2.0、CAN-FD、CANopen 和 EtherCAT 不属于当前板 V2 基础验收。
+- `[G0]` 基线 HEAD=`1f542521189d5e0ef25e64e6530608ece8d6e137`。host CTest `45/45 PASS`。AT32F415 bench debug 配置和构建通过，ELF SHA-256=`7E061224F3FA3D06A0CF0E2B91892FDEE5B0111B939CCC8228BB74B947041B12`。
+- `[G1]` 新增证据文件：`docs/evidence/2026-11-08-legacy-baseline.md`、`docs/evidence/2026-11-08-at32f415-resource-matrix.md`、`docs/evidence/2026-11-08-timing-and-blocking-baseline.md`、`docs/evidence/2026-11-08-uart-dma-audit.md`、`docs/evidence/2026-11-08-g3-safe-acceptance-matrix.md`。
+- `[边界]` 本轮只做主机测试、固件构建、源码和 SDK 资源审计。未执行调试器、刷写、UART 命令、PWM 使能、实板带电操作或电机测试。
+- `[待决]` TMR2 单调时间源、SPI1 DMA 通道、WDT/WWDT 选择、H0/H1 复合快照实现和 G3-SAFE 实施仍需后续阶段审批。当前 G3 只允许无功率输出验证，G3-SAFE 通过前禁止进入带电测试。
+
+## 2026-11-09 FalconFOC V2 G2 standalone Core
+
+- `[实现]` 新增独立 `core/` C11 静态库，提供 Clarke、Park、逆 Park、角度环绕、中心注入 SVPWM、限幅、显式 `dt_s` 和电压开环步进。Core 不链接 Legacy、MCU、厂商 SDK、FreeRTOS、Shell、Flash、CMSIS-DSP 或硬件寄存器。
+- `[测试]` Core 独立 CMake/CTest 三项测试全部通过，覆盖变换、六扇区 SVPWM、期望值、输入不可变、非法数值、非法 VBUS、非法 `dt_s`、状态保持和确定性重放。
+- `[回归]` 既有 Legacy host 流程 `45/45 PASS`。AT32F415 `fw-full-diag-carrier-bench-debug` 配置和构建通过，继续使用 `cortex-m3-soft`。未修改 Legacy 控制 ISR、PWM、ADC、Encoder、FreeRTOS port 或根 CMake 组装。
+- `[质量门禁]` CMake quality、preset、platform backend 和 CMake smoke 检查通过。现有 firmware CLI 合约脚本因本机没有 Bash 无法执行，需在具备 Bash 的环境中补跑。
+- `[边界]` G2 只证明独立控制核心的主机软件基础成立，不证明 AT32F415 WCET、采样时序、PWM 寄存器、安全监督、运行时调度或 G3-SAFE。未刷机、未启动调试器、未发送 UART 命令、未使能 PWM、未进行实板带电或电机测试。
+
+## 2026-11-09 FalconFOC V2 G2 independent source acceptance
+
+- `[审查]` 对本地工作树中的 `core/` 公共头文件、实现、CMake、三组测试、README 和 G2 证据记录完成逐行审查。变换和 SVPWM 使用局部结果提交，`foc_step` 在错误路径完整初始化禁用输出，并且失败时不提交电角度状态。
+- `[补强]` 增加 SVPWM 扇区边界连续性、非零向量输出有限性、轴向期望值、失败安全输出完整性、不同合法 `dt_s` 等时积分和长序列状态验证。
+- `[结论]` 本地源码与证据快照独立验收 PASS。仓库 firmware CLI 质量脚本仍因当前 Windows 环境没有 Bash 未闭合，不影响 Core CTest、Legacy `45/45` 回归或 bench 固件构建结论。
+
+## 2026-11-09 FalconFOC V2 G3-NP Core/Device and offline chain
+
+- `[接口]` 新增独立 `g3/np/` 主机工程，显式表示 Board1 ADC rank、V/A 换算、ABC/ACB 相序和 TMR1 CH1/CH2/CH3 映射。Device 请求把 `INHIBIT` 与 `UPDATE` 分开，零 compare 只作为 mock 禁止状态的寄存器值，不等同于零占空比驱动或主动制动。
+- `[离线链]` 新增 `Sample -> Device decode -> foc_step -> Device map -> mock registers` 模拟链。模拟桥臂 gate 永久关闭，合法请求只更新 mock compare，不报告物理桥臂使能。
+- `[测试]` G3-NP 两个 CTest 目标通过，覆盖 ADC 转换、相序和通道映射、样本新鲜度、非法时间、禁用输出、锁存故障优先级、瞬态恢复和失败时 Core 状态保持。
+- `[边界]` G3-NP 未修改 Legacy ISR、ADC/PWM 实时链或根固件 CMake。未执行调试器、刷写、UART 命令、PWM 使能、实板带电或电机测试。G3-SAFE 与 G3-PWR 继续未通过。
+
+## 2026-11-09 FalconFOC V2 G3-SAFE first host contract
+
+- `[安全状态]` 新增独立 `g3/safe/` 主机工程，冻结 BOOT、DISABLED、READY、RUNNING、FAULT_LATCHED 状态，故障锁存、显式清除回 DISABLED、命令/样本单调时间新鲜度、双 heartbeat 和输出 gate 语义。
+- `[WDT/Flash]` 只实现 watchdog feed permission 与 Flash permission contract，不访问真实 WDT、WWDT、Flash 或 PWM 寄存器。运行态、故障态和非 INHIBIT 动作均被拒绝。
+- `[测试]` G3-SAFE fault-injection host test `1/1 PASS`，覆盖状态禁止、命令超时、样本超时、无效样本阈值、fast/foreground heartbeat 丢失、非法输出动作、故障清除和非自动恢复。
+- `[边界]` 当前结果属于 `host-verified` 软件契约证据，不证明 WDT 复位时间、桥臂关闭延迟、硬件 break、驱动器保护、Flash 恢复或任何带电行为。G3-PWR 继续锁定。
+
+## 2026-11-09 FalconFOC V2 G2/G3-NP source-style acceptance
+
+- `[规范问题]` 专项审查确认新增 `core/` 与 `g3/np/` 原先没有进入 C/H formatter、CMake quality 和统一质量门禁的完整受管范围，且新增 C/H、CMake 文件缺少 Themis 头、public 契约和 EOF 规范证据。
+- `[整改]` 为 11 个 C/H 文件补齐模块或测试角色、设计/使用/所有权/失败契约、public symbol 注释、section banner 和 EOF 标记。为 2 个 standalone CMake 文件补齐 Role 头和 kebab-case target，并扩展 formatter/CMake/quality-gate 覆盖。
+- `[门禁]` 新增 `scripts/gates/check_falconfoc_source_contract.ps1`，独立检查 G2/G3-NP C/H、CMake 和 README，并增加统一质量门禁 `falconfoc` scope。source contract、clang-format、两个新增 CMake 的严格 cmake-format、FalconFOC 专项质量 scope、CMake structural checks、G2/G3-NP 测试和 Legacy 回归通过。全量 scope 已先执行 source contract，再被既有根 `CMakeLists.txt` 格式差异阻断，全量 firmware CLI 仍需要 Bash。
+
+## 2026-11-10 FalconFOC V2 G3-SAFE-HW01 hardware safety-chain audit
+
+- `[范围]` 完成 Board1 原理图、网表、BOM、DRV8311H 数据手册、AT32F415 生成式 TMR1/ADC/GPIO 配置、WDT/WWDT SDK 和 Legacy PWM 调用链的只读交叉审计。未修改控制 ISR、WDT 配置、板级寄存器，未刷机、未上电、未使能 PWM。
+- `[P0]` 发现生成式 `wk_tmr1_init()` 在 `app_main_bootstrap()` 之前已经开启 TMR1 主输出、CH1/2/3 及互补通道和计数器。`pwm_out_disable()` 尚未成为复位后的第一道门禁，因此“上电默认禁止输出”不能仅由当前软件辅助函数证明。
+- `[P0]` 网表确认 DRV8311H `nFAULT` 没有 MCU 端点，`nSLEEP` 也没有 MCU 控制端点。当前 Board1 没有可声明的软件故障输入、MCU 睡眠控制或已闭合的 `nFAULT -> nSLEEP` 外部关断链。
+- `[P0]` TMR1 SDK 存在 Break 寄存器和 API，官方 Datasheet 也给出 QFN32 PA6 的 `TMR1_BRK` 复用，但当前 PA6 被 IA 电流采样占用、生成配置保持 `brk_enable=FALSE`，且 DRV `nFAULT` 没有接入。该能力只能标为 `register-only`，不能写成当前板的硬件安全保护。
+- `[芯片资料]` 官方 AT32F415 Reference Manual 确认 WDT 由 30–60 kHz LICK 驱动，WWDT 由主时钟驱动，WDT 因此成为第一版独立监督的首选候选。官方 Datasheet 还确认 QFN32 PA6 具备 `TMR1_BRK` 复用，但当前 PA6 被 IA 电流采样占用，不能在现板上直接形成 DRV `nFAULT` -> TMR1 Break 路径。
+- `[WDT]` 生成配置同时注释 `WDT_MODULE_ENABLED` 和 `WWDT_MODULE_ENABLED`。WDT 的器件级时钟来源已经确认，但 timeout、频率容差、复位原因和复位期间输出状态仍需补证。G3-SAFE 硬件门禁与 G3-PWR 继续锁定。
+- `[证据]` 新增 `docs/evidence/2026-11-10-g3-safe-hw01-resource-audit.md` 和 `docs/superpowers/plans/2026-11-10-falconfoc-g3-safe-hw01.md`，将启动门禁、故障路径、WDT、复位默认态和安全时序拆成后续可验收任务。
+
+## 2026-11-10 FalconFOC V2 HW02-A reset-safety preparation
+
+- `[复核]` 接受 HW01 资源审计，但补充两项边界。`CCR=0` 在 TMR1 极性、中心对齐计数、互补输出和 DRV 6x PWM 真值表共同作用下，不能直接等价为 `INHIBIT`。R7 确实连接 `nFAULT` 与 `nSLEEP`，但电阻通路是否能跨过 DRV Sleep 阈值仍需在明确 DCBUS、D2 钳位和输入电流条件后计算与测量。
+- `[电源]` Board1 的 `DCBUS -> U4 VIN_AVDD/VM -> U4 AVDD -> DRV_3V3 -> U3/U5/CSAREF` 依赖被纳入 HW02-A。完全断开 DCBUS 可能同时关闭 MCU 供电，外部 3.3 V 注入在反向供电审查前禁止采用。
+- `[阶段]` 批准 `HW02-A` 只读准备，新增 `docs/evidence/2026-11-10-g3-safe-hw02-a-prep.md` 和 `docs/superpowers/plans/2026-11-10-falconfoc-g3-safe-hw02-a.md`。该阶段只建立电源边界、TMR1 寄存器矩阵、`CCR=0` 推导、R7 网络计算和测量前提。
+- `[限制]` `HW02-B` 实板供电与波形观测仍需单独授权。WDT 实际复位测试不并入首次复位波形观测，G3-SAFE 最终硬件验收和 G3-PWR 继续锁定。
+
+## 2026-11-10 FalconFOC V2 NEXT-FOC-01 d/q current control
+
+- `[实现]` 新增独立 d/q 电流 PI，复用 G2 变换和 SVPWM。采用显式 `dt_s`、共享电压矢量上限与基于最终占空比的抗饱和。计算失败时清空输出并保留积分状态。
+- `[验证]` Core `4/4`，G3-NP `2/2`，G3-SAFE Host `1/1`，Legacy Host `45/45`，AT32F415 Bench 全新构建和 FalconFOC 专项门禁通过。四种步长的固定转子闭环通过。全仓门禁仍阻断于根 CMake 格式，Firmware CLI 合约使用 Git Bash 单独补跑通过。详见 `docs/evidence/2026-11-10-next-foc-01-current-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW01A Host current pipeline
+
+- `[实现]` 新增 Host Pipeline 连接 ADC 解码、电流 PI、Device 映射、Safety 最终 Gate 和闭门 Mock。只有完整 UPDATE 获准且被 Mock 接受才提交 PI 状态。禁止失败明确标记为未确认。零序列、源时间与故障恢复规则覆盖到端到端测试。
+- `[验证]` 固定转子模型接受 `1800` 次 UPDATE，最终 INHIBIT，最大窗口轴误差 `0.417 mA`。Pipeline `1/1`、Core `4/4`、G3-NP `2/2`、G3-SAFE `1/1`、Legacy Host `45/45`、Legacy Bench 与 FalconFOC 专项门禁通过。全仓仍阻断于既有根 CMake 格式。详见 `docs/evidence/2026-11-10-next-sw01a-pipeline-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW01B Host execution domains
+
+- `[实现]` 新增 H0、H1 和 Foreground 的固定时序入口。H0 独占 Pipeline，双槽接收角度与命令，原子遥测和独立禁止通道处理抢占。最终 Safety Gate 后仍检查停止请求，保留原 PI 提交与恢复语义。
+- `[验证]` Runtime 与 Pipeline `2/2`，Core `4/4`，G3-NP `2/2`，G3-SAFE `1/1`，Legacy Host `45/45`，Bench 和 FalconFOC 专项通过。每次重放接受 `1200` 个 UPDATE，最大误差 `0.417 mA`，最终过迟触发进入 Mock INHIBIT。全仓继续阻断于既有根 CMake 格式。详见 `docs/evidence/2026-11-10-next-sw01b-runtime-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-FOC-02 sensored motion loops
+
+- `[实现]` 新增机械与电气坐标换算、有界电角预测、独立速度 PI 与位置 P。H1 以源命令和会话身份发布外环目标，仅在 H0 确认接受后提交提案。换模仅允许在已禁止的 DISABLED 会话，重新使能沿用 Safety ARM/START。
+- `[验证]` 固定参数 PMSM 电气机械模型验证正反速度、连续位置和负载增减，记录轨迹、双实例隔离与确定性重放。Core `5/5`、Runtime `4/4`、G3-NP `2/2`、G3-SAFE `1/1`、Legacy Host `45/45`、Bench 与专项门禁通过。全仓仍阻断于既有根 CMake 格式。详见 `docs/evidence/2026-11-10-next-foc-02-motion-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW03 AT32F415 参考固件
+
+- `[实现]` 独立裸机入口复用厂商启动、xB 链接脚本和 SDK。TMR2 计时，TMR1 CH4/ADC1 进入 H0，TMR5/SPI1 进入 H1。锁定适配器校验三相请求，拒绝 UPDATE 并保持 PI 未提交。
+- `[验证]` V2 ELF/BIN/HEX/MAP 已生成。Board1 Host、Core、Runtime、G3-NP、G3-SAFE、Legacy Host 与 Bench 通过。专项门禁通过，全仓格式门禁待闭合。编码器料号无 CRC，物理输出与实板时序仍待验证。详见 `docs/evidence/2026-11-10-next-sw03-at32f415-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW04 UART 与主机工具
+
+- `[实现]` 新增独立 COBS/CCITT-FALSE V1 协议、会话与序号检查、低优先级 USART1 字节 IRQ、有界缓冲、Runtime 命令撤销与 H0 命令超时故障恢复。三个 RAM 参数由 Foreground 持有，ARM/START 保持 OUTPUT_LOCKED，保存与自动流遥测明确返回不支持。
+- `[验证]` Protocol 1/1、Board/Transport/Python 3/3、Runtime 5/5、Core 5/5、G3-NP 2/2、G3-SAFE 1/1、Legacy Host 45/45、全新 Bench 和 V2 构建通过。V2 Flash 33,768 B、链接器 RAM 3,376 B。源码契约与专项门禁通过，全仓仍阻断于根 CMake 格式。详见 `docs/evidence/2026-11-10-next-sw04-uart-validation.md`。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW05 RC0 软件验收
+
+- [验证] 增加 10,000 次确定性协议随机输入、87 µs UART 压力流和 100,000 周期 Runtime 长事件流。长流重复指纹 49dea950，H0 漏期、迟到和预算超限均为 0。UART 压力统计为 CRC 29、丢帧 88、RX 溢出 29、UPDATE 0。
+- [资源] 重新生成 V2 ELF/MAP，Flash 33,768 B、链接器 RAM 3,376 B、.bss 2,268 B，4 KiB 栈保留断言通过。ARM、Host、Legacy Host 45/45、Legacy Bench 和专项门禁通过。
+- [边界] Windows Clang sanitizer 运行时因缺少 coe_win/Dbghelp 链接符号标记 BLOCKED。全仓门禁仍停在既有根 CMake 格式，全软件 RC0 证据记录见 docs/evidence/2026-11-10-next-sw05-rc0-validation.md。
+
+## 2026-11-10 FalconFOC V2 NEXT-SW05R RC0 software recheck
+
+- `[AC11]` 使用 LLVM Clang 22.1.8 的 `-fsanitize=address,undefined` 重新构建并运行 Core、G3-NP、G3-SAFE、Runtime、Protocol、Board/UART Host 工程，共 18/18 CTest 通过；仅为测试进程补充 LLVM 动态 sanitizer runtime 路径，未向生产 ARM 构建注入 sanitizer 选项。
+- `[CMake]` 根 `CMakeLists.txt` 只做 LF 换行修正，并修复两个门禁脚本对无扩展名 `.cmake-format` Python 配置的识别以及临时 Unix 输入检查。根文件格式检查通过，未改变 CMake 命令、字符串或目标语义。
+- `[边界]` `Scope all` 在根文件之后继续暴露既有共享 CMake、`tests/CMakeLists.txt` 及新 standalone V2 CMake 清单的格式差异。本轮按授权不格式化这些文件，因此 RC0 软件仍为 `BLOCKED`；Legacy 回归、Legacy Bench、V2 ARM ELF/BIN/HEX/MAP 和全部 Host 功能测试保持通过。

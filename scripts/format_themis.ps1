@@ -136,7 +136,7 @@ function Get-ThemisOwnedCFiles
 
     $result = @()
     foreach ($path in $RepoRelativePaths) {
-        if ($path -notmatch '^(applications|bsp|components|include|subsys|tests)/.+\.(c|h)$') {
+        if ($path -notmatch '^(applications|bsp|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|subsys|tests)/.+\.(c|h)$') {
             continue
         }
 
@@ -166,6 +166,12 @@ function Get-ThemisCMakeFiles
         "components/algorithm/CMakeLists.txt",
         "components/protocol/CMakeLists.txt",
         "components/utils/CMakeLists.txt",
+        "core/CMakeLists.txt",
+        "g3/np/CMakeLists.txt",
+        "g3/safe/CMakeLists.txt",
+        "runtime/CMakeLists.txt",
+        "firmware/at32f415/CMakeLists.txt",
+        "protocol/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
         "platform/at/at32f403a/CMakeLists.txt",
         "platform/template/cortex_m4_ref/CMakeLists.txt",
@@ -360,20 +366,47 @@ function Invoke-CMakeFormatPass
     }
 
     $failed = @()
-    foreach ($file in $Files) {
-        $relativePath = (Get-RelativePathCompat -BasePath $paths.RepoRoot -TargetPath $file).Replace('\', '/')
-        Write-Host ("[format_themis] cmake-" + $ModeName + ": " + $relativePath)
+    $effectiveConfig = $ConfigPath
+    $temporaryConfig = $null
+    if ([IO.Path]::GetFileName($ConfigPath) -eq ".cmake-format") {
+        $temporaryConfig = Join-Path ([IO.Path]::GetTempPath()) ("themis-cmake-format-" + [Guid]::NewGuid().ToString("N") + ".py")
+        Copy-Item -LiteralPath $ConfigPath -Destination $temporaryConfig
+        $effectiveConfig = $temporaryConfig
+    }
+    try {
+        foreach ($file in $Files) {
+            $relativePath = (Get-RelativePathCompat -BasePath $paths.RepoRoot -TargetPath $file).Replace('\', '/')
+            Write-Host ("[format_themis] cmake-" + $ModeName + ": " + $relativePath)
 
-        $arguments = @("--config-files", $ConfigPath)
-        if ($ModeName -eq "check") {
-            $arguments += @("--check", $file)
-        } else {
-            $arguments += @("-i", $file)
+            $arguments = @("--config-files", $effectiveConfig)
+            if ($ModeName -eq "check") {
+                $arguments += @("--check", $file)
+            } else {
+                $arguments += @("-i", $file)
+            }
+
+            if ($ModeName -eq "check") {
+                $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("themis-cmake-input-" + [Guid]::NewGuid().ToString("N") + ".cmake")
+                $crlf = [String]([char]13) + [String]([char]10)
+                $lf = [String]([char]10)
+                $sourceText = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($file)).Replace($crlf, $lf)
+                [IO.File]::WriteAllText($temporarySource, $sourceText, [Text.UTF8Encoding]::new($false))
+                try {
+                    $arguments = @("--config-files", $effectiveConfig, "--check", $temporarySource)
+                    Invoke-ResolvedCommand -CommandParts $FormatterCommand -Arguments $arguments
+                } finally {
+                    Remove-Item -LiteralPath $temporarySource -Force -ErrorAction SilentlyContinue
+                }
+            } else {
+                Invoke-ResolvedCommand -CommandParts $FormatterCommand -Arguments $arguments
+            }
+            if ($LASTEXITCODE -ne 0) {
+                $failed += $relativePath
+            }
         }
-
-        Invoke-ResolvedCommand -CommandParts $FormatterCommand -Arguments $arguments
-        if ($LASTEXITCODE -ne 0) {
-            $failed += $relativePath
+    } finally {
+        if ($null -ne $temporaryConfig) {
+            Remove-Item -LiteralPath $temporaryConfig -Force -ErrorAction SilentlyContinue
         }
     }
 

@@ -91,6 +91,38 @@ int main(void)
 
     {
         const float pi = 3.14159265358979323846f;
+        const struct {
+            float alpha;
+            float beta;
+            unsigned int sector;
+        } signed_zero[] = {
+            {0.0f, 0.0f, 1U},
+            {-0.0f, 0.0f, 4U},
+            {0.0f, -0.0f, 1U},
+            {-0.0f, -0.0f, 4U},
+            {-1.0f, -0.0f, 4U}
+        };
+        const unsigned int boundary_sector[] = {1U, 2U, 3U, 4U, 5U, 6U, 1U};
+
+        for (unsigned int index = 0U; index < sizeof(signed_zero) / sizeof(signed_zero[0]);
+             ++index) {
+            vector.alpha = signed_zero[index].alpha;
+            vector.beta = signed_zero[index].beta;
+            TEST_ASSERT(foc_svpwm(&vector, 12.0f, &config, &output) == FOC_STATUS_OK);
+            TEST_ASSERT(output.sector == signed_zero[index].sector);
+        }
+        for (unsigned int index = 0U; index < sizeof(boundary_sector) / sizeof(boundary_sector[0]);
+             ++index) {
+            const float angle = (float)index * pi / 3.0f;
+            vector.alpha = cosf(angle);
+            vector.beta = sinf(angle);
+            TEST_ASSERT(foc_svpwm(&vector, 12.0f, &config, &output) == FOC_STATUS_OK);
+            TEST_ASSERT(output.sector == boundary_sector[index]);
+        }
+    }
+
+    {
+        const float pi = 3.14159265358979323846f;
         const float epsilon = 1.0e-4f;
         unsigned int boundary;
 

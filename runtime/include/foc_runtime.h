@@ -32,6 +32,7 @@
 
 #include "foc_motion.h"
 #include "foc_pipeline.h"
+#include "foc_trajectory.h"
 
 #include <stdatomic.h>
 
@@ -161,6 +162,8 @@ struct foc_runtime_motion_config {
     struct foc_position_config position;
     /** Symmetric q current limit in A, at most the inner current limit. */
     float iq_limit_a;
+    /** Optional velocity/position trajectory shaping, disabled by default. */
+    struct foc_trajectory_config trajectory;
 };
 
 /** Caller-selected schedules and Host injection configuration. */
@@ -201,7 +204,7 @@ struct foc_runtime_sensor {
     float mechanical_rad_s;
 };
 
-/** One complete H1 publication. Its sensor timestamp also dates the derived target. */
+/** One complete H1 publication. Its sensor timestamp dates angle, speed, and any derived target. */
 struct foc_runtime_sensor_slot {
     /** Source feedback and quality from one capture. */
     struct foc_runtime_sensor sample;
@@ -380,6 +383,10 @@ struct foc_runtime {
     float outer_trial_a;
     /** True when the last H1 publication has an integral proposal. */
     bool outer_trial_seen;
+    /** H1-owned trajectory state for the current session. */
+    struct foc_trajectory_context trajectory;
+    /** Trial trajectory state awaiting H0 acceptance. */
+    struct foc_trajectory_context trajectory_trial;
     /** H1-written slots. H0 reads only the published slot. */
     struct foc_runtime_sensor_slot sensor_slots[2];
     /** Foreground-written slots. H0 reads only the published slot. */

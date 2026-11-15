@@ -136,7 +136,7 @@ function Get-ThemisOwnedCFiles
 
     $result = @()
     foreach ($path in $RepoRelativePaths) {
-        if ($path -notmatch '^(applications|bsp|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|subsys|tests)/.+\.(c|h)$') {
+        if ($path -notmatch '^(applications|bsp|calibration|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|sensors|subsys|tests)/.+\.(c|h)$') {
             continue
         }
 
@@ -167,6 +167,8 @@ function Get-ThemisCMakeFiles
         "components/protocol/CMakeLists.txt",
         "components/utils/CMakeLists.txt",
         "core/CMakeLists.txt",
+        "calibration/CMakeLists.txt",
+        "sensors/CMakeLists.txt",
         "g3/np/CMakeLists.txt",
         "g3/safe/CMakeLists.txt",
         "runtime/CMakeLists.txt",

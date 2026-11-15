@@ -28,6 +28,9 @@ add_library(
   "${repo}/core/src/foc_core.c"
   "${repo}/core/src/foc_current.c"
   "${repo}/core/src/foc_motion.c"
+  "${repo}/core/src/foc_trajectory.c"
+  "${repo}/calibration/src/foc_calibration.c"
+  "${repo}/sensors/src/foc_encoder.c"
   "${repo}/g3/np/src/foc_device.c"
   "${repo}/g3/np/src/foc_device_sim.c"
   "${repo}/g3/safe/src/foc_safe.c"
@@ -42,6 +45,9 @@ target_include_directories(
          "${repo}/g3/np/include"
          "${repo}/g3/safe/include"
          "${repo}/runtime/include"
+         "${repo}/calibration/include"
+         "${repo}/sensors/include"
+         "${repo}/platform/at/at32f415/generated/inc"
 )
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-board1 PRIVATE -Wall -Wextra -Wpedantic)
@@ -102,6 +108,9 @@ else()
   add_executable(test-foc-board1 tests/test_foc_board.c)
   target_link_libraries(test-foc-board1 PRIVATE falconfoc-board1)
   add_test(NAME test-foc-board1 COMMAND test-foc-board1)
+  add_executable(test-foc-board-config tests/test_foc_board_config.c)
+  target_link_libraries(test-foc-board-config PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-board-config COMMAND test-foc-board-config)
   add_executable(test-foc-serial tests/test_foc_serial.c)
   target_link_libraries(test-foc-serial PRIVATE falconfoc-board1)
   add_test(NAME test-foc-serial COMMAND test-foc-serial)

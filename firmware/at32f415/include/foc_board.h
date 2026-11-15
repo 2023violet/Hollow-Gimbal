@@ -22,16 +22,19 @@
  */
 #pragma once
 
+#include "foc_calibration.h"
+#include "foc_encoder.h"
 #include "foc_runtime.h"
+#include "tm_platform_foc_timing.h"
 
 /* Public Types ---------------------------------------------------------------- */
 
 /** Board schedule and range constants shared with the IRQ binding. */
 enum foc_board_limits {
-    /** 150 MHz timer input after the APB timer multiplier. */
-    FOC_BOARD_TIMER_HZ = 150000000,
-    /** Counter ticks per second on TMR2 and TMR5. */
-    FOC_BOARD_US_HZ = 1000000,
+    /** AT32F415 timer input after the APB timer multiplier. */
+    FOC_BOARD_TIMER_HZ = TM_PLATFORM_TMR_CLK_HZ,
+    /** Counter ticks per second on the V2 TMR2/TMR5 timebase. */
+    FOC_BOARD_US_HZ = TM_PLATFORM_V2_TIMEBASE_HZ,
     /** Nominal TMR1 event interval in microseconds. */
     FOC_BOARD_H0_US = 200,
     /** Nominal TMR5 event interval in microseconds. */
@@ -94,30 +97,46 @@ enum foc_board_encoder_result {
 struct foc_board_encoder {
     /** Time of current frame start in microseconds. */
     uint32_t captured_us;
-    /** Time of last accepted mechanical observation. */
-    uint32_t previous_us;
     /** Sequence of completed or failed observations. */
     uint32_t seq;
     /** Consecutive unsuccessful transactions, saturating. */
     uint32_t losses;
-    /** Last accepted raw 16-bit angle. */
-    uint16_t previous_code;
-    /** Continuous mechanical angle in radians relative to the sensor's raw zero. */
-    float position_rad;
+    /** Portable angle, unwrap, velocity, and quality owner. */
+    struct foc_encoder_context sensor;
+    /** Latest portable sensor result for local diagnostics. */
+    struct foc_encoder_feedback feedback;
     /** Latest transaction disposition. */
     enum foc_board_encoder_result result;
     /** True between transport start and its single completion. */
     bool pending;
-    /** True once there is a mechanical reference for velocity estimation. */
-    bool previous_seen;
     /** True after a gap makes the continuous position ambiguous for this session. */
     bool continuity_lost;
+    /** Explicit Sensor policy selected by a pre-initialization snapshot. */
+    struct foc_encoder_config config;
+    /** True when config is an explicit calibrated policy. */
+    bool config_valid;
 };
 
 /* Public Functions ------------------------------------------------------------- */
 
 /** Initialize the reference control instance at the common microsecond epoch. */
 int foc_board_init(struct foc_runtime *runtime, struct foc_board_output *output, uint32_t now_us);
+
+/**
+ * Initialize an explicit calibrated instance before any producer has started.
+ *
+ * The default foc_board_init() path is unchanged. This opt-in entry validates
+ * the accepted snapshot against Board1's immutable ADC, phase, and encoder
+ * facts, initializes Runtime from local candidate copies, and only then
+ * commits the caller-owned Runtime, output journal, and Sensor policy. A
+ * previously initialized encoder is rejected so its continuous state cannot
+ * be changed in place.
+ */
+int foc_board_init_with_calibration(struct foc_runtime *runtime,
+                                    struct foc_board_output *output,
+                                    struct foc_board_encoder *encoder,
+                                    const struct foc_calibration_snapshot *snapshot,
+                                    uint32_t now_us);
 
 /** Convert an inclusive half-range-valid interval to seconds. */
 bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_us, float *seconds);

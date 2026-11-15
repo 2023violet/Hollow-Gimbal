@@ -16,6 +16,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -170,6 +171,21 @@ static enum foc_pipeline_status foc_pipeline_observe_sample(
     return FOC_PIPELINE_OK;
 }
 
+static bool foc_pipeline_feedforward_feedback_valid(
+    const struct foc_pipeline *pipeline,
+    const struct foc_pipeline_input *input
+)
+{
+    const struct foc_pipeline_electrical_feedback *feedback = &input->electrical_feedback;
+    return feedback->valid && isfinite(feedback->state.angle_rad) &&
+        isfinite(feedback->state.velocity_rad_s) &&
+        foc_safe_timestamp_fresh(
+               input->adc.sample_tick,
+               feedback->source_us,
+               pipeline->feedforward_max_age_us
+        );
+}
+
 /* Public Functions ------------------------------------------------------------- */
 
 int foc_pipeline_init(struct foc_pipeline *pipeline, const struct foc_pipeline_config *config)
@@ -182,11 +198,20 @@ int foc_pipeline_init(struct foc_pipeline *pipeline, const struct foc_pipeline_c
     if (foc_current_init(&trial.current, &config->current) != FOC_STATUS_OK ||
         foc_device_adc_config_validate(&config->adc) != FOC_DEVICE_STATUS_OK ||
         foc_device_pwm_config_validate(&config->pwm) != FOC_DEVICE_STATUS_OK ||
-        foc_safe_init(&trial.safety, &config->safety) != FOC_SAFE_STATUS_OK) {
+        foc_safe_init(&trial.safety, &config->safety) != FOC_SAFE_STATUS_OK ||
+        (config->feedforward.enabled &&
+         (config->feedforward.max_age_us == 0U ||
+          config->feedforward.max_age_us >= UINT32_C(0x80000000))) ||
+        foc_current_feedforward_init(
+            &trial.feedforward,
+            &config->feedforward.model,
+            config->feedforward.enabled
+        ) != FOC_STATUS_OK) {
         return FOC_PIPELINE_ERR_CONFIG;
     }
     trial.adc_config = config->adc;
     trial.pwm_config = config->pwm;
+    trial.feedforward_max_age_us = config->feedforward.max_age_us;
     trial.output_submit = config->output_submit;
     trial.output_arg = config->output_arg;
     (void)foc_safe_boot_complete(&trial.safety);
@@ -386,8 +411,20 @@ int foc_pipeline_step_guarded(
         .vbus_v = measurement.core.vbus_v,
         .dt_s = input->dt_s,
     };
-    if (foc_current_step(&trial, &current_input, &result) != FOC_STATUS_OK ||
-        result.output_enable == 0U) {
+    if (pipeline->feedforward.enabled &&
+        !foc_pipeline_feedforward_feedback_valid(pipeline, input)) {
+        return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_FEEDBACK);
+    }
+    const int current_status = pipeline->feedforward.enabled
+        ? foc_current_step_with_feedforward(
+              &trial,
+              &current_input,
+              &pipeline->feedforward,
+              input->electrical_feedback.state.velocity_rad_s,
+              &result
+          )
+        : foc_current_step(&trial, &current_input, &result);
+    if (current_status != FOC_STATUS_OK || result.output_enable == 0U) {
         return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_CORE);
     }
     const struct foc_output core_output = {

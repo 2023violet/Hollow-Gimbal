@@ -259,7 +259,8 @@ static int direct_output(
     return 0;
 }
 
-static struct foc_runtime_config model_runtime_config(const struct plant_config *config)
+static struct foc_runtime_config
+model_runtime_config(const struct plant_config *config, bool trajectory_enabled)
 {
     return (struct foc_runtime_config){
         .h0 = {100U, 20U, 10U},
@@ -275,6 +276,13 @@ static struct foc_runtime_config model_runtime_config(const struct plant_config 
             .velocity = velocity_config,
             .position = position_config,
             .iq_limit_a = current_config.current_limit_a,
+            .trajectory = {
+                .enabled = trajectory_enabled,
+                .max_velocity_rad_s = 12.0f,
+                .max_accel_rad_s2 = 20.0f,
+                .max_dt_s = 0.002f,
+                .position_tolerance_rad = 0.01f,
+            },
         },
     };
 }
@@ -318,7 +326,7 @@ static int begin_model_runtime(
     float reference
 )
 {
-    const struct foc_runtime_config config = model_runtime_config(plant);
+    const struct foc_runtime_config config = model_runtime_config(plant, false);
     const struct foc_pipeline_config pipeline = {
         .current = current_config,
         .adc = adc_config,
@@ -348,6 +356,47 @@ static int begin_model_runtime(
         TEST_ASSERT(runtime->pipeline.mock.updates == 0U);
         TEST_ASSERT(model_foreground(runtime, tick) == 0);
     }
+    TEST_ASSERT(runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING);
+    return 0;
+}
+
+static int begin_trajectory_runtime(
+    struct foc_runtime *runtime,
+    const struct plant_config *plant,
+    enum foc_runtime_mode mode,
+    float reference
+)
+{
+    const struct foc_runtime_config config = model_runtime_config(plant, true);
+    const struct foc_pipeline_config pipeline = {
+        .current = current_config,
+        .adc = adc_config,
+        .pwm = pwm_config,
+        .safety = safety_config,
+    };
+    const struct plant_state rest = {0};
+    TEST_ASSERT(foc_runtime_init(runtime, &pipeline, &config, 0U) == FOC_RUNTIME_OK);
+    for (uint32_t tick = 0U; tick <= 6U; ++tick) {
+        struct foc_runtime_fast_input input = {
+            .adc = plant_adc(plant, rest, tick, 100U * tick),
+            .now_us = 100U * tick + 1U
+        };
+        if (tick == 0U) {
+            input.action = FOC_RUNTIME_ACTION_SET_MODE;
+            input.requested_mode = mode;
+        } else if (tick == 5U) {
+            TEST_ASSERT(model_command(runtime, mode, reference, 1U, 500U) == FOC_RUNTIME_OK);
+            input.action = FOC_RUNTIME_ACTION_ARM;
+        } else if (tick == 6U) {
+            input.action = FOC_RUNTIME_ACTION_START;
+        }
+        if (tick % 5U == 0U) {
+            TEST_ASSERT(model_sensor(runtime, rest, tick) == FOC_RUNTIME_OK);
+        }
+        TEST_ASSERT(foc_runtime_h0_step(runtime, &input) == FOC_RUNTIME_IDLE);
+        TEST_ASSERT(model_foreground(runtime, tick) == 0);
+    }
+    TEST_ASSERT(runtime->config.motion.trajectory.enabled);
     TEST_ASSERT(runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING);
     return 0;
 }
@@ -594,6 +643,97 @@ static int test_runtime_replay(void)
     return run_model(true, true, true, &second);
 }
 
+static int test_trajectory_runtime_model(void)
+{
+    struct foc_runtime velocity_runtime = {0};
+    struct foc_runtime position_runtime = {0};
+    struct plant_state velocity_state = {0};
+    struct plant_state position_state = {0};
+    float previous_plan = 0.0f;
+    float max_plan = 0.0f;
+    float max_plan_accel = 0.0f;
+    bool plan_seen = false;
+    uint32_t velocity_command_seq = 1U;
+
+    TEST_ASSERT(
+        begin_trajectory_runtime(&velocity_runtime, &motor, FOC_RUNTIME_MODE_VELOCITY, 8.0f) == 0
+    );
+    for (uint32_t tick = 7U; tick <= 10007U; ++tick) {
+        const float velocity_target = tick < 4007U ? 8.0f : -8.0f;
+        if (tick % 20U == 0U || tick == 4007U) {
+            TEST_ASSERT(
+                model_command(
+                    &velocity_runtime,
+                    FOC_RUNTIME_MODE_VELOCITY,
+                    velocity_target,
+                    ++velocity_command_seq,
+                    tick * 100U
+                ) == FOC_RUNTIME_OK
+            );
+        }
+        uint32_t compare[3];
+        float iq_ref;
+        TEST_ASSERT(
+            runtime_output(&velocity_runtime, &motor, velocity_state, tick, compare, &iq_ref) == 0
+        );
+        (void)plant_apply(&motor, &velocity_state, compare, 0.0);
+        if (velocity_runtime.trajectory.initialized &&
+            velocity_runtime.trajectory.state == FOC_TRAJECTORY_STATE_ACTIVE) {
+            const float planned = velocity_runtime.trajectory.planned_velocity_rad_s;
+            max_plan = fmaxf(max_plan, fabsf(planned));
+            if (plan_seen) {
+                max_plan_accel = fmaxf(max_plan_accel, fabsf(planned - previous_plan) / 0.0005f);
+            }
+            previous_plan = planned;
+            plan_seen = true;
+        }
+    }
+    TEST_ASSERT(max_plan <= 12.0001f);
+    TEST_ASSERT(max_plan_accel <= 20.05f);
+    TEST_ASSERT(velocity_state.speed < -2.0);
+
+    TEST_ASSERT(
+        begin_trajectory_runtime(&position_runtime, &motor, FOC_RUNTIME_MODE_POSITION, 2.0f) == 0
+    );
+    uint32_t position_command_seq = 1U;
+    for (uint32_t tick = 7U; tick <= 14007U; ++tick) {
+        const float position_target = tick < 7007U ? 2.0f : -1.0f;
+        if (tick % 20U == 0U || tick == 7007U) {
+            TEST_ASSERT(
+                model_command(
+                    &position_runtime,
+                    FOC_RUNTIME_MODE_POSITION,
+                    position_target,
+                    ++position_command_seq,
+                    tick * 100U
+                ) == FOC_RUNTIME_OK
+            );
+        }
+        uint32_t compare[3];
+        float iq_ref;
+        TEST_ASSERT(
+            runtime_output(&position_runtime, &motor, position_state, tick, compare, &iq_ref) == 0
+        );
+        (void)plant_apply(&motor, &position_state, compare, 0.0);
+    }
+    TEST_ASSERT(isfinite(position_state.position) && isfinite(position_state.speed));
+    TEST_ASSERT(fabs(position_state.position) < 4.0);
+
+    const uint32_t rejected_tick = 14010U;
+    const struct foc_runtime_fast_input rejected_input = {
+        .adc = plant_adc(&motor, position_state, rejected_tick, rejected_tick * 100U),
+        .now_us = rejected_tick * 100U + 1U,
+    };
+    TEST_ASSERT(model_sensor(&position_runtime, position_state, rejected_tick) == FOC_RUNTIME_OK);
+    const float committed_plan = position_runtime.trajectory.planned_velocity_rad_s;
+    position_runtime.pipeline.mock.reject_update = true;
+    const int rejected_status = foc_runtime_h0_step(&position_runtime, &rejected_input);
+    TEST_ASSERT(rejected_status != FOC_RUNTIME_OK);
+    TEST_ASSERT(position_runtime.trajectory.planned_velocity_rad_s == committed_plan);
+    position_runtime.pipeline.mock.reject_update = false;
+    return 0;
+}
+
 static int test_two_motors(void)
 {
     const struct plant_config second_motor =
@@ -652,7 +792,8 @@ static int test_two_motors(void)
 int main(void)
 {
     return test_plant() || run_model(false, false, false, NULL) ||
-        run_model(true, false, false, NULL) || test_runtime_replay() || test_two_motors();
+        run_model(true, false, false, NULL) || test_runtime_replay() ||
+        test_trajectory_runtime_model() || test_two_motors();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

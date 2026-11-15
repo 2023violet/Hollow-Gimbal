@@ -15,13 +15,13 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_core.h"
+#include "foc_core_internal.h"
 
 #include <math.h>
+#include <stdbool.h>
 
 /* Private Macros and Constants ------------------------------------------------- */
 
-static const float FOC_PI = 3.14159265358979323846f;
-static const float FOC_TWO_PI = 6.28318530717958647692f;
 static const float FOC_INV_SQRT3 = 0.57735026918962576451f;
 static const float FOC_SQRT3_OVER_TWO = 0.86602540378443864676f;
 static const float FOC_SVPWM_VECTOR_LIMIT = 0.66666666666666666667f;
@@ -31,17 +31,6 @@ static const float FOC_SVPWM_VECTOR_LIMIT = 0.66666666666666666667f;
 static int foc_float_is_finite(float value)
 {
     return isfinite(value) != 0;
-}
-
-static float foc_wrap_angle(float angle)
-{
-    float wrapped = fmodf(angle, FOC_TWO_PI);
-
-    if (wrapped < 0.0f) {
-        wrapped += FOC_TWO_PI;
-    }
-
-    return wrapped;
 }
 
 static void foc_set_safe_svpwm(struct foc_svpwm_output *output)
@@ -67,17 +56,19 @@ static void foc_set_safe_output(struct foc_output *output, float theta_elec_rad)
 
 int foc_angle_normalize(float angle_rad, float *wrapped_rad)
 {
+    struct foc_angle_cache cache;
+    int status;
+
     if (wrapped_rad == NULL) {
         return FOC_STATUS_ERR_NULL;
     }
     *wrapped_rad = 0.0f;
-    if (!foc_float_is_finite(angle_rad)) {
-        return FOC_STATUS_ERR_NONFINITE;
+    status = foc_angle_cache_prepare(angle_rad, &cache);
+    if (status != FOC_STATUS_OK) {
+        return status;
     }
-    const float wrapped = foc_wrap_angle(angle_rad);
-    /* A tiny negative angle can round up to one full turn. */
-    *wrapped_rad = wrapped >= FOC_TWO_PI ? 0.0f : wrapped;
-    return FOC_STATUS_OK;
+    *wrapped_rad = cache.angle_rad;
+    return status;
 }
 
 int foc_config_validate(const struct foc_config *config)
@@ -129,9 +120,8 @@ int foc_park(
     struct foc_vector_dq *output
 )
 {
-    float sine;
-    float cosine;
-    struct foc_vector_dq result;
+    struct foc_angle_cache cache;
+    int status;
 
     if (input == NULL || output == NULL) {
         return FOC_STATUS_ERR_NULL;
@@ -142,16 +132,11 @@ int foc_park(
         return FOC_STATUS_ERR_NONFINITE;
     }
 
-    theta_elec_rad = foc_wrap_angle(theta_elec_rad);
-    sine = sinf(theta_elec_rad);
-    cosine = cosf(theta_elec_rad);
-    result.d = input->alpha * cosine + input->beta * sine;
-    result.q = input->beta * cosine - input->alpha * sine;
-    if (!foc_float_is_finite(result.d) || !foc_float_is_finite(result.q)) {
-        return FOC_STATUS_ERR_NONFINITE;
+    status = foc_angle_cache_prepare(theta_elec_rad, &cache);
+    if (status != FOC_STATUS_OK) {
+        return status;
     }
-    *output = result;
-    return FOC_STATUS_OK;
+    return foc_park_cached(input, &cache, output);
 }
 
 int foc_inverse_park(
@@ -160,9 +145,8 @@ int foc_inverse_park(
     struct foc_vector_alpha_beta *output
 )
 {
-    float sine;
-    float cosine;
-    struct foc_vector_alpha_beta result;
+    struct foc_angle_cache cache;
+    int status;
 
     if (input == NULL || output == NULL) {
         return FOC_STATUS_ERR_NULL;
@@ -173,19 +157,70 @@ int foc_inverse_park(
         return FOC_STATUS_ERR_NONFINITE;
     }
 
-    theta_elec_rad = foc_wrap_angle(theta_elec_rad);
-    sine = sinf(theta_elec_rad);
-    cosine = cosf(theta_elec_rad);
-    result.alpha = input->d * cosine - input->q * sine;
-    result.beta = input->d * sine + input->q * cosine;
-    if (!foc_float_is_finite(result.alpha) || !foc_float_is_finite(result.beta)) {
-        return FOC_STATUS_ERR_NONFINITE;
+    status = foc_angle_cache_prepare(theta_elec_rad, &cache);
+    if (status != FOC_STATUS_OK) {
+        return status;
     }
-    *output = result;
-    return FOC_STATUS_OK;
+    return foc_inverse_park_cached(input, &cache, output);
+}
+
+static unsigned int foc_svpwm_sector(float alpha, float beta)
+{
+    const float sqrt3 = 1.73205080756887729353f;
+    const bool alpha_zero = alpha == 0.0f;
+    const bool beta_zero = beta == 0.0f;
+
+    if (alpha_zero && beta_zero) {
+        if (signbit(alpha) != 0) {
+            return 4U;
+        }
+        return 1U;
+    }
+    if (alpha_zero) {
+        return beta > 0.0f ? 2U : 5U;
+    }
+    if (beta_zero) {
+        if (alpha > 0.0f) {
+            return 1U;
+        }
+        return 4U;
+    }
+    if (alpha > 0.0f) {
+        if (beta > 0.0f) {
+            return beta < sqrt3 * alpha ? 1U : 2U;
+        }
+        return -beta < sqrt3 * alpha ? 6U : 5U;
+    }
+    if (beta > 0.0f) {
+        return beta > -sqrt3 * alpha ? 2U : 3U;
+    }
+    return -beta < -sqrt3 * alpha ? 4U : 5U;
 }
 
 int foc_svpwm(
+    const struct foc_vector_alpha_beta *input,
+    float vbus_v,
+    const struct foc_config *config,
+    struct foc_svpwm_output *output
+)
+{
+    int status;
+
+    if (output == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    foc_set_safe_svpwm(output);
+    if (input == NULL || config == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    status = foc_config_validate(config);
+    if (status != FOC_STATUS_OK) {
+        return status;
+    }
+    return foc_svpwm_trusted(input, vbus_v, config, output);
+}
+
+int foc_svpwm_trusted(
     const struct foc_vector_alpha_beta *input,
     float vbus_v,
     const struct foc_config *config,
@@ -205,7 +240,6 @@ int foc_svpwm(
     float duty_a;
     float duty_b;
     float duty_c;
-    float angle;
     unsigned int sector;
     unsigned int saturated = 0U;
     struct foc_svpwm_output result;
@@ -217,14 +251,6 @@ int foc_svpwm(
 
     if (input == NULL || config == NULL) {
         return FOC_STATUS_ERR_NULL;
-    }
-
-    {
-        const int config_status = foc_config_validate(config);
-
-        if (config_status != FOC_STATUS_OK) {
-            return config_status;
-        }
     }
 
     if (!foc_float_is_finite(vbus_v) || vbus_v < config->vbus_min_v) {
@@ -291,14 +317,7 @@ int foc_svpwm(
         saturated = 1U;
     }
 
-    angle = atan2f(input->beta, input->alpha);
-    if (angle < 0.0f) {
-        angle += FOC_TWO_PI;
-    }
-    sector = (unsigned int)(angle / (FOC_PI / 3.0f)) + 1U;
-    if (sector > 6U) {
-        sector = 6U;
-    }
+    sector = foc_svpwm_sector(input->alpha, input->beta);
 
     if (!foc_float_is_finite(duty_a) || !foc_float_is_finite(duty_b) ||
         !foc_float_is_finite(duty_c)) {
@@ -357,6 +376,7 @@ int foc_step(
     struct foc_vector_dq dq;
     struct foc_vector_alpha_beta alpha_beta;
     struct foc_svpwm_output svpwm;
+    struct foc_angle_cache angle_cache;
     int status;
 
     if (output == NULL) {
@@ -405,7 +425,11 @@ int foc_step(
     if (!foc_float_is_finite(next_theta)) {
         return FOC_STATUS_ERR_NONFINITE;
     }
-    next_theta = foc_wrap_angle(next_theta);
+    status = foc_angle_cache_prepare(next_theta, &angle_cache);
+    if (status != FOC_STATUS_OK) {
+        return status;
+    }
+    next_theta = angle_cache.angle_rad;
 
     dq.d = command->vd_v;
     dq.q = command->vq_v;
@@ -421,12 +445,12 @@ int foc_step(
         voltage_saturated = 1U;
     }
 
-    status = foc_inverse_park(&dq, next_theta, &alpha_beta);
+    status = foc_inverse_park_cached(&dq, &angle_cache, &alpha_beta);
     if (status != FOC_STATUS_OK) {
         return status;
     }
 
-    status = foc_svpwm(&alpha_beta, measurement->vbus_v, &context->config, &svpwm);
+    status = foc_svpwm_trusted(&alpha_beta, measurement->vbus_v, &context->config, &svpwm);
     if (status != FOC_STATUS_OK) {
         return status;
     }

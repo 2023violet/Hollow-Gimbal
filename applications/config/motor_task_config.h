@@ -1,3 +1,5 @@
+// clang-format off
+
 /**
  * @file    motor_task_config.h
  * @brief   Application-owned motor task budget configuration
@@ -15,6 +17,7 @@
 
 /* Includes ------------------------------------------------------------------------------------- */
 #include "config/tm_core_config.h"
+#include "tm_platform_foc_timing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,7 +53,7 @@ extern "C" {
 #error "TM_MOTOR_BENCH_RUN_BUDGET_MS must be 50U/200U/400U/1000U/30000U in bench firmware."
 #endif
 #define TM_MOTOR_BENCH_MAX_RUN_MS      (TM_MOTOR_BENCH_RUN_BUDGET_MS)
-#define TM_MOTOR_BENCH_ADC_TICK_HZ     (20000U)
+#define TM_MOTOR_BENCH_ADC_TICK_HZ     TM_PLATFORM_LEGACY_TMR1_CARRIER_HZ
 #define TM_MOTOR_BENCH_MAX_RUN_TICKS   ((TM_MOTOR_BENCH_MAX_RUN_MS * \
                                          TM_MOTOR_BENCH_ADC_TICK_HZ) / 1000U)
 #define TM_MOTOR_BENCH_HEARTBEAT_TIMEOUT_MS    (1500U)

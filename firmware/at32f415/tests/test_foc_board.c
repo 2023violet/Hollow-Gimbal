@@ -126,6 +126,9 @@ static int test_encoder(void)
     CHECK(sample.valid && sample.captured_us == 0U && sample.seq == 1U);
     CHECK(fabsf(sample.mechanical_rad - 0.00009587f) < 1e-8f);
     CHECK(fabsf(sample.mechanical_rad_s - 0.191748f) < 1e-5f);
+    CHECK(encoder.feedback.quality == FOC_ENCODER_QUALITY_VALID);
+    CHECK(encoder.feedback.speed_valid && encoder.feedback.raw_velocity_rad_s > 0.0f);
+    CHECK(sample.mechanical_rad_s == encoder.feedback.filtered_velocity_rad_s);
     CHECK(foc_board_adc_begin(&runtime, &adc, 100U));
     CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 108U) == FOC_RUNTIME_IDLE);
     CHECK(runtime.angle_prediction_us == 100U && runtime.adc.produced_us == 100U);

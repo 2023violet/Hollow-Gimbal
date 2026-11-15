@@ -34,6 +34,20 @@ The public declarations are in `include/foc_core.h`. Physical quantities use SI 
 
 The later Runtime API may expose command publication and a fast-tick adapter. G2 keeps those ownership and scheduling concerns out of the Core and uses `foc_step` as its explicit, host-testable entry point.
 
+## Optional trajectory planner
+
+`include/foc_trajectory.h` provides a small Float32 reference generator for
+the existing velocity PI loop. It can limit a velocity target by
+`max_accel_rad_s2 * dt_s` and `max_velocity_rad_s`, or generate a point-to-point
+velocity target from continuous mechanical position using
+`sqrt(2 * max_accel * abs(target - measured))`. It never wraps multi-turn
+mechanical position and it does not own sensors, clocks, Safety, or output.
+
+The context is caller-owned and copyable for a trial. Runtime commits the trial
+only after the corresponding downstream UPDATE is accepted. Invalid input
+clears the output and leaves the planned velocity unchanged. The planner is
+optional; existing Runtime configurations leave it disabled.
+
 The minimum caller sequence is:
 
 ```c
@@ -85,6 +99,22 @@ Failed steps clear the entire output and leave the context unchanged. A cleared 
 `include/foc_motion.h` provides mechanical-to-electrical conversion, bounded angle prediction, velocity PI, and stateless position P. Supply continuous mechanical position in rad and coherent speed in rad/s. The producer owns the mechanical zero, direction normalization, and any single-turn unwrapping. The electrical angle is `wrap(pole_pairs * mechanical_position + electrical_offset)` and electrical speed is `pole_pairs * mechanical_speed`. The caller aligns encoder sign and phase polarity so positive q current produces positive mechanical torque. Position error keeps all mechanical turns. Only electrical phase is normalized.
 
 `foc_rotor_predict` takes an already validated forward interval in microseconds. It limits both the interval and the extrapolation contribution `0.5 * max_electrical_acceleration * dt_s^2`. Source-angle and speed uncertainty belong to the caller's sensor quality contract. `foc_velocity_step` uses actual `dt_s`, admits only the supported integral increment, and bounds the integral when the q current limit drops. A disabled step freezes state. Position P limits its velocity reference and has no state to reset. A new motion session resets the velocity PI.
+
+## Optional current feedforward
+
+`foc_current_feedforward_init()` validates an optional PMSM model in SI units:
+`Ld` and `Lq` in H, and `psi_f` in Wb. The enabled equations are
+`vd_ff = -omega_e * Lq * iq_target` and
+`vq_ff = omega_e * (Ld * id_target + psi_f)`. The feedforward voltage is added
+before the existing SVPWM limit and voltage reconstruction; anti-windup admits
+the integral against the PI proportional term plus feedforward, so feedforward
+voltage is not incorrectly credited to the PI integrator.
+
+The ordinary `foc_current_step()` path remains unchanged when feedforward is
+not configured. `foc_current_step_with_feedforward()` requires the caller to
+provide a finite electrical speed valid at the same control instant. This Core
+API does not synthesize speed from an angle and does not wire the optional path
+into Board1 or Runtime automatically.
 
 ## Host build and tests
 

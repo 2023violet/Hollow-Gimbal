@@ -4,9 +4,7 @@
 # - keep each target explicit so ownership and coverage stay readable
 # - avoid stale retired UI/resource paths that no longer exist in this product tree
 
-set(_falconfoc_host_platform_generated_inc
-    "${CMAKE_SOURCE_DIR}/platform/at/at32f415/generated/inc"
-)
+set(_falconfoc_host_platform_generated_inc "${CMAKE_SOURCE_DIR}/platform/at/at32f415/generated/inc")
 
 themis_add_host_test(
   NAME
@@ -506,10 +504,7 @@ themis_add_host_test(
   "themis/tests"
 )
 target_compile_definitions(
-  test_app_shell_diag_contract
-  PRIVATE
-  TM_BUILD_PROFILE_FULL_DIAG=1
-  TM_BENCH_DIAG=1
+  test_app_shell_diag_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1 TM_BENCH_DIAG=1
 )
 
 themis_add_host_test(
@@ -649,10 +644,7 @@ themis_add_host_test(
   "themis/tests"
 )
 target_compile_definitions(
-  test_motor_bench_trace_contract
-  PRIVATE
-  TM_BUILD_PROFILE_FULL_DIAG=1
-  TM_BENCH_DIAG=1
+  test_motor_bench_trace_contract PRIVATE TM_BUILD_PROFILE_FULL_DIAG=1 TM_BENCH_DIAG=1
 )
 if(NOT MSVC)
   target_link_libraries(test_motor_bench_trace_contract PRIVATE m)
@@ -711,10 +703,7 @@ themis_add_host_test(
   "themis/tests"
 )
 target_compile_definitions(
-  test_motor_fsm_bench_pwm_boundary_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  FOC_ENERGIZED_CALIB_ENABLE=0
+  test_motor_fsm_bench_pwm_boundary_contract PRIVATE TM_BENCH_DIAG=1 FOC_ENERGIZED_CALIB_ENABLE=0
 )
 
 themis_add_host_test(
@@ -855,14 +844,13 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_voltage_openloop_model_contract PRIVATE m)
   target_compile_options(
-    test_foc_voltage_openloop_model_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_voltage_openloop_model_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_include_directories(
-  test_foc_voltage_openloop_model_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_voltage_openloop_model_contract BEFORE
+  PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid" "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(
@@ -888,20 +876,16 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_bench_fixed_duty_contract PRIVATE m)
   target_compile_options(
-    test_foc_bench_fixed_duty_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_bench_fixed_duty_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_compile_definitions(
-  test_foc_bench_fixed_duty_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  TM_BENCH_FIXED_DUTY_TEST=1
+  test_foc_bench_fixed_duty_contract PRIVATE TM_BENCH_DIAG=1 TM_BENCH_FIXED_DUTY_TEST=1
 )
 target_include_directories(
-  test_foc_bench_fixed_duty_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_bench_fixed_duty_contract BEFORE PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+                                                    "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(
@@ -927,20 +911,16 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_bench_raw_sixstep_contract PRIVATE m)
   target_compile_options(
-    test_foc_bench_raw_sixstep_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_bench_raw_sixstep_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_compile_definitions(
-  test_foc_bench_raw_sixstep_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  TM_BENCH_RAW_SIXSTEP_TEST=1
+  test_foc_bench_raw_sixstep_contract PRIVATE TM_BENCH_DIAG=1 TM_BENCH_RAW_SIXSTEP_TEST=1
 )
 target_include_directories(
-  test_foc_bench_raw_sixstep_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_bench_raw_sixstep_contract BEFORE PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+                                                     "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(
@@ -966,20 +946,16 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_bench_raw_sine_contract PRIVATE m)
   target_compile_options(
-    test_foc_bench_raw_sine_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_bench_raw_sine_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_compile_definitions(
-  test_foc_bench_raw_sine_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  TM_BENCH_RAW_SINE_TEST=1
+  test_foc_bench_raw_sine_contract PRIVATE TM_BENCH_DIAG=1 TM_BENCH_RAW_SINE_TEST=1
 )
 target_include_directories(
-  test_foc_bench_raw_sine_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_bench_raw_sine_contract BEFORE PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+                                                  "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(
@@ -1005,20 +981,17 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_bench_raw_sine_match_sixstep_contract PRIVATE m)
   target_compile_options(
-    test_foc_bench_raw_sine_match_sixstep_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_bench_raw_sine_match_sixstep_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_compile_definitions(
-  test_foc_bench_raw_sine_match_sixstep_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  TM_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST=1
+  test_foc_bench_raw_sine_match_sixstep_contract PRIVATE TM_BENCH_DIAG=1
+                                                         TM_BENCH_RAW_SINE_MATCH_SIXSTEP_TEST=1
 )
 target_include_directories(
-  test_foc_bench_raw_sine_match_sixstep_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_bench_raw_sine_match_sixstep_contract BEFORE
+  PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid" "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(
@@ -1044,20 +1017,16 @@ themis_add_host_test(
 if(NOT MSVC)
   target_link_libraries(test_foc_bench_raw_sine_20_contract PRIVATE m)
   target_compile_options(
-    test_foc_bench_raw_sine_20_contract PRIVATE
-    -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
+    test_foc_bench_raw_sine_20_contract
+    PRIVATE -include "${CMAKE_SOURCE_DIR}/tests/host/support/at32f415_adc_contract.h"
   )
 endif()
 target_compile_definitions(
-  test_foc_bench_raw_sine_20_contract
-  PRIVATE
-  TM_BENCH_DIAG=1
-  TM_BENCH_RAW_SINE_20_TEST=1
+  test_foc_bench_raw_sine_20_contract PRIVATE TM_BENCH_DIAG=1 TM_BENCH_RAW_SINE_20_TEST=1
 )
 target_include_directories(
-  test_foc_bench_raw_sine_20_contract BEFORE PRIVATE
-  "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
-  "${CMAKE_SOURCE_DIR}/bsp"
+  test_foc_bench_raw_sine_20_contract BEFORE PRIVATE "${CMAKE_SOURCE_DIR}/components/algorithm/pid"
+                                                     "${CMAKE_SOURCE_DIR}/bsp"
 )
 
 themis_add_host_test(

@@ -32,6 +32,8 @@
 
 #include "foc_core.h"
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -88,6 +90,36 @@ struct foc_current_context {
     unsigned int initialized;
 };
 
+/** Validated PMSM parameters used only by the optional voltage feedforward path. */
+struct foc_current_feedforward_model {
+    /** d-axis inductance in H. */
+    float ld_h;
+    /** q-axis inductance in H. */
+    float lq_h;
+    /** Permanent-magnet flux linkage in Wb. */
+    float psi_f_wb;
+};
+
+/** Caller-owned, immutable-after-init optional feedforward configuration. */
+struct foc_current_feedforward_context {
+    /** Validated motor model. It is intentionally unused while disabled. */
+    struct foc_current_feedforward_model model;
+    /** True when the caller explicitly enables d/q decoupling and back-EMF feedforward. */
+    bool enabled;
+    /** Set only after foc_current_feedforward_init() succeeds. */
+    bool initialized;
+};
+
+/** Feedforward result in the same d/q voltage units as the PI output. */
+struct foc_current_feedforward_output {
+    /** d-axis cross-coupling compensation in V. */
+    float voltage_d_v;
+    /** q-axis cross-coupling plus back-EMF compensation in V. */
+    float voltage_q_v;
+    /** True only when a validated enabled context produced this result. */
+    bool enabled;
+};
+
 /* Public Functions ------------------------------------------------------------- */
 
 /* Lifecycle ------------------------------------------------------------------- */
@@ -109,6 +141,20 @@ int foc_current_init(struct foc_current_context *context, const struct foc_curre
  */
 int foc_current_reset(struct foc_current_context *context);
 
+/** Validate and initialize optional feedforward parameters; disabled mode accepts an empty model. */
+int foc_current_feedforward_init(struct foc_current_feedforward_context *context,
+                                 const struct foc_current_feedforward_model *model,
+                                 bool enabled);
+
+/** Clear the optional feedforward context while retaining its validated model and enabled state. */
+int foc_current_feedforward_reset(struct foc_current_feedforward_context *context);
+
+/** Calculate validated target-current d/q feedforward for one signed electrical speed. */
+int foc_current_feedforward_compute(const struct foc_current_feedforward_context *context,
+                                    float omega_e_rad_s,
+                                    struct foc_vector_dq target_a,
+                                    struct foc_current_feedforward_output *output);
+
 /* Control --------------------------------------------------------------------- */
 
 /**
@@ -122,6 +168,22 @@ int foc_current_reset(struct foc_current_context *context);
 int foc_current_step(struct foc_current_context *context,
                      const struct foc_current_input *input,
                      struct foc_current_output *output);
+
+/**
+ * Execute one current step with optional d/q feedforward.
+ *
+ * A disabled context follows the original foc_current_step() path. An enabled
+ * context requires a finite electrical speed and uses target-current
+ * feedforward before the existing SVPWM limit, voltage reconstruction, and
+ * transactional integral admission. The Runtime/Board caller must provide a
+ * speed sample valid at the same control instant; this function does not read
+ * clocks or synthesize speed from an angle alone.
+ */
+int foc_current_step_with_feedforward(struct foc_current_context *context,
+                                      const struct foc_current_input *input,
+                                      const struct foc_current_feedforward_context *feedforward,
+                                      float omega_e_rad_s,
+                                      struct foc_current_output *output);
 
 #ifdef __cplusplus
 }

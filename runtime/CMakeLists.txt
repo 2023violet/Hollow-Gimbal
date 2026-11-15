@@ -23,6 +23,7 @@ add_library(
   ../core/src/foc_core.c
   ../core/src/foc_current.c
   ../core/src/foc_motion.c
+  ../core/src/foc_trajectory.c
   ../g3/np/src/foc_device.c
   ../g3/np/src/foc_device_sim.c
   ../g3/safe/src/foc_safe.c
@@ -60,3 +61,19 @@ add_test(NAME test-foc-remote COMMAND test-foc-remote)
 add_executable(test-foc-long tests/test_foc_long.c)
 target_link_libraries(test-foc-long PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-long COMMAND test-foc-long)
+
+add_executable(test-foc-control01b tests/test_foc_control01b.c)
+target_link_libraries(test-foc-control01b PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-control01b COMMAND test-foc-control01b)
+
+add_executable(test-foc-system tests/test_foc_system.c)
+target_link_libraries(test-foc-system PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-system COMMAND test-foc-system)
+
+add_executable(test-foc-robustness tests/test_foc_robustness.c)
+target_link_libraries(test-foc-robustness PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-robustness COMMAND test-foc-robustness)
+
+add_executable(test-foc-ff-admission tests/test_foc_ff_admission.c)
+target_link_libraries(test-foc-ff-admission PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-ff-admission COMMAND test-foc-ff-admission)

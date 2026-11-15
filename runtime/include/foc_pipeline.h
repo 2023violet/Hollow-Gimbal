@@ -8,6 +8,8 @@
  * ---------------
  * Connects Device decoding and mapping, Current Core, and the Safety state
  * machine. A staged PI step is committed only after the output accepts UPDATE.
+ * The optional feedforward policy consumes only a coherent H1 electrical
+ * feedback snapshot supplied with the H0 input.
  *
  * Usage example
  * -------------
@@ -32,6 +34,7 @@
 
 #include "foc_current.h"
 #include "foc_device_sim.h"
+#include "foc_motion.h"
 #include "foc_safe.h"
 
 /* Public Types ---------------------------------------------------------------- */
@@ -79,6 +82,18 @@ enum foc_pipeline_status {
     FOC_PIPELINE_ERR_STOP = -12,
     /** The supplied current time moved backward or crossed the half range. */
     FOC_PIPELINE_ERR_TIME = -13,
+    /** The enabled feedforward path received an invalid or stale electrical-speed snapshot. */
+    FOC_PIPELINE_ERR_FEEDBACK = -14,
+};
+
+/** Optional current-feedforward policy owned by the Pipeline. */
+struct foc_pipeline_feedforward_config {
+    /** False preserves the original PI-only control path. */
+    bool enabled;
+    /** Validated PMSM model copied into the Pipeline at initialization. */
+    struct foc_current_feedforward_model model;
+    /** Maximum permitted age from the H1 source to the ADC sample, in µs. */
+    uint32_t max_age_us;
 };
 
 /** Settings copied into a caller-owned pipeline. */
@@ -91,10 +106,24 @@ struct foc_pipeline_config {
     struct foc_device_pwm_config pwm;
     /** Safety timeouts and invalid-sample threshold. */
     struct foc_safe_config safety;
+    /** Optional H1 electrical-speed feedforward policy. */
+    struct foc_pipeline_feedforward_config feedforward;
     /** Optional final adapter. NULL preserves the closed-gate Host Mock. */
     foc_pipeline_output_submit_t output_submit;
     /** Caller-owned adapter storage, valid throughout the pipeline lifetime. */
     void *output_arg;
+};
+
+/** Coherent H1 electrical feedback supplied with one H0 ADC sample. */
+struct foc_pipeline_electrical_feedback {
+    /** Electrical phase and signed electrical speed at source time. */
+    struct foc_electrical_state state;
+    /** H1 source capture time in the same clock as adc.sample_tick. */
+    uint32_t source_us;
+    /** H1 publication identity, retained for diagnostics and tests. */
+    uint32_t source_seq;
+    /** True only when the complete feedback sample passed H1 validation. */
+    bool valid;
 };
 
 /** Host-published current target, copied on successful publication. */
@@ -129,6 +158,8 @@ struct foc_pipeline_input {
     uint32_t now_us;
     /** Actual caller-supplied control interval in seconds. */
     float dt_s;
+    /** Electrical angle and speed from one coherent H1 publication. */
+    struct foc_pipeline_electrical_feedback electrical_feedback;
     /** Test-only event, zero for a normal cycle. */
     struct foc_pipeline_gate_injection before_gate;
     /** Optional derived current target carrying the already observed source command identity. */
@@ -183,6 +214,10 @@ struct foc_pipeline {
     struct foc_device_adc_config adc_config;
     /** Device output mapping settings. */
     struct foc_device_pwm_config pwm_config;
+    /** Optional, validated current feedforward context. */
+    struct foc_current_feedforward_context feedforward;
+    /** Maximum accepted H1-to-ADC age for the feedforward snapshot. */
+    uint32_t feedforward_max_age_us;
     /** Latest accepted d/q target in A. */
     struct foc_vector_dq target_a;
     /** Command sequence/time retained across recovery. */
@@ -277,7 +312,8 @@ int foc_pipeline_step(struct foc_pipeline *pipeline, const struct foc_pipeline_i
  * @param input Read-only ADC, angle and timing snapshot.
  * @param guard Optional non-blocking admission check. It must not reenter Pipeline.
  * @param argument Caller-owned guard data, used only during the call.
- * @return Step status. A false guard requests INHIBIT and leaves PI unchanged.
+ * @return Step status. A false guard or invalid feedforward snapshot requests
+ * INHIBIT and leaves PI unchanged.
  */
 int foc_pipeline_step_guarded(struct foc_pipeline *pipeline,
                               const struct foc_pipeline_input *input,

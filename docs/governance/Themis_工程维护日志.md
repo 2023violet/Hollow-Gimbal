@@ -2534,3 +2534,199 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[AC11]` 使用 LLVM Clang 22.1.8 的 `-fsanitize=address,undefined` 重新构建并运行 Core、G3-NP、G3-SAFE、Runtime、Protocol、Board/UART Host 工程，共 18/18 CTest 通过；仅为测试进程补充 LLVM 动态 sanitizer runtime 路径，未向生产 ARM 构建注入 sanitizer 选项。
 - `[CMake]` 根 `CMakeLists.txt` 只做 LF 换行修正，并修复两个门禁脚本对无扩展名 `.cmake-format` Python 配置的识别以及临时 Unix 输入检查。根文件格式检查通过，未改变 CMake 命令、字符串或目标语义。
 - `[边界]` `Scope all` 在根文件之后继续暴露既有共享 CMake、`tests/CMakeLists.txt` 及新 standalone V2 CMake 清单的格式差异。本轮按授权不格式化这些文件，因此 RC0 软件仍为 `BLOCKED`；Legacy 回归、Legacy Bench、V2 ARM ELF/BIN/HEX/MAP 和全部 Host 功能测试保持通过。
+
+## 2026-11-12 FalconFOC V2 NEXT-CORE-PERF-01A Float32 baseline
+
+- `[基线]` 新增独立 Host baseline targets，仅记录当前 Float32 电流环的 Golden CSV、动态数学调用次数、正常/饱和 Host 微基准和 Legacy `foc_fast_sincos` 全角度误差扫描；未修改 Core、Runtime、Safety、Board 或 Protocol 生产逻辑。
+- `[结果]` 正常路径动态计数为 `fmodf/sinf/cosf=3/3/3`、`atan2f=1`、`sqrtf=3`、`hypotf=1`；带抗饱和二次调制路径为 `5/5/5`、`atan2f=2`、`sqrtf=5`、`hypotf=2`。Legacy 扫描 1,048,576 点，最大三角误差 `5.99211262e-6`，最大 duty 传播差 `2.56299973e-6`，sector mismatch `0`。
+- `[性能边界]` Host Release 中正常路径中位数 `141.2125 ns/step`，饱和候选路径 `257.9015 ns/step`；这些不是 AT32F415 周期或 WCET。ARM V2 ELF/MAP/反汇编和栈帧已重新读取，V2 BIN SHA 保持不变。
+- `[限制]` PERF-01A 到此停止。未引入 Q31、未删除 `atan2f`、未替换 sin/cos、未修改 PI/抗饱和、未刷机、未上电、未提交或推送。详见 `docs/evidence/2026-11-12-next-core-perf-01a-float32-baseline.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CORE-PERF-01B Float32 hot-path reduction
+
+- `[实现]` Core 内部新增一次角度规约/sin-cos 载荷，Park、逆 Park、电压反算和抗饱和二次调制复用；SVPWM sector 改为无 `atan2f` 的符号/边界判定；公开 API 验证保留，电流 context 使用已初始化配置的 trusted SVPWM 入口。
+- `[等价]` PERF-01A 原始 Golden SHA `AC74F399...8427` 保持不变，4,126 条记录逐项比较通过；状态、sector、Device compare、积分状态和浮点输出均在固定门限内等价。正常动态 `fmodf/sinf/cosf` 从 `3/3/3` 降至 `1/1/1`，`atan2f` 从 1 降至 0。
+- `[性能]` Windows Host Release 中位数：正常路径 `141.2125 -> 88.7070 ns/step`（-37.18%），饱和候选路径 `257.9015 -> 177.7580 ns/step`（-31.08%）。AT32F415 ELF `.text` `31,976 -> 31,560 B`，RAM 静态统计不变；`foc_current_step` 栈帧增加 16 B，记录为后续栈水位验证边界。
+- `[验证]` Core 7/7、Runtime 6/6、G3-NP 2/2、G3-SAFE 1/1、Board/UART/Python 3/3、Protocol 1/1、Legacy Host 45/45、Legacy Bench、V2 ARM 构建、source contract、C/H formatter 和 FalconFOC scoped quality gate 通过。
+- `[限制]` 未修改 Runtime、Safety、Device、Board、Protocol、Legacy；未进入 PERF-01C、Q31、传感器或校准；未刷机、未上电、未提交或推送。详见 `docs/evidence/2026-11-13-next-core-perf-01b-float32-hotpath.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CORE-PERF-01C Float32 hot-path final acceptance
+
+- `[边界修正]` 独立 sector differential test 在 `atan2f(-0,-0)` 语义上发现直接判定误返回 sector 6；按原实现的 `-pi + 2pi -> sector 4` 规则做最小修正，并加入带符号零回归。
+- `[等价]` 新参考实现覆盖 100,015 个定向/随机样本，sector、duty、状态和饱和标志全部一致。原始 PERF-01A Golden SHA `AC74F399...8427` 保持不变，4,126 条记录逐列比较失败数为 0。
+- `[验证]` Core `8/8`、Runtime `6/6`、G3-NP `2/2`、G3-SAFE `1/1`、Board/UART/Python `3/3`、Protocol `1/1`、Legacy Host `45/45`、Clang ASan/UBSan `21/21`、Legacy Bench、V2 ARM 构建、源码契约、C/H formatter 和 FalconFOC scoped gate 通过。
+- `[性能]` PERF-01C Host 中位数为正常 `90.5050 ns/step`、饱和修正 `179.5810 ns/step`；相对 PERF-01A 分别下降 `35.91%` 和 `30.37%`。ARM `.text=31,556 B`、`.rodata=1,268 B`、链接器 RAM `3,376 B`，没有 MCU WCET 或真实栈水位结论。
+- `[范围]` 全仓 `Scope all` 仍在既有 `core/CMakeLists.txt` cmake-format debt 处阻断；本轮没有扩大范围处理无关 CMake。未刷机、未上电、未使能 PWM、未提交或推送。详见 `docs/evidence/2026-11-13-next-core-perf-01c-validation.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-SENSOR-01 magnetic encoder feedback
+
+- `[模块]` 新增独立 `sensors/` Float32 模块，使用整数累计计数保存连续机械位置，输出方向化单圈角度、实际源时间间隔、raw 差分速度、可变 `dt` 一阶 LPF、alpha-beta 跟踪速度和有界质量枚举。模块无 MCU/SPI/RTOS/Runtime/Safety/动态内存/全局可变状态依赖，`foc_encoder_context`/feedback 分别为 `80/48 B`。
+- `[连续性]` 支持 16 位 `65535 -> 0`、反向、跨 uint32 微秒时间戳回绕、重复/倒序时间戳、最小/最大间隔、半圈别名判定、精确半圈跳变、速度越界和显式连续性锁存。无效帧不推进最后可信位置或滤波状态，恢复必须显式 reset。
+- `[Board1]` 保留 SPI 事务、完成/错误、源捕获时间和 `foc_runtime_sensor` 接口；Board1 仅负责 transport 与 H1 发布，新的 Sensor 模块负责解圈和速度。现有 `mechanical_rad_s` 选择 LPF 输出，raw 与 alpha-beta 只保留本地诊断；ARM/START、UPDATE、INHIBIT 锁定行为未改变。
+- `[数据集]` 确定性 Host 合成序列通过：静止 RMS raw/LPF/alpha-beta `0.271071/0.03487715/0.03200987`，8 rad/s 阶跃延迟 `11/9` 帧，正反转恢复 `14/11` 帧，加速 RMSE `0.03382908/0.02845867`，单次丢帧恢复 raw 误差 `0.02669954 rad/s`。这些是算法比较，不是实板噪声或 MCU 时序证据。
+- `[验证]` Sensor CTest `1/1`、Board/UART/Python `3/3`、Clang ASan/UBSan 合计 `22/22`、Core `8/8`、Runtime `6/6`、G3-NP `2/2`、G3-SAFE `1/1`、Protocol `1/1`、Legacy Host `45/45`、Legacy Bench、ARM 构建、源码契约 `51` C/H、C/H formatter 和 FalconFOC scoped gate 通过。
+- `[资源/边界]` Sensor 接入后的 ARM `.text=33,076 B`、`.rodata=1,312 B`、`.bss=2,392 B`、链接器 RAM `3,504 B`；`foc_encoder_update` 静态栈帧 `72 B`。未执行刷机、上电、PWM 或真实编码器电气测试，未开始校准开发。详见 `docs/evidence/2026-11-13-next-sensor-01-validation.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CAL-01 calibration candidates
+
+- `[模块]` 新增独立 `calibration/` Float32/C11 模块，使用在线 Welford 统计估计三相 ADC 零点，使用显式机械/电角度参考拟合方向和极对数，并使用圆周均值估计电角度 offset。模块不访问 Board、Runtime、Safety、Flash、PWM 或 MCU。
+- `[零点]` 64 个确定性零电流样本得到 offset `(2042.98, 2052.02, 2048.50)` counts，噪声 RMS `(0.826009, 0.826011, 0.503953)` counts；未确认外部零电流前提、突变、漂移、invalid mask 和样本不足均拒绝。
+- `[辨识]` 合成可信参考数据得到 direction `-1`、pole pairs `7`、electrical offset `1.199989 rad`，RMS residual `0.0004121638 rad`；机械跨度不足、被动机械角度和不可区分候选返回 `UNIDENTIFIABLE`。圆周边界 offset `6.199975 rad`，RMS residual `0.0004019763 rad`。
+- `[边界]` 结果携带 ADC/encoder/current-gain/phase-order/pole-pair identity；本轮只验证映射到未来 `foc_device_adc_config` 与 `foc_rotor_config` 的字段，不覆盖当前 Board1 的 2048/7/0 静态值，不写 Flash，不自动应用。
+- `[验证]` Calibration `1/1`、Sensor `1/1`、Core `8/8`、Runtime `6/6`、G3-NP `2/2`、G3-SAFE `1/1`、Board/UART/Python `3/3`、Protocol `1/1`、Legacy Host `45/45`、Legacy Bench、ASan/UBSan `23/23`、ARM 构建、源码契约 `54` C/H、C/H formatter 和 FalconFOC scoped gate 通过。
+- `[范围]` Calibration ARM 独立编译对象 `4,100 B` text、最大静态栈帧 `104 B`，未进入生产 ARM 链接或实时路径。真实 ADC 零点、编码器安装方向、极对数和电角度 offset 仍未验证；G3-SAFE/G3-PWR 继续锁定。详见 `docs/evidence/2026-11-13-next-cal-01-validation.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CONTROL-01 optional d/q feedforward
+
+- `[实现]` 在 `core` 增加可选 Float32 PMSM d/q 前馈上下文和入口，使用 `Ld`、`Lq`、`psi_f` 与同一控制时刻的 signed electrical speed 计算 `vd_ff`/`vq_ff`。前馈关闭时继续走原 `foc_current_step()` 事务路径，不修改 Runtime、Safety、Board 或 Protocol。
+- `[抗饱和]` 前馈与 PI 请求一起进入原 SVPWM、VBUS/电压向量和 duty 限幅；积分器准入扣除 proportional 与 feedforward，保留失败不提交和饱和恢复语义。独立 PMSM 模型覆盖正反速度、参数失配、限幅和 500 周期饱和。
+- `[验证]` Core 独立构建 `9/9`，Sensors `1/1`，Calibration `1/1`，Runtime/Pipeline `6/6`，G3-NP `2/2`，G3-SAFE `1/1`，Protocol `1/1`，Board/UART/Python `3/3`，Legacy Host `45/45`，Clang ASan/UBSan `24/24`，Legacy Bench、V2 ARM 构建、源码契约、C/H formatter、受影响 CMake formatter 和 FalconFOC scoped quality gate 通过。无 sanitizer 诊断，`git diff --check` 通过；`Scope all` 仍在既有 `g3/np/CMakeLists.txt` 格式债务处失败。
+- `[资源]` V2 ARM 链接器报告 `.text=33,436 B`、`.rodata=1,312 B`、`.data=84 B`、`.bss=2,392 B`，Flash `35,216 B`、链接器 RAM `3,504 B`；`foc_current_step_internal` 静态栈帧 `184 B`。ELF/BIN/HEX/MAP SHA 分别记录于本轮证据文件。
+- `[边界]` H0 当前 `foc_current_input` 没有同一 ADC 时刻的可信电角速度，故本轮只完成算法和独立 Core 入口，未隐式接入 H1 速度，也未宣称 Board/Runtime 集成或真实电机收益。最终状态为 `NEXT-CONTROL-01 ALGORITHM PASS / INTEGRATION BLOCKED`；未刷机、未上电、未启用 PWM、未提交或推送。详见 `docs/evidence/2026-11-13-next-control-01-validation.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CONTROL-01B electrical-speed integration
+
+- `[链路]` 复用 H1 已发布的双槽 `foc_runtime_sensor_slot`，将同一槽内的 `foc_electrical_state`、源时间和序列随 H0 输入传入 Pipeline。H0 不重复运行 Sensor、不重复乘极对数、不读取全局速度缓存；前馈仍默认关闭，Board1 配置未启用。
+- `[时序]` 新增 `foc_pipeline_feedforward_config.max_age_us` 和电气反馈快照检查，使用现有 uint32 模数时间关系拒绝未来、过期、非有限或无效速度。合法源到 ADC 延迟采用零阶保持近似，并明确不覆盖编码器滤波群延迟、速度噪声或加速度误差。
+- `[事务]` 前馈无效时返回 `FOC_PIPELINE_ERR_FEEDBACK`，沿原 Pipeline `INHIBIT` 路径停止，PI 试算状态不提交；有效时继续使用已验收的 Core 前馈、SVPWM、Device 和 Safety 门禁。
+- `[验证]` 新增 `test-foc-control01b`，覆盖正反速度、合法延迟、过期/未来样本、NaN/无效反馈、uint32 回绕和 H1 写槽/H0 读槽交错。Runtime `7/7`、Board `3/3`、Legacy Host `45/45`、ASan/UBSan 合计 `25/25`、ARM 构建、源码契约 `56` C/H、C/H/受影响 CMake formatter、FalconFOC scoped gate 和 `git diff --check` 通过。
+- `[资源]` V2 ARM `.text=33,748 B`、`.rodata=1,332 B`、`.data=84 B`、`.bss=2,412 B`，Flash `35,548 B`、链接器 RAM `3,528 B`；`foc_pipeline_step_guarded` 静态栈帧 `312 B`，`foc_runtime_control` `224 B`。本轮没有真实 MCU WCET 或实板时序结论。
+- `[边界]` `Scope all` 仍在既有 `g3/np/CMakeLists.txt` 格式债务处失败；G3-SAFE 硬件验收和 G3-PWR 继续锁定。最终状态为 `NEXT-CONTROL-01B SOFTWARE INTEGRATION PASS`，但真实测速延迟、参数和功率级行为仍未验证；未刷机、未上电、未启用 PWM、未提交或推送。详见 `docs/evidence/2026-11-13-next-control-01b-integration.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CONTROL-02 trajectory planning
+
+- `[模块]` 新增独立 `foc_trajectory` Float32/C11 模块，支持速度目标加减速限制、连续位置点到点规划、制动速度上界、正反转、多圈位置和明确的 READY/ACTIVE/INVALID 生命周期。模块不访问 Sensor、Board、Safety、Protocol、时钟或输出。
+- `[集成]` Runtime H1 在轨迹启用时复制 context 试算，把规划速度接入现有 Velocity PI；正式轨迹状态复用 `outer_trial_seen`、`accepted_outer_seq` 和 `motion_session` 提交边界。H0、Device、Safety 或 UPDATE 拒绝不会推进正式轨迹；轨迹关闭时保留旧位置 P/速度 PI 路径。
+- `[验证]` 独立 Core `10/10`，Runtime `7/7`，包含现有 PMSM 模型的轨迹速度/位置、目标反向和 UPDATE 拒绝测试；Board/UART/Python `3/3`，Legacy Host `45/45`，Legacy Bench、ARM 构建、Clang ASan/UBSan 合计 `26/26`、源码契约 `59` C/H、C/H/受影响 CMake formatter、FalconFOC scoped gate 和 `git diff --check` 通过。
+- `[资源]` V2 ARM 链接器报告 `.text=34,904 B`、`.rodata=1,352 B`、`.data=84 B`、`.bss=2,488 B`，Flash `36,724 B`、链接器 RAM `3,600 B`；轨迹公开函数栈帧为 `init 56 B`、`reset 16 B`、`velocity_step 32 B`、`position_step 40 B`，`foc_runtime_control` `224 B`。没有真实 MCU WCET 或 H1 实测占用结论。
+- `[边界]` 轨迹和前馈在 Board1 参考配置中均默认关闭；正常减速不替代独立 Safety INHIBIT。`Scope all` 仍受既有 `g3/np/CMakeLists.txt` 格式债务影响，G3-SAFE 硬件验收和 G3-PWR 继续锁定；未刷机、未上电、未启用 PWM、未提交或推送。详见 `docs/evidence/2026-11-13-next-control-02-trajectory.md`。
+
+## 2026-11-13 FalconFOC V2 NEXT-CONFIG-01 calibration admission
+
+- `[实现]` 在现有 `calibration/` 中新增完整候选的原子准入与 `foc_calibration_snapshot`。入口重新检查质量、范围、样本数和跨结果 identity；失败不修改调用者快照。CAL-01 的校准方向与源机械坐标方向通过一次乘法解析为 Runtime Sensor 方向，不重复反转。
+- `[集成]` Board1 增加显式的 `foc_board_init_with_calibration()`。它在初始化前装配 ADC 偏置、极对数、电角度 offset 和 Sensor 方向，成功后一次性提交 Runtime、输出日志和 Sensor 配置；默认 `foc_board_init()`、2048/7/0 名义参数、前馈/轨迹关闭和输出锁保持不变。
+- `[验证]` 新增 Calibration admission 负向测试和 Board1 Profile A/B 数据链测试，覆盖 ADC 解码、编码器方向、Rotor 映射、H1 发布、身份不匹配和重复配置拒绝。真实 ADC/编码器/电机参数仍未验证；本轮不写 Flash、不刷机、不上电、不启用 PWM。
+
+## 2026-11-13 FalconFOC V2 NEXT-SYSTEM-01 full-chain stability
+
+- `[测试]` 新增 `runtime/tests/test_foc_system.c` 与 `test-foc-system` CTest，启用 Host feedforward、trajectory、速度 PI、电流 PI、SVPWM、Device、Safety 和 Mock，使用 H0 `200 us`、H1 `500 us`、Foreground `200 us` 的多速率事件流重复回放。指纹 `3f01f6e3`，H0 due `103`、H1 due `41`，漏期/迟到/预算超限均为零。
+- `[故障]` 系统测试覆盖正反速度命令、UPDATE 拒绝、轨迹/外环/内环试算状态不提交，以及 WDT inhibit 后的 `FAULT_LATCHED`。既有 `test-foc-long` 的 `100,000` 次回放仍保持指纹 `49dea950`，updates `99,998`，漏期、迟到和预算超限均为零。
+- `[门禁]` Runtime CTest 增至 `8/8`，ASan/UBSan 总计 `28/28`，Source contract `61 C/H、8 CMake、8 README`，C/H/受影响 CMake formatter、`Scope falconfoc` 和 Legacy Host `45/45` 通过。`Scope all` 仍停在既有 `g3/np/CMakeLists.txt` cmake-format debt；无生产算法或安全路径修复，未刷机、未上电、未启用 PWM、未提交或推送。
+
+## 2026-11-13 FalconFOC V2 NEXT-RC0-SW-01 RC0 软件复验
+
+- `[修复]` 仅按本轮授权对 `g3/np/CMakeLists.txt` 做 cmake-format 布局修正；目标、源文件、编译选项、链接依赖、测试注册和构建语义均保持不变。文件 SHA 从 `8CF6AF73...` 变为 `68AC235F...`，独立 G3-NP 构建 `2/2` 通过。
+- `[验证]` 新鲜 `build/rc0/software-gate-01` Host Debug MinGW `45/45`、Clang ASan/UBSan `28/28`、Runtime `8/8`、Legacy Bench 构建和 V2 AT32F415 ARM 构建通过；系统回放 `3f01f6e3`、长回放 `49dea950` 保持确定性。RelWithDebInfo 的唯一失败是 Debug-only fail-fast 断言在 `NDEBUG` 下不触发，已记录为配置差异。
+- `[门禁]` Source contract `61/8/8`、C/H formatter、changed/untracked CMake formatter、`Scope falconfoc` 和 `git diff --check` 通过。`Scope all` 在继续检查时暴露另一个未修改的既有 `g3/safe/CMakeLists.txt` 格式债务；按任务边界不扩大修改范围，因此 `NEXT-RC0-SW-01 BLOCKED`、`RC0 SOFTWARE BLOCKED`。
+- `[产物]` V2 section 为 `.text=34,916 B`、`.rodata=1,352 B`、`.data=84 B`、`.bss=2,520 B`，Flash `36,736 B`、RAM `3,632 B`；ARM/Legacy artifact SHA 已写入 `docs/evidence/2026-11-13-next-rc0-sw-01-validation.md`。
+- `[边界]` 没有刷机、上电、PWM、Flash 写入、commit 或 push；G3-SAFE 硬件能力仍未验证，G3-PWR 继续锁定。
+
+## 2026-11-14 FalconFOC V2 NEXT-RC0-SW-01B 剩余 CMake 门禁复验
+
+- `[修复]` 仅对 `g3/safe/CMakeLists.txt` 使用仓库 `cmakelang/cmake-format 0.6.13` 做格式布局修正；SHA 从 `B01FA782...` 变为 `A8300D56...`，目标、源文件、编译选项、链接关系和测试注册未变。
+- `[扫描]` 对 `Scope all` 的 29 个实际 CMake 文件做完整逐文件检查。修复前失败 5 个；修复后仍有 `tests/CMakeLists.txt`、`cmake/ThemisBuildAxes.cmake`、`cmake/ThemisContracts.cmake`、`platform/at/at32f415/ThemisPlatformDefaults.cmake` 4 个未授权历史格式失败，未扩大修改范围。
+- `[验证]` 新鲜 `build/rc0/software-gate-01b` Host Debug `45/45`、Core `10/10`、Runtime `8/8`、G3-NP `2/2`、G3-SAFE `1/1`、Board `4/4`、Clang ASan/UBSan `28/28`、SYSTEM replay `3f01f6e3`、long replay `49dea950`、Legacy Bench、V2 ARM 构建全部通过。RelWithDebInfo 保留真实 `44/45`，唯一失败是 `NDEBUG` 下 Debug-only fail-fast 断言未触发。
+- `[资源]` V2 ARM section 仍为 `.text=34,916 B`、`.rodata=1,352 B`、`.data=84 B`、`.bss=2,520 B`，Flash `36,736 B`、RAM `3,632 B`；主要静态栈帧已记录于 `docs/evidence/2026-11-14-next-rc0-sw-01b-validation.md`。Legacy 二进制指纹仅因 `__DATE__/__TIME__` 跨日变化，链接布局和代码 section 大小不变。
+- `[结论]` Source contract、C/H formatter、changed/untracked CMake formatter、`Scope falconfoc` 和 `git diff --check` 通过；`Scope all` 被 4 个未授权格式文件阻断，因此 `NEXT-RC0-SW-01B BLOCKED`、`RC0 SOFTWARE BLOCKED`。G3-SAFE 硬件未验证，G3-PWR 继续锁定。
+
+## 2026-11-14 FalconFOC V2 NEXT-RC0-SW-01C CMake 格式债务收口
+
+- `[修复]` 仅按授权格式化 `tests/CMakeLists.txt`、`cmake/ThemisBuildAxes.cmake`、`cmake/ThemisContracts.cmake` 和 `platform/at/at32f415/ThemisPlatformDefaults.cmake`。四个文件的非注释语义 token 数量与顺序逐一保持一致；`g3/np`、`g3/safe` 两项既有修复保持不变。
+- `[扫描]` 从当前 `check_cmake_quality.ps1` 动态枚举 29 个 `Scope all` CMake 文件，`cmake-format 0.6.13` 扫描结果 `29/29 PASS`。
+- `[验证]` 新鲜 `build/rc0/software-gate-01c` Host Debug `45/45`、Core `10/10`、Sensors `1/1`、Calibration `1/1`、G3-NP `2/2`、G3-SAFE `1/1`、Runtime `8/8`、Protocol `1/1`、Board `4/4`、Clang ASan/UBSan `28/28`、SYSTEM replay `3f01f6e3`、long replay `49dea950`、Legacy Bench 和 V2 ARM 构建通过。RelWithDebInfo 真实结果为 `44/45`，失败仍是 `NDEBUG` 下 Debug-only fail-fast 断言。
+- `[门禁]` Source contract、C/H formatter、全量 CMake formatter、`Scope falconfoc` 和 `git diff --check` 通过；正式 `Scope all` 在 `test_firmware_cli_contract.ps1` 因当前 Windows 没有 Bash 失败。没有 Git Bash，也没有已安装 WSL 发行版；未安装依赖、未改门禁脚本，因此 `NEXT-RC0-SW-01C BLOCKED`、`RC0 SOFTWARE BLOCKED`。
+- `[资源]` V2 ARM `.text=34,916 B`、`.rodata=1,352 B`、`.data=84 B`、`.bss=2,520 B`，Flash `36,736 B`、RAM `3,632 B`，主要静态栈帧与产物 SHA 写入 `docs/evidence/2026-11-14-next-rc0-sw-01c-validation.md`。Legacy 指纹差异仅来自 `__DATE__/__TIME__`，代码 section 和链接布局不变。
+- `[边界]` Board1 输出锁、默认校准参数、Feedforward/Trajectory 默认关闭状态保持；G3-SAFE 硬件未验证、G3-PWR 继续锁定；未刷机、未上电、未启用 PWM、未写 Flash、未提交或推送。
+
+## 2026-11-14 FalconFOC V2 NEXT-RC0-ENV-01 Bash 环境与 Scope all 复验
+
+- `[环境]` 复用现有 `D:\Git\bin\bash.exe`，Bash `5.3.15`、Git `2.55.0.windows.4`；仅在当前 PowerShell 进程临时前置 `D:\Git\bin;D:\Git\cmd`，没有安装依赖、修改系统 PATH 或 Git 全局配置。
+- `[CLI]` `test_firmware_cli_contract.ps1` 实际通过，`run.sh all/build/repair/memory` 全部由脚本创建的 Mock cmake/ninja/OpenOCD 路径执行，退出码 `0`，临时目录和随机 build 目录已清理；未接触真实设备。
+- `[门禁]` 正式 `Scope all` 已越过 Bash 与 Firmware CLI contract 阶段，CMake `29/29`、Source contract、C/H、Scope falconfoc、preset/platform/smoke、cache guard 和 Transport/Shell 均通过；随后在 `test_falconfoc_themis_lite_contract.ps1` 读取缺失的 `platform/at32f403a/ThemisPlatformDefaults.cmake` 处失败，因此 `NEXT-RC0-ENV-01 BLOCKED`、`RC0 SOFTWARE BLOCKED`。
+- `[回归]` 新鲜 `build/rc0/software-gate-01c` Host Debug `45/45`、ASan/UBSan `28/28`、Runtime `8/8`、G3-NP `2/2`、G3-SAFE `1/1`、Board `4/4`、SYSTEM replay `3f01f6e3`、long replay `49dea950`、Legacy Bench 和 V2 ARM 构建通过；RelWithDebInfo 保持 `44/45`。
+- `[边界]` 未修改 CLI smoke、Lite contract、生产源码或门禁规则；没有刷机、上电、PWM、Flash 写入、commit 或 push。G3-SAFE 硬件仍未验证，G3-PWR 继续锁定。详见 `docs/evidence/2026-11-14-next-rc0-env-01-validation.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-RC0-CONTRACT-01 Themis-lite 归属审查
+
+- `[审查]` 当前工作树、CMake presets、platform 目录和迁移文档确认 AT32F415 是当前 Legacy 与 V2 的实际平台；AT32F403A 目录不存在，AT32F423 也没有实现目录或有效 preset。`47c4a9e` 历史提交说明已明确记录 Themis-lite 脚本仍引用不存在的 at32f403a 路径，属于预存迁移欠账。
+- `[分类]` `test_falconfoc_themis_lite_contract.ps1` 同时包含 ACTIVE 的 artifact/ownership/feature/CPU-class/Shell/Flash/安全负向断言、MISMATCHED 的 F403A→F415 路径和 boot/linker 引用、尚未实现的 platform timing seam，以及 LEGACY 的 COM54/J-Link/AT32F403A 历史维护 witness。不能把整份脚本删除，也不能复制文件伪造旧平台。
+- `[方案]` 推荐将当前 RC0 FalconFoc contract 与 historical/prepared platform audit 分离；当前 contract 只验收 AT32F415 和有效软件安全/构建边界，旧 Themis-lite 与 F423/timing seam 作为独立迁移审计。具体文件计划、保留断言和后续矩阵见 `docs/evidence/2026-11-14-next-rc0-contract-01-review.md`。
+- `[状态]` 本轮只读审查完成，没有修改脚本、平台文件、CMake、生产源码或门禁；`RC0 SOFTWARE BLOCKED`、`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED` 保持。
+
+## 2026-11-14 FalconFOC V2 NEXT-RC0-CONTRACT-02 当前产品契约迁移
+
+- `[迁移]` 新增 `tests/script/test_falconfoc_current_contract.ps1`，将仍然有效的 FalconFoc 软件、AT32F415 平台、CPU class、启动链、Shell/transport、Flash、artifact 和输出锁断言从历史 Themis-lite 入口分离出来；原 `test_falconfoc_themis_lite_contract.ps1` 保留为历史/准备平台审计，不再作为当前 RC0 的唯一阻断入口。
+- `[强化]` 当前契约现在精确验证 `cortex-m3`、无 FPU、soft-float、ARM_CM3 port，以及 M4F-hard 参考 class 的 CPU/FPU/ABI/port 值；不再只检查变量名存在。AT32F415 timing 仍按真实 `applications/algo/foc_config.h` 值检查，并明确记录 platform-owned timing seam 尚未迁移，未创建占位平台文件或改变运行参数。
+- `[文档]` 两份启动文档的 live owner 已从历史 AT32F403A 路径对齐到 `platform/at/at32f415/generated/src/main.c`；历史 F403A/F423 与 COM54/J-Link witness 仍保留在历史记录和独立审计范围。
+- `[验证]` 当前契约独立 PASS；隔离负向夹具 `12/12` 按预期拒绝错误 CPU class、FPU/ABI、Flash geometry、linker stack、缺失 artifact、timing、metadata owner、boot doc、旧 vendor header、output lock、IPC 和 Shell 泄漏。Scope `falconfoc`、`bsp`、`applications`、`all` 均实际 PASS；Host Debug `45/45`；Clang ASan/UBSan `28/28`；SYSTEM replay `3f01f6e3`；long replay `49dea950`；Legacy Bench 与三种 AT32F415 固件 preset 构建通过。V2 独立 ARM ELF/BIN/HEX/MAP 重新构建，Flash `36,736 B`、RAM `3,632 B`，保持 soft-float ABI；实际 MCU WCET、G3-SAFE 硬件和 G3-PWR 仍未验证/锁定。
+- `[状态]` `NEXT-RC0-CONTRACT-02 PASS`、`RC0 SOFTWARE GATES PASS`。本轮未修改 FOC、Runtime、Safety、Device、Board 功率输出或历史契约脚本；未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-14 FalconFOC V2 NEXT-BOARD-READY-01 实板准备与硬件准入设计
+
+- `[架构]` 分离记录 Legacy 与 V2 Reference 的真实执行链：Legacy 为 AT32F415 + FreeRTOS ARM_CM3，TMR1/ADC 约 20 kHz event、产品 FOC 10 kHz、TMR5 外环 5 kHz、位置 1 kHz；V2 已将 H0 绑定 TMR1/ADC 200 µs、H1 绑定 TMR5/SPI1 500 µs，Foreground 仍为主循环轮询。没有把 Host H0/H1 回放当成 Legacy 或 V2 的实板 WCET。
+- `[资源]` 重新执行 V2 与 Legacy AT32F415 构建、ELF/MAP/`readelf`/`objdump`/`nm` 分析，统一区分 Flash BIN、RAM 静态对象、保留栈和 ELF debug 大小。V2 当前 Flash load `36,736 B`、RAM linker 使用 `3,632 B`，其中 `.data=84 B`、`.bss=2,520 B`、保留栈 `1,024 B`；`._user_heap_stack` 不含 heap，4 KiB stack headroom 断言仍只是静态约束。
+- `[测量设计]` 建立 H0/H1 入口延迟、ADC/SPI 事务、Core/Safety 执行、publication-to-consume、Foreground、抢占次数、P95/P99 和 Observed Maximum 的 DWT/GPIO/Timer capture 方案，明确 Observed Maximum 不等于 Proven WCET；V2 当前没有真实 PWM 提交点，不能测量 actuator response。
+- `[安全]` 核对 V2 输出锁、INHIBIT、TMR1 MOE/PWM mux、DRV8311H nFAULT/nSLEEP 边界。软件 INHIBIT 仍只代表软件决定；功率桥关闭、复位状态、死区、CSA、温升和 watchdog 均需要 H4 级硬件证据。
+- `[门禁]` 建立 GATE H0（资料一致性）、H1（无功率输出）、H2（实时性/栈）、H3（传感器采样时序）、H4（功率级安全，另行授权）流程。仓库硬件资料文件存在，但实际板卡 revision、调试器/串口身份、仪器、电源、急停、装配状态仍需现场确认；发现 README/AGENTS 的 DAP-Link/COM3 与历史启动文档 J-Link/COM54 witness 不一致，列为 H0 前置澄清项。
+- `[状态]` `NEXT-BOARD-READY-01 PREPARATION PASS`。本轮未刷机、未上电、未连接真实调试器、未启用 PWM、未修改控制/安全/板级生产代码；`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED` 保持。详见 `docs/evidence/2026-11-14-next-board-ready-01.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-ENGINEERING-01 数学验证与热路径审计
+
+- `[验证]` 新增独立 double 参考测试 `core/tests/test_foc_math_reference.c`，覆盖 Clarke、Park、逆 Park、SVPWM 和非法 VBUS 安全输出；变换与 SVPWM 各 `10,000` 个确定性样本通过。生产 Float32 与 double 参考的最大 Park 误差约 `4.54e-5`，归因于大角度规约和 Float32 三角函数差异，没有发现坐标或符号错误。
+- `[审计]` 读取 AT32F415 ARM 反汇编和符号，确认 H0 `foc_current_step_internal` 的 `fmodf/sinf/cosf/sqrtf/hypotf`、H1 `foc_encoder_update` 的浮点除法/滤波、H1 trajectory position 的 `sqrtf` 和 Runtime Safety 调用链。没有把 Host 时间换算成 MCU WCET，也没有删除防御性检查。
+- `[结构]` 复核 V2 `main.c` 的输出锁、时钟/ADC/SPI/TMR/UART/NVIC 初始化、IRQ 共享状态和失败 WFI 路径。当前 helper 分区已经清楚；由于没有证明拆分会带来收益，且静态 IRQ 状态迁移有生命周期风险，本轮不执行 `main.c` 文件拆分。
+- `[回归]` Core `11/11`、Clang ASan/UBSan 全工程 `29/29`、Host Debug `45/45`、Legacy 三种 AT32F415 构建、V2 ARM、source contract `62/8/8`、C/H formatter、`Scope falconfoc`、`Scope all` 和 `git diff --check` 通过。RC0 replay 指纹继续保持 `3f01f6e3` 和 `49dea950`。
+- `[状态]` `NEXT-ENGINEERING-01 PARTIAL PASS`。当前没有确认的控制公式错误；Current PI/外环/Sensor 独立 oracle、目标 MCU cycle measurement 和真实栈高水位仍未完成。未刷机、未上电、未启用 PWM、未改变控制算法或安全策略。详见 `docs/evidence/2026-11-14-next-engineering-01.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-MATH-02 独立数学验证
+
+- `[验证]` 新增独立 double Current PI 参考和独立 PMSM RK4/前馈参考；纳入既有 Clarke/Park/SVPWM、速度/位置/轨迹及磁编码器参考测试。Current PI `4,096` 个轨迹样本、PMSM `5,000` 个样本、运动 `5,000` 个样本、Sensor `5,000` 个有效样本通过；Core `14/14`、Sensors `2/2`。
+- `[回归]` Clang ASan/UBSan 全工程 `33/33`、Host Debug `45/45`、SYSTEM replay `3f01f6e3`、long replay `49dea950`、Source contract `66/8/8`、C/H formatter、`Scope falconfoc`、临时接通现有 Bash 后的 `Scope all`、ARM 构建和 `git diff --check` 通过。
+- `[边界]` 参考测试独立验证数值和状态契约，不证明 AT32F415 WCET、真实 ADC/PWM 时序、功率级安全或电机实机性能。未修改生产控制算法、Runtime、Safety、Board 或 Protocol；未刷机、未上电、未启用 PWM、未写 Flash、未 commit 或 push。`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED` 保持。详见 `docs/evidence/2026-11-14-next-math-02-validation.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-PERF-02 Float32 热路径性能分析
+
+- `[基线]` 使用当前工作树 fresh Host Release 基准、独立数学计数构建和 AT32F415 soft-float ELF 反汇编确认 H0 电流环调用链。当前 Normal `112.816 ns/step`、饱和路径 `215.620 ns/step` 仅为 Host 对照；当前 ELF `.text=36,644 B`、`.data=92 B`、`.bss=3,544 B`。
+- `[候选]` 对最终电压 envelope 的 `hypotf` 保守快速路径完成独立 A/B。Normal Current Step 局部调用减少，但完整 H0 重复测量方向不稳定，5 次和 10 次聚合中位数分别得到 `-6.84%` 与 `+6.92%`，不能证明真实产品收益。
+- `[决定]` 已撤回本轮唯一生产优化候选，保留现有 Float32 实现。Golden 行级比较 `0` 差异；Core `14/14`、Sensors `2/2`、ASan/UBSan `33/33`、Host `45/45`、SYSTEM `3f01f6e3`、Long `49dea950`、`Scope all`、ARM 构建和格式门禁通过。最终状态为 `NEXT-PERF-02 ANALYSIS PASS / NO CHANGE`。未刷机、未上电、未启用 PWM、未 commit 或 push；`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED` 保持。详见 `docs/evidence/2026-11-14-next-perf-02-validation.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-CONTROL-ROBUST-01 控制鲁棒性研究
+
+- `[模型]` 新增 `runtime/tests/test_foc_robustness.c` 和 `test-foc-robustness`，以 H0 `200 us`、H1 `500 us` 推进生产 Float32 Current/Velocity/Position/Trajectory/Feedforward，测试侧使用独立 double PMSM 电气/机械方程和 RK4 积分。包含负载、Rs/Ld/Lq/ψf/J/B 偏差、编码器角度偏差、速度噪声、400 us 传感器延迟、丢样和组合工况，共 `22` 个固定场景，输出忽略构建目录中的 CSV。
+- `[结果]` 所有研究场景均保持有限，`unstable_cases=0`。名义 Current 尾段 RMSE `0.00112 A`；Ld/Lq `0.5x/1.5x` 时 RMSE 约 `0.29 A` 且出现约 `7,400` 个饱和周期；J `4x` 和 Rs/Lq/J 组合使速度尾段 RMSE 分别升至约 `0.0123/0.0195`；Trajectory 位置尾段 RMSE `0.0140 rad`，直接 Position P 为 `0.00257 rad`。这些结果支持候选研究，不支持直接修改默认参数。
+- `[门禁]` Runtime `9/9`、ASan/UBSan 总计 `34/34`、Host `45/45`、Source contract `67/8/8`、SYSTEM `3f01f6e3`、Long `49dea950`、`Scope all`、ARM 构建和格式检查通过。最终状态为 `NEXT-CONTROL-ROBUST-01 PASS（Host 数学/仿真范围）`；未修改生产控制/参数/硬件路径，未刷机、未上电、未启用 PWM、未 commit 或 push。`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。详见 `docs/evidence/2026-11-14-next-control-robust-01.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-CONTROL-OPT-01 电流环退化根因与候选优化
+
+- `[根因]` 逐 H0 trace 证明 Ld/Lq 退化案例中的约 `7,400` 个饱和周期主要与无负载电流目标导致的机械加速和反电动势有关：末段稳态需求约 `12.06 V`，当前可用边界 `12 V`，裕量约 `-0.071 V`。相同 Ld/Lq 偏差在固定 `20 rad/s`、负载抵消转矩后无饱和，电流尾段 RMSE `2.15e-4 A`。
+- `[对照]` 连续时间 `Kp=Lωc、Ki=Rωc` PI 候选没有改善：Ld/Lq `0.5x` 无速度约束 RMSE `0.2908 -> 0.3223 A`，固定速度 `0.0720 -> 0.1196 A`。参数一致 Feedforward 在固定高速/负载对照中将 RMSE `0.0702 -> 0.0132 A`、尾段 RMSE `1.62e-4 -> 1.09e-6 A`，无新增饱和。
+- `[决定]` 保留一个仅限 Host 的研究候选：完成电机参数校准准入并确认电气速度可信后，再评审启用一致 PMSM Feedforward；本轮不修改生产默认参数或 Runtime。Robustness 研究入口扩展为 `31` 个场景，Runtime `9/9`、ASan/UBSan `34/34`、Host `45/45`、SYSTEM `3f01f6e3`、Long `49dea950`、`Scope all`、ARM 构建和格式门禁通过。最终状态为 `NEXT-CONTROL-OPT-01 PASS（Host 研究范围）`；未刷机、未上电、未启用 PWM、未 commit 或 push。详见 `docs/evidence/2026-11-14-next-control-opt-01.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-FF-ADMISSION-01 Feedforward 软件准入契约
+
+- `[审计]` 核对 CAL-01、CONFIG-01、Sensors、Runtime 和 Feedforward：现有代码已有数值合法性、H1 source time/seq/session/age/future 检查、SVPWM/anti-windup/Safety 限制和 Board1 默认关闭；但没有 PMSM 参数 provenance、motor identity、calibration version 与参数组绑定。
+- `[契约]` 新增 Host-only `test-foc-ff-admission`，区分数值合法、来源可信、电气速度可信和 Feedforward 使用准入，覆盖 NaN/零电感、身份/版本冲突、首次/过期/旧 session/旧序列、时间戳回绕、正负速度和显式 enable。生产 wiring 明确标记 `host_only`，不自动启用前馈。
+- `[门禁]` Runtime `10/10`、ASan/UBSan 总计 `35/35`、Host `45/45`、Source contract `68/8/8`、SYSTEM `3f01f6e3`、Long `49dea950`、`Scope all`、ARM 构建和格式门禁通过。最终状态为 `NEXT-FF-ADMISSION-01 PASS（Host 软件契约范围）`；真实 PMSM 参数辨识、物理速度质量、Board1 Feedforward 和硬件安全仍未验证/未启用。未刷机、未上电、未启用 PWM、未 commit 或 push。详见 `docs/evidence/2026-11-14-next-ff-admission-01.md`。
+
+## 2026-11-14 FalconFOC V2 NEXT-CODE-QUALITY-01 Board 配置、初始化结构与防御性检查专项
+
+- `[修改]` 仅在 `firmware/at32f415/src/foc_board.c` 将 Current/ADC/PWM/Safety、H0/H1/监督/遥测和 Motion 的嵌套配置改为 designated initializer；ADC 换算复用既有 `FOC_BOARD_ADC_MAX`，并补充单位、名义配置与未辨识电机参数边界说明。没有改变参数值、结构体布局、公共 API、初始化顺序或输出锁。
+- `[审查]` 源码核对 `main.c` 的真实启动顺序、IRQ 状态所有权和失败 WFI 路径；当前静态 helper 分区清楚，拆分会移动共享 ISR 状态且没有已证明收益，因此 `main.c` 保持不变。对 `foc_current_step_internal`、`foc_encoder_update`、`foc_runtime_h0_step`、`foc_runtime_h1_step` 的动态校验逐项复核，没有删除任何安全或事务检查。
+- `[验证]` Board `4/4`、Core `14/14`、Sensors `2/2`、Calibration `1/1`、Runtime `10/10`、G3-NP `2/2`、G3-SAFE `1/1`、Protocol `1/1`、Host Debug `45/45`、Clang ASan/UBSan `35/35`、SYSTEM replay `3f01f6e3`、Long replay `49dea950`、C/H/Source contract/CMake `29/29`、`Scope falconfoc`、`Scope all` 和 `git diff --check` 均通过。V2 ARM 产物 `.text=36,644 B`、`.data=92 B`、`.bss=3,544 B`、Flash `36,736 B`、RAM `3,632 B`，ELF/BIN/HEX/MAP SHA-256 与基线一致。
+- `[状态]` `NEXT-CODE-QUALITY-01 PASS`。继续保持 `G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED`；未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-15 FalconFOC V2 NEXT-TIMING-OWNER-01 AT32F415 时序参数所有权收敛
+
+- `[审计]` 核对 Legacy `foc_config.h`、`motor_task.c`、`foc_ctrl.c`、生成式 `wk_tmr.c` 与 V2 `foc_board.h/main.c`：确认 150 MHz timer input、Legacy TMR1 20 kHz carrier/ADC event、Legacy TMR5 5 kHz soft IRQ、产品 FOC 10/5 kHz、velocity 5 kHz、position/trajectory 1 kHz，以及 V2 H0 200 µs/H1 500 µs 的真实边界。明确 `osDelay(1)` 不是严格硬实时 1 kHz。
+- `[所有权]` 新增 `platform/at/at32f415/generated/inc/tm_platform_foc_timing.h`，集中拥有 AT32F415 timer clock、Legacy TMR1/TMR5 固定外设 cadence 和 V2 1 µs timebase。Legacy `PWM_FREQ_HZ`、velocity/position/trajectory 仍留在应用产品配置；V2 H0/H1、Safety timeout 和 SPI/ADC window 仍留在各自 Board/Runtime 契约。
+- `[实现]` `foc_config.h`、`foc_board.h` 和 bench `TM_MOTOR_BENCH_ADC_TICK_HZ` 改为引用平台事实；增加 Hz/MHz、FOC-step/carrier、velocity/TMR5 的编译期一致性检查。V2 standalone Board target 和 Legacy Host contract 补齐平台 generated include 路径。未修改生成式 Timer、ADC、SPI、FreeRTOS、PWM、ISR 优先级或实际周期。
+- `[验证]` Legacy tiny/standard/full-diag 构建、V2 ARM 构建、Host Debug `45/45`、Clang ASan/UBSan `35/35`、SYSTEM `3f01f6e3`、Long `49dea950`、Source contract、C/H/CMake formatter、`Scope falconfoc`、`Scope all` 和 `git diff --check` 均通过。Legacy tiny/standard BIN/HEX 与基线一致；full-diag BIN/HEX 和 section 资源一致，ELF 仅因 Debug 源码/include 元数据变化。V2 ELF/BIN/HEX/MAP 与基线一致。
+- `[状态]` `NEXT-TIMING-OWNER-01 PASS`。继续保持 `G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED`；未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-15 FalconFOC V2 NEXT-RC0-BASELINE-01 软件候选基线冻结
+
+- `[完整性]` 在原工作树之外建立 `D:/study/Software/Hollow-Gimbal_RC0_Verification_20261115_01` 独立源快照，纳入 `.vscode`、`memory.sh`、`symbols.txt` 和全部当前生产/测试/平台输入；排除 `.git`、构建缓存、临时目录及被忽略的 `state show` 诊断输出。逐文件清单 `1660/1660`，缺失 `0`、意外 `0`、SHA-256 不一致 `0`。
+- `[重建]` 在独立验证副本中重新配置 Host Debug、Clang ASan/UBSan、Legacy tiny/standard/full-diag 和 V2 AT32F415 ARM；Host `45/45`、Sanitizer `35/35`、Source contract `68/8/8`、Firmware CLI contract、`Scope falconfoc`、`Scope all` 和 CMake `29/29` 均实际通过，SYSTEM/Long replay 保持 `3f01f6e3`/`49dea950`。
+- `[产物]` V2 ELF/BIN/HEX 与原工作树逐字节一致，Flash `36,736 B`、RAM `3,632 B`；Legacy tiny/standard ELF/BIN/HEX 一致。full-diag 的 BIN 差异仅为 Debug 构建 `__DATE__`/`__TIME__` 字符串，section 尺寸和指令内容未发现差异。
+- `[修正]` 独立快照初始排除了正式 CLI 入口 `memory.sh` 和 `.vscode`，CLI contract 在独立目录中真实拒绝；补回后重新生成清单并完成全部门禁，未通过跳过测试或修改门禁规则解决。
+- `[状态]` `NEXT-RC0-BASELINE-01 PASS`。建议冻结为 RC0 软件源码提交候选；`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。详见 `docs/evidence/2026-11-15-next-rc0-baseline-01.md`。

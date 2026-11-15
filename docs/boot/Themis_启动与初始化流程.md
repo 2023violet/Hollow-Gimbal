@@ -6,7 +6,7 @@
 
 当前 live owner 只包括：
 
-- `platform/at/at32f403a/generated/src/main.c`
+- `platform/at/at32f415/generated/src/main.c`
 - `applications/app_main.c`
 - `bsp/board/bsp_init.c`
 - `motor_task_init()`
@@ -17,7 +17,7 @@
 ## 2. 当前正式启动链
 
 ```text
-platform/at/at32f403a/generated/src/main.c
+platform/at/at32f415/generated/src/main.c
     -> wk_wait_for_power_stable()
     -> wk_system_clock_config()
     -> wk_periph_clock_config()
@@ -65,7 +65,7 @@ applications/app_main.c
 
 ## 3. Owner 收口
 
-### 3.1 `platform/at/at32f403a/generated/src/main.c`
+### 3.1 `platform/at/at32f415/generated/src/main.c`
 
 职责：
 

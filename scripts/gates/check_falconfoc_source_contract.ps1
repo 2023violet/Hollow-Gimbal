@@ -110,6 +110,8 @@ function Assert-CMakeContract
 $resolvedRoot = Resolve-RepoRoot -Root $RepoRoot
 $sourceRoots = @(
     (Join-Path $resolvedRoot "core"),
+    (Join-Path $resolvedRoot "calibration"),
+    (Join-Path $resolvedRoot "sensors"),
     (Join-Path $resolvedRoot "g3\np"),
     (Join-Path $resolvedRoot "g3\safe"),
     (Join-Path $resolvedRoot "runtime"),

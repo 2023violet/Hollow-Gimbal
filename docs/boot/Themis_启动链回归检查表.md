@@ -8,7 +8,7 @@
 ## 2. 当前真实启动链
 
 ```text
-platform/at/at32f403a/generated/src/main.c
+platform/at/at32f415/generated/src/main.c
     -> app_main_bootstrap()
 
 applications/app_main.c
@@ -32,7 +32,7 @@ applications/app_main.c
 
 ## 3. 当前 owner 边界
 
-- 平台入口：`platform/at/at32f403a/generated/src/main.c`
+- 平台入口：`platform/at/at32f415/generated/src/main.c`
 - 启动桥：`applications/app_main.c`
 - board pre-kernel glue：`bsp/board/bsp_init.c`
 - APP bring-up owner：`motor_task_init`
@@ -42,7 +42,7 @@ applications/app_main.c
 
 ## 4. 回归检查项
 
-1. `platform/at/at32f403a/generated/src/main.c` 是否仍然只承接芯片级 bring-up。
+1. `platform/at/at32f415/generated/src/main.c` 是否仍然只承接芯片级 bring-up。
 2. `applications/app_main.c` 是否仍然是 staged boot 的唯一桥接入口。
 3. `bsp/board/bsp_init.c` 是否仍然只承接最小 pre-kernel glue。
 4. `motor_task_init()` 是否仍然先调用 `shell_task_init()`，再调用 `_motor_init()`。

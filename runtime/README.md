@@ -42,6 +42,41 @@ Each service has a period, maximum delay and simulated budget. A due service ski
 
 The original fixture uses matched `100 µs` H0 and H1 periods, `1 ms` supervision and `10 ms` telemetry. With `motion.enabled` false, the original angle contract requires exact ADC source-time matching. Simulated costs, stop acknowledgement, and compare values establish Host behavior. MCU interrupt arbitration, generated atomic instructions, execution time and physical output need separate evidence.
 
+## NEXT-CONTROL-01B electrical-speed feedforward
+
+`foc_pipeline_config.feedforward` is disabled by default. When enabled, the
+Pipeline requires `foc_pipeline_input.electrical_feedback` to contain the
+finite, signed `foc_electrical_state` and source timestamp copied from one H1
+sensor slot. H0 fills this field from the same slot used for angle prediction;
+it does not recompute speed, multiply by pole pairs again, or read a global
+cache. The configured `max_age_us` bounds the source-to-ADC interval with the
+same modular timestamp ordering used elsewhere in Runtime.
+
+The speed is a zero-order-hold estimate from the H1 source instant to the ADC
+sample. It is accepted only when the complete H1 sample is valid, the source is
+not in the future, and its age is within the configured bound. A stale,
+future, non-finite, or invalid snapshot returns `FOC_PIPELINE_ERR_FEEDBACK`,
+submits the existing `INHIBIT` path, and leaves the staged PI state uncommitted.
+The original `foc_current_step()` path and Board1 default remain unchanged when
+the policy is disabled. This software contract does not measure encoder filter
+delay, acceleration-model error, or hardware ISR timing.
+
+## NEXT-CONTROL-02 trajectory planning
+
+`foc_trajectory` is an optional H1 reference shaper placed before the existing
+velocity PI. In VELOCITY mode it clamps the command and limits each reference
+change by `max_accel_rad_s2 * dt_s`. In POSITION mode it uses continuous
+mechanical position and a braking-speed bound `sqrt(2 * a_max * abs(error))`,
+then applies the same acceleration limiter. It does not create another PI or
+replace the existing position P and velocity PI when disabled.
+
+The planner context is copied for each H1 trial. Its committed state follows
+the same `accepted_outer_seq` and `motion_session` boundary as the velocity PI:
+an H0/Safety/Device rejection cannot advance the formal trajectory. A new
+session resets the planner, and invalid sensor or timing input cannot generate a
+new reference. Normal trajectory deceleration never delays an independent
+Safety INHIBIT.
+
 ## NEXT-FOC-02 sensored modes
 
 Enable `config.motion` and supply H1 with coherent continuous mechanical position, speed and source time. H0 predicts electrical phase forward to the ADC source instant when age, prediction horizon, and extrapolation error limits all permit it. The H1 capture timestamp stays intact. `angle_prediction_us` in the H0 snapshot reports the interval applied. The configured acceleration bound is a sensor/motor assumption. H0 rejects a future capture or invalid prediction.
@@ -51,3 +86,14 @@ CURRENT uses `foc_runtime_publish_command` with d/q current. VELOCITY and POSITI
 Select a different mode using `FOC_RUNTIME_ACTION_SET_MODE` only in DISABLED with confirmed INHIBIT. New source commands and sensor captures must follow the new boundary. H1 resets its velocity state when it next observes the boundary, and H0 resets inner PI on explicit START. Before START, outer modes publish a neutral target for readiness. The normal Safety ARM/START sequence still applies.
 
 Run `test-foc-motion-model` for direct and Runtime PMSM dynamics, including `100 µs` H0, `500 µs` H1, `1 ms` supervision, reversible speed and position steps, and load transients. Run `test-foc-motion-runtime` for fault, timeout and mode-transition assertions. The model consumes confirmed compare updates and stops at INHIBIT.
+
+## NEXT-SYSTEM-01 full-chain Host stability
+
+`test-foc-system` is the deterministic system-level Host lane. It enables the
+optional feedforward and trajectory policies together, drives H0 at `200 us`,
+H1 at `500 us`, and foreground supervision at `200 us`, then replays a
+multi-rate event stream twice. The test changes velocity direction, refreshes
+commands, records a stable replay fingerprint, rejects one UPDATE, verifies
+that current/outer/trajectory staged state is not committed, and finally
+injects a WDT inhibit. It exercises the existing Host Mock boundary only; it
+does not unlock Board1 output or claim MCU timing.

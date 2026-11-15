@@ -439,6 +439,13 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
         .angle_sample_us = adc->sample_tick,
         .now_us = now_us,
         .dt_s = (float)runtime->interval_us * 1.0e-6f,
+        .electrical_feedback =
+            {
+                .state = sensor.electrical,
+                .source_us = sensor.sample.captured_us,
+                .source_seq = sensor.sample.seq,
+                .valid = runtime->config.motion.enabled && sensor.sample.valid,
+            },
         .cycle_target = target_valid ? &sensor.target : NULL,
         .require_cycle_target = outer,
     };
@@ -585,8 +592,12 @@ static void foc_runtime_prepare_outer(
 {
     const bool same_session = previous != NULL && previous->session == view->motion_session;
     const bool running = view->state == FOC_SAFE_STATE_RUNNING && !view->inhibit_pending;
+    const bool trajectory_enabled = runtime->config.motion.trajectory.enabled;
     if (!same_session || !running) {
         (void)foc_velocity_reset(&runtime->outer_velocity);
+        if (trajectory_enabled && runtime->trajectory.initialized) {
+            (void)foc_trajectory_reset(&runtime->trajectory, 0.0f);
+        }
         runtime->outer_trial_seen = false;
     }
     candidate->mode = view->mode;
@@ -594,6 +605,9 @@ static void foc_runtime_prepare_outer(
     if (candidate->sample.valid && running && runtime->outer_trial_seen &&
         view->accepted_outer_seen && previous->sample.seq == view->accepted_outer_seq) {
         runtime->outer_velocity.integral_a = runtime->outer_trial_a;
+        if (trajectory_enabled) {
+            runtime->trajectory = runtime->trajectory_trial;
+        }
     }
     runtime->outer_trial_seen = false;
 
@@ -621,7 +635,31 @@ static void foc_runtime_prepare_outer(
         const struct foc_runtime_motion_config *policy = &runtime->config.motion;
         const float speed_limit = policy->position.velocity_limit_rad_s;
         float speed = fmaxf(-speed_limit, fminf(command.target.motion_ref, speed_limit));
-        if (command.mode == FOC_RUNTIME_MODE_POSITION) {
+        const float dt_s =
+            (float)(candidate->sample.captured_us - previous->sample.captured_us) * 1.0e-6f;
+        if (trajectory_enabled) {
+            struct foc_trajectory_output trajectory_output;
+            struct foc_trajectory_context trajectory_trial = runtime->trajectory;
+            const int trajectory_status = command.mode == FOC_RUNTIME_MODE_POSITION
+                ? foc_trajectory_position_step(
+                      &trajectory_trial,
+                      command.target.motion_ref,
+                      candidate->sample.mechanical_rad,
+                      dt_s,
+                      &trajectory_output
+                  )
+                : foc_trajectory_velocity_step(
+                      &trajectory_trial,
+                      command.target.motion_ref,
+                      dt_s,
+                      &trajectory_output
+                  );
+            if (trajectory_status != FOC_TRAJECTORY_STATUS_OK) {
+                return;
+            }
+            runtime->trajectory_trial = trajectory_trial;
+            speed = trajectory_output.velocity_ref_rad_s;
+        } else if (command.mode == FOC_RUNTIME_MODE_POSITION) {
             struct foc_position_output output;
             if (foc_position_step(
                     &policy->position,
@@ -638,7 +676,7 @@ static void foc_runtime_prepare_outer(
         const struct foc_velocity_input input = {
             .ref_rad_s = speed,
             .measured_rad_s = candidate->sample.mechanical_rad_s,
-            .dt_s = (float)(candidate->sample.captured_us - previous->sample.captured_us) * 1.0e-6f,
+            .dt_s = dt_s,
             .iq_limit_a = policy->iq_limit_a,
             .enabled = true,
         };
@@ -707,6 +745,10 @@ int foc_runtime_init(
         return FOC_RUNTIME_ERR_CONFIG;
     }
     struct foc_velocity_context velocity = {0};
+    struct foc_trajectory_context trajectory = {0};
+    if (config->motion.trajectory.enabled && !config->motion.enabled) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
     if (config->motion.enabled) {
         const struct foc_runtime_motion_config *motion = &config->motion;
         struct foc_electrical_state electrical;
@@ -720,12 +762,18 @@ int foc_runtime_init(
             foc_velocity_init(&velocity, &motion->velocity) != FOC_STATUS_OK) {
             return FOC_RUNTIME_ERR_CONFIG;
         }
+        if (motion->trajectory.enabled &&
+            (foc_trajectory_init(&trajectory, &motion->trajectory) != FOC_TRAJECTORY_STATUS_OK ||
+             foc_trajectory_reset(&trajectory, 0.0f) != FOC_TRAJECTORY_STATUS_OK)) {
+            return FOC_RUNTIME_ERR_CONFIG;
+        }
     }
     *runtime = (struct foc_runtime){
         .config = *config,
         .boot_us = now_us,
         .pipeline = pipeline,
         .outer_velocity = velocity,
+        .trajectory = trajectory,
         .h0 = {.next_us = now_us, .last_call_us = now_us},
         .h1 = {.next_us = now_us, .last_call_us = now_us},
         .supervision = {.next_us = now_us, .last_call_us = now_us},

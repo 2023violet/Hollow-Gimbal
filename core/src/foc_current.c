@@ -14,6 +14,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_current.h"
+#include "foc_core_internal.h"
 #include <float.h>
 #include <math.h>
 
@@ -48,8 +49,9 @@ static unsigned int foc_current_limit_vector(struct foc_vector_dq *vector, float
 }
 
 static int foc_current_modulate(
-    const struct foc_config *config,
+    const struct foc_current_config *config,
     const struct foc_current_input *input,
+    const struct foc_angle_cache *angle_cache,
     struct foc_vector_dq requested_v,
     float voltage_limit_v,
     struct foc_current_output *result
@@ -63,11 +65,11 @@ static int foc_current_modulate(
         return FOC_STATUS_ERR_NONFINITE;
     }
     limited = foc_current_limit_vector(&requested_v, voltage_limit_v);
-    status = foc_inverse_park(&requested_v, input->theta_elec_rad, &voltage);
+    status = foc_inverse_park_cached(&requested_v, angle_cache, &voltage);
     if (status != FOC_STATUS_OK) {
         return status;
     }
-    status = foc_svpwm(&voltage, input->vbus_v, config, &result->svpwm);
+    status = foc_svpwm_trusted(&voltage, input->vbus_v, &config->pwm, &result->svpwm);
     if (status != FOC_STATUS_OK) {
         return status;
     }
@@ -79,7 +81,7 @@ static int foc_current_modulate(
     const float c = result->svpwm.duty_c;
     voltage.alpha = ((a - b) + (a - c)) / 3.0f * input->vbus_v;
     voltage.beta = (b - c) * FOC_CURRENT_INV_SQRT3 * input->vbus_v;
-    status = foc_park(&voltage, input->theta_elec_rad, &result->voltage_dq_v);
+    status = foc_park_cached(&voltage, angle_cache, &result->voltage_dq_v);
     if (status != FOC_STATUS_OK) {
         return status;
     }
@@ -103,6 +105,13 @@ foc_current_admit_integral(float previous, float trial, float proportional, floa
         return fminf(previous, fmaxf(trial, applied - proportional));
     }
     return previous;
+}
+
+static int foc_current_feedforward_model_valid(const struct foc_current_feedforward_model *model)
+{
+    return model != NULL && isfinite(model->ld_h) && isfinite(model->lq_h) &&
+        isfinite(model->psi_f_wb) && model->ld_h > 0.0f && model->lq_h > 0.0f &&
+        model->psi_f_wb >= 0.0f;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -145,15 +154,84 @@ int foc_current_reset(struct foc_current_context *context)
     return FOC_STATUS_OK;
 }
 
-int foc_current_step(
+int foc_current_feedforward_init(
+    struct foc_current_feedforward_context *context,
+    const struct foc_current_feedforward_model *model,
+    bool enabled
+)
+{
+    if (context == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    if (enabled && !foc_current_feedforward_model_valid(model)) {
+        return FOC_STATUS_ERR_INVALID_CONFIG;
+    }
+    *context = (struct foc_current_feedforward_context){
+        .model = model != NULL ? *model : (struct foc_current_feedforward_model){0},
+        .enabled = enabled,
+        .initialized = true,
+    };
+    return FOC_STATUS_OK;
+}
+
+int foc_current_feedforward_reset(struct foc_current_feedforward_context *context)
+{
+    if (context == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    if (!context->initialized) {
+        return FOC_STATUS_ERR_NOT_INITIALIZED;
+    }
+    return FOC_STATUS_OK;
+}
+
+int foc_current_feedforward_compute(
+    const struct foc_current_feedforward_context *context,
+    float omega_e_rad_s,
+    struct foc_vector_dq target_a,
+    struct foc_current_feedforward_output *output
+)
+{
+    if (output == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    *output = (struct foc_current_feedforward_output){0};
+    if (context == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    if (!context->initialized) {
+        return FOC_STATUS_ERR_NOT_INITIALIZED;
+    }
+    if (!context->enabled) {
+        return FOC_STATUS_OK;
+    }
+    if (!isfinite(omega_e_rad_s) || !foc_current_feedforward_model_valid(&context->model) ||
+        !foc_current_dq_finite(target_a)) {
+        return FOC_STATUS_ERR_NONFINITE;
+    }
+    output->voltage_d_v = -omega_e_rad_s * context->model.lq_h * target_a.q;
+    output->voltage_q_v =
+        omega_e_rad_s * (context->model.ld_h * target_a.d + context->model.psi_f_wb);
+    if (!isfinite(output->voltage_d_v) || !isfinite(output->voltage_q_v)) {
+        *output = (struct foc_current_feedforward_output){0};
+        return FOC_STATUS_ERR_NONFINITE;
+    }
+    output->enabled = true;
+    return FOC_STATUS_OK;
+}
+
+static int foc_current_step_internal(
     struct foc_current_context *context,
     const struct foc_current_input *input,
+    const struct foc_current_feedforward_context *feedforward,
+    float omega_e_rad_s,
     struct foc_current_output *output
 )
 {
     struct foc_current_output result = {0};
     struct foc_vector_alpha_beta current;
     struct foc_vector_dq target;
+    struct foc_angle_cache angle_cache;
     int status;
 
     if (output == NULL) {
@@ -176,6 +254,10 @@ int foc_current_step(
     if (!foc_current_dq_finite(input->target_a)) {
         return FOC_STATUS_ERR_NONFINITE;
     }
+    status = foc_angle_cache_prepare(input->theta_elec_rad, &angle_cache);
+    if (status != FOC_STATUS_OK) {
+        return status;
+    }
     /* The maximum phase spread is sqrt(3) times the vector magnitude. */
     const float voltage_limit_v =
         fminf(config->pwm.voltage_limit_v, input->vbus_v * FOC_CURRENT_INV_SQRT3);
@@ -187,13 +269,33 @@ int foc_current_step(
     if (status != FOC_STATUS_OK) {
         return status;
     }
-    status = foc_park(&current, input->theta_elec_rad, &result.measured_dq_a);
+    status = foc_park_cached(&current, &angle_cache, &result.measured_dq_a);
     if (status != FOC_STATUS_OK) {
         return status;
     }
 
     target = input->target_a;
     result.target_limited = foc_current_limit_vector(&target, config->current_limit_a);
+    struct foc_vector_dq feedforward_voltage = {0};
+    bool feedforward_enabled = false;
+    if (feedforward != NULL && feedforward->enabled) {
+        struct foc_current_feedforward_output feedforward_output;
+
+        status = foc_current_feedforward_compute(
+            feedforward,
+            omega_e_rad_s,
+            target,
+            &feedforward_output
+        );
+        if (status != FOC_STATUS_OK) {
+            return status;
+        }
+        feedforward_voltage = (struct foc_vector_dq){
+            feedforward_output.voltage_d_v,
+            feedforward_output.voltage_q_v,
+        };
+        feedforward_enabled = feedforward_output.enabled;
+    }
     const struct foc_vector_dq error = {
         target.d - result.measured_dq_a.d,
         target.q - result.measured_dq_a.q
@@ -210,37 +312,51 @@ int foc_current_step(
     if (!foc_current_dq_finite(integral)) {
         return FOC_STATUS_ERR_NONFINITE;
     }
-    const struct foc_vector_dq requested = {
-        proportional.d + integral.d,
-        proportional.q + integral.q
-    };
-    status = foc_current_modulate(&config->pwm, input, requested, voltage_limit_v, &result);
+    struct foc_vector_dq requested = {proportional.d + integral.d, proportional.q + integral.q};
+    if (feedforward_enabled) {
+        requested.d += feedforward_voltage.d;
+        requested.q += feedforward_voltage.q;
+    }
+    status = foc_current_modulate(config, input, &angle_cache, requested, voltage_limit_v, &result);
     if (status != FOC_STATUS_OK) {
         return status;
     }
     if (result.svpwm.saturated != 0U) {
+        const struct foc_vector_dq proportional_total = feedforward_enabled
+            ? (struct foc_vector_dq){
+                  proportional.d + feedforward_voltage.d,
+                  proportional.q + feedforward_voltage.q,
+              }
+            : proportional;
         const struct foc_vector_dq admitted = {
             foc_current_admit_integral(
                 previous.d,
                 integral.d,
-                proportional.d,
+                proportional_total.d,
                 result.voltage_dq_v.d
             ),
             foc_current_admit_integral(
                 previous.q,
                 integral.q,
-                proportional.q,
+                proportional_total.q,
                 result.voltage_dq_v.q
             )
         };
 
         if (admitted.d != integral.d || admitted.q != integral.q) {
             const struct foc_vector_dq corrected = {
-                proportional.d + admitted.d,
-                proportional.q + admitted.q
+                proportional_total.d + admitted.d,
+                proportional_total.q + admitted.q
             };
 
-            status = foc_current_modulate(&config->pwm, input, corrected, voltage_limit_v, &result);
+            status = foc_current_modulate(
+                config,
+                input,
+                &angle_cache,
+                corrected,
+                voltage_limit_v,
+                &result
+            );
             if (status != FOC_STATUS_OK) {
                 return status;
             }
@@ -253,6 +369,35 @@ int foc_current_step(
     context->integral_v = integral;
     *output = result;
     return FOC_STATUS_OK;
+}
+
+int foc_current_step(
+    struct foc_current_context *context,
+    const struct foc_current_input *input,
+    struct foc_current_output *output
+)
+{
+    return foc_current_step_internal(context, input, NULL, 0.0f, output);
+}
+
+int foc_current_step_with_feedforward(
+    struct foc_current_context *context,
+    const struct foc_current_input *input,
+    const struct foc_current_feedforward_context *feedforward,
+    float omega_e_rad_s,
+    struct foc_current_output *output
+)
+{
+    if (feedforward == NULL) {
+        return foc_current_step(context, input, output);
+    }
+    if (!feedforward->initialized) {
+        if (output != NULL) {
+            *output = (struct foc_current_output){0};
+        }
+        return FOC_STATUS_ERR_NOT_INITIALIZED;
+    }
+    return foc_current_step_internal(context, input, feedforward, omega_e_rad_s, output);
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

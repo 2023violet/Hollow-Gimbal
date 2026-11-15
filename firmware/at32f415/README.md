@@ -7,6 +7,9 @@ acknowledges the software lock only. ZERO_DUTY and ACTIVE_BRAKE are distinct
 rejected actions. Foreground services the [V1 UART protocol](../../protocol/README.md)
 after Runtime supervision. ARM/START report OUTPUT_LOCKED. A restricted
 command-timeout clear is executed and rechecked by H0.
+The optional d/q PMSM feedforward policy remains disabled in the Board1
+reference configuration; enabling it requires a separately validated electrical
+speed snapshot and motor parameter set.
 
 ## Build
 
@@ -27,6 +30,30 @@ The target emits `falconfoc-v2-at32f415.{elf,bin,hex,map}` in the cross-build
 directory. The Host test passes fake peripheral observations to the same Board
 Port functions called by the MCU handlers.
 
+## Timing ownership
+
+AT32F415 timer-clock facts are owned by
+`platform/at/at32f415/generated/inc/tm_platform_foc_timing.h` and are consumed
+by both the Legacy application configuration and this V2 Board port. The
+Legacy `PWM_FREQ_HZ`/current-step, velocity, position, and trajectory values
+remain product control policy; `PWM_FREQ_HZ` is not the generated TMR1 carrier
+frequency. This split prevents a future platform clock change from silently
+changing the Legacy control cadence or the V2 timestamp scale.
+
+## Explicit calibrated initialization
+
+`foc_board_init()` keeps the nominal Board1 values (2048-count ADC offsets,
+seven pole pairs, zero electrical offset, and reversed raw encoder direction).
+An accepted `foc_calibration_snapshot` may be supplied to
+`foc_board_init_with_calibration()` before any producer starts. That entry point
+validates the snapshot against the Board1 ADC gain, full scale, phase order, and
+encoder facts, assembles local pipeline/runtime/Sensor copies, and commits them
+only after the complete initialization succeeds. It rejects a second attempt
+to modify an initialized encoder, does not write Flash, and does not unlock
+PWM. The calibration source direction and CAL-01 rotor direction are multiplied
+once to resolve the Sensor raw-code direction; the Core continues to receive a
+positive-pole-pair mechanical coordinate.
+
 ## Board1 mapping
 
 | Resource | V2 binding |
@@ -39,7 +66,7 @@ Port functions called by the MCU handlers.
 | Nominal scaling | 12-bit raw. VBUS = count × 3.3 × 11 / 4095 V. I = (count − 2048) × 3.3 / (4095 × 0.5) A. Gains, offsets and valid CSA conduction windows need measurement. |
 | Logical PWM requests | A → CH3 PA10/PB1 (driver C), B → CH2 PA9/PB0 (driver B), C → CH1 PA8/PA7 (driver A). Compare is truncated duty × 29999, inclusive, for diagnostics only. |
 | TMR5 / SPI1 | TMR5 overflow begins a nominal 500 µs slot and asserts PA15 CS. CH1 compare at +20 µs starts one SPI transfer and CH2 at +70 µs closes the bounded window. SPI1 RX/error IRQ captures the result. PB3 SCK, PB4 MISO, PB5 MOSI. |
-| Encoder | KTH7823-X-N-QN16, active-low CS, SPI mode 3, MSB first, APB2/16, one zero TX word and one 16-bit angle word. No wire CRC. Source time is the CS assertion proxy. Counts are mirrored for the Legacy CCW mounting convention, wrapped differences yield continuous rad and rad/s. The absolute sensor zero and seven pole pairs are nominal. Electrical offset zero is uncalibrated. |
+| Encoder | KTH7823-X-N-QN16, active-low CS, SPI mode 3, MSB first, APB2/16, one zero TX word and one 16-bit angle word. No wire CRC. Source time is the CS assertion proxy. `sensors/foc_encoder` owns direction, bounded uint32 timestamp arithmetic, integer-backed unwrapping, raw difference speed, variable-`dt` LPF speed, alpha-beta comparison speed, and quality classification. Board1 publishes the LPF speed into the existing `foc_runtime_sensor`; the raw and tracked estimates remain local diagnostics. The absolute sensor zero and seven pole pairs are nominal. Electrical offset zero is uncalibrated. |
 | IRQ priority | NVIC grouping 0, four preemption bits. ADC1 #18 and TMR1_CH #27 use priority 0. TMR5_GLOBAL #50 and SPI1 #35 use priority 1. Same-priority pairs serialize their own acquisition state. H0 may preempt H1. |
 | USART1 | PB6 TX, PB7 RX, 115200 8N1, byte IRQ priority 2. Bounded RX ring and single complete TX buffer. |
 | Other resources | DMA1/2, SysTick and both watchdogs are unused. No Flash persistence backend. |

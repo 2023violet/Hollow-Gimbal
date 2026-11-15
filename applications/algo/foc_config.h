@@ -1,13 +1,17 @@
+// clang-format off
+
 /**
  * @file    foc_config.h
  * @brief   FOC System Configuration
  * @version v1.0.0
  * @date    2026.03.19
- * 
+ *
  * Copyright (c) 2026 Zhang Jiaming <164293474@qq.com>. All rights reserved.
  */
 
 #pragma once
+
+#include "tm_platform_foc_timing.h"
 
 /* include -------------------------------------------------------------------------------------- */
 #include "foc_math.h"
@@ -85,9 +89,9 @@ extern "C" {
 
 /* Section 3: Timer & PWM ----------------------------------------------------------------------- */
 
-/* APB2 / TIM1 clock frequency (Hz). at32f415kbu7_4: PLL → 150 MHz. */
-#define TMR_CLK_HZ             (150000000U)
-#define TMR_CLK_MHZ            (150U) /* Kept for legacy expressions. */
+/* Platform-owned timer clock; control cadence below remains product-owned. */
+#define TMR_CLK_HZ             TM_PLATFORM_TMR_CLK_HZ
+#define TMR_CLK_MHZ            TM_PLATFORM_TMR_CLK_MHZ
 
 /** FOC current-loop cadence (Hz).
  *
@@ -109,6 +113,13 @@ extern "C" {
 #else
 #define PWM_FREQ_HZ            (10000U) /* Legacy name: FOC step, not TMR1 carrier. */
 #endif
+
+#if (TMR_CLK_HZ / 1000000U) != TMR_CLK_MHZ
+#error "AT32F415 platform timer clock MHz/Hz facts disagree."
+#endif
+#if (TM_PLATFORM_LEGACY_TMR1_CARRIER_HZ % PWM_FREQ_HZ) != 0U
+#error "Legacy FOC step cadence must divide the platform TMR1 carrier cadence."
+#endif
 #define PWM_PERIOD_S           (1.0f / (float)PWM_FREQ_HZ) /* Derived from the FOC step cadence. */
 #define PWM_PERIOD_CYCLES      (TMR_CLK_HZ / PWM_FREQ_HZ) /* 15000 cnt */
 #define PWM_ARR                (PWM_PERIOD_CYCLES / 2U) /* TIM1 ARR */
@@ -126,6 +137,10 @@ extern "C" {
 
 #define VEL_LOOP_FREQ_HZ       (5000U) /* 5 kHz */
 #define VEL_LOOP_TS            (1.0f / (float)VEL_LOOP_FREQ_HZ) /* 200 μs */
+
+#if VEL_LOOP_FREQ_HZ != TM_PLATFORM_LEGACY_TMR5_SOFTIRQ_HZ
+#error "Legacy velocity cadence must match the platform TMR5 soft-IRQ cadence."
+#endif
 
 #define POS_LOOP_FREQ_HZ       (1000U) /* 1 kHz */
 #define POS_LOOP_TS            (1.0f / (float)POS_LOOP_FREQ_HZ) /* 1 ms */
@@ -481,5 +496,6 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
 
 /* ---------------------------------------- end of file ----------------------------------------- */

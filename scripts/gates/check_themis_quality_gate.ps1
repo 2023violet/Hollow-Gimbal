@@ -204,11 +204,11 @@ function Invoke-HostCacheGuardRegression
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedGitRoot }
 }
 
-function Invoke-FalconFocLiteContract
+function Invoke-FalconFocCurrentContract
 {
     param([string]$ResolvedRepoRoot)
 
-    $scriptPath = Join-Path $ResolvedRepoRoot "tests\\script\\test_falconfoc_themis_lite_contract.ps1"
+    $scriptPath = Join-Path $ResolvedRepoRoot "tests\\script\\test_falconfoc_current_contract.ps1"
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap @{ RepoRoot = $ResolvedRepoRoot }
     Set-GateLayerSummary -Label "App" -Errors 0 -Warnings 0
 }
@@ -287,14 +287,14 @@ try {
             Invoke-HostTests -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot
         }
         "bsp" {
-            Invoke-FalconFocLiteContract -ResolvedRepoRoot $paths.RepoRoot
+            Invoke-FalconFocCurrentContract -ResolvedRepoRoot $paths.RepoRoot
         }
         "applications" {
-            Invoke-FalconFocLiteContract -ResolvedRepoRoot $paths.RepoRoot
+            Invoke-FalconFocCurrentContract -ResolvedRepoRoot $paths.RepoRoot
             Invoke-HostTests -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot
         }
         "all" {
-            Invoke-FalconFocLiteContract -ResolvedRepoRoot $paths.RepoRoot
+            Invoke-FalconFocCurrentContract -ResolvedRepoRoot $paths.RepoRoot
             Invoke-HostTests -ResolvedGitRoot $paths.GitRoot -ResolvedRepoRoot $paths.RepoRoot
         }
     }

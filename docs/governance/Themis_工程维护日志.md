@@ -2737,3 +2737,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[纠偏]` 早期 Code Wiki 和项目摘要保留为历史证据，但明确标注当前软件状态以 `278c6911e65d7782bb58d7b0b023fdcb9f414c08` 和 `NEXT-RC0-BASELINE-01` 为准，避免旧资源数字、旧交接日期和旧状态词继续冒充现役事实。
 - `[规则]` 根 `AGENTS.md` 为当前唯一项目规则入口，未发现项目级 override、CLAUDE 或同名规则分叉。Codex 生成记忆按宿主规则只读，本轮没有直接修改记忆文件。
 - `[状态]` 知识收尾完成；未删除历史文档、构建目录、独立验证快照或其他残留现场。删除候选需在本次汇报后由用户明确确认，当前保留以便复核。
+
+## 2026-11-15 FalconFOC V2 neat-freak 清场复核
+
+- `[清理]` 按用户确认删除独立源码快照 `Hollow-Gimbal_RC0_Verification_20261115_01`、独立构建验证副本 `Hollow-Gimbal_RC0_Verification_20261115_01_build`，以及仓库内未跟踪的构建缓存、`build-rel` 和 `tmp`。
+- `[保留]` `build/` 中被 Git 跟踪的历史探针脚本和 `work/` 中被 Git 跟踪的平台工程源文件均保留，没有删除任何版本控制内容；`docs/evidence`、源码、测试和维护文档保持完整。
+- `[复核]` 清场后 `git status --short --untracked-files=all` 为空，远端 `origin/codex/falconfoc-v2-rc0` 与本地保持同步。当前没有外部验证现场或忽略构建缓存残留。

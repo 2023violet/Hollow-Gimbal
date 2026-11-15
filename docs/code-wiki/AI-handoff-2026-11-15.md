@@ -4,8 +4,9 @@
 
 这份文件是当前软件候选基线的交接入口。它覆盖当前已推送代码、软件验证结果、真实边界和下一步入口；早期 `AI-handoff-*`、调试总结和板级记录保留为历史证据，不再作为当前状态的唯一来源。
 
-软件基线提交：`278c6911e65d7782bb58d7b0b023fdcb9f414c08`  
-当前分支：`codex/falconfoc-v2-rc0`  
+软件基线提交：`278c6911e65d7782bb58d7b0b023fdcb9f414c08`
+
+当前分支：`codex/falconfoc-v2-rc0`
 远端：`origin/codex/falconfoc-v2-rc0`
 
 ## 项目现在是什么

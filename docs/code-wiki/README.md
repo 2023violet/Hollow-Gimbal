@@ -2,7 +2,9 @@
 
 > 代码级知识地图、硬件配置审计与无板验证报告
 >
-> 分析基准：`D:/study/Software/Hollow-Gimbal` 当前工作树，日期：2026-09-26。
+> 当前基准：提交 `278c6911e65d7782bb58d7b0b023fdcb9f414c08`，分支 `codex/falconfoc-v2-rc0`，日期：2026-11-15。
+>
+> 当前交接入口：[AI-handoff-2026-11-15.md](AI-handoff-2026-11-15.md)。本文件保留较早的代码级和板级分析；与当前代码、RC0 基线证据冲突时，以当前提交、测试和基线报告为准。
 
 ## 1. 文档定位
 
@@ -71,6 +73,7 @@
 | [debugging-summary.md](debugging-summary.md) | 低压开环卡死问题的实机证据、推导、候选根因和安全收口 |
 | [ai-handoff-prompt.md](ai-handoff-prompt.md) | 2026-08-30 版交接提示词（历史） |
 | [AI-handoff-2026-09-26.md](AI-handoff-2026-09-26.md) | **现役交接入口：根因已确认（AVDD 供电压垮）+ 修复清单 + 验证阶梯** |
+| [AI-handoff-2026-11-15.md](AI-handoff-2026-11-15.md) | **当前软件 RC0 交接入口：提交、架构边界、门禁和未验证项** |
 | [AI-handoff-2026-08-31.md](AI-handoff-2026-08-31.md) | 历史：攻坚全史（电流链确诊/±90° 推理/隔离镜像），被 09-26 版取代 |
 | [../planning/Themis_开环根因延申验证与修复计划.md](../planning/Themis_开环根因延申验证与修复计划.md) | 本轮根因机制推导、实机确诊与修复的唯一计划入口（含预测表与结果回填区） |
 

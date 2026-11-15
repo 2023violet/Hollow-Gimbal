@@ -68,6 +68,11 @@ The current live board-debug lane is documented around:
 
 ## Documentation | 文档
 
+- current handoff and software baseline:
+  - [docs/code-wiki/AI-handoff-2026-11-15.md](./docs/code-wiki/AI-handoff-2026-11-15.md)
+- RC0 reproducible source baseline:
+  - [docs/evidence/2026-11-15-next-rc0-baseline-01.md](./docs/evidence/2026-11-15-next-rc0-baseline-01.md)
+
 - main docs entry:
   - [docs/README.md](./docs/README.md)
 - current-source Code Wiki (AT32F415):

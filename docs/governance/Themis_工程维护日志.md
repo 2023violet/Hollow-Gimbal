@@ -2730,3 +2730,10 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[产物]` V2 ELF/BIN/HEX 与原工作树逐字节一致，Flash `36,736 B`、RAM `3,632 B`；Legacy tiny/standard ELF/BIN/HEX 一致。full-diag 的 BIN 差异仅为 Debug 构建 `__DATE__`/`__TIME__` 字符串，section 尺寸和指令内容未发现差异。
 - `[修正]` 独立快照初始排除了正式 CLI 入口 `memory.sh` 和 `.vscode`，CLI contract 在独立目录中真实拒绝；补回后重新生成清单并完成全部门禁，未通过跳过测试或修改门禁规则解决。
 - `[状态]` `NEXT-RC0-BASELINE-01 PASS`。建议冻结为 RC0 软件源码提交候选；`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。详见 `docs/evidence/2026-11-15-next-rc0-baseline-01.md`。
+
+## 2026-11-15 FalconFOC V2 neat-freak 知识收尾
+
+- `[交接]` 新增 `docs/code-wiki/AI-handoff-2026-11-15.md`，将当前提交、RC0 软件基线、架构边界、可执行命令和硬件未验证项收敛为新人首个入口；README、docs 索引、Code Wiki、项目摘要和运行验证页均指向该入口。
+- `[纠偏]` 早期 Code Wiki 和项目摘要保留为历史证据，但明确标注当前软件状态以 `278c6911e65d7782bb58d7b0b023fdcb9f414c08` 和 `NEXT-RC0-BASELINE-01` 为准，避免旧资源数字、旧交接日期和旧状态词继续冒充现役事实。
+- `[规则]` 根 `AGENTS.md` 为当前唯一项目规则入口，未发现项目级 override、CLAUDE 或同名规则分叉。Codex 生成记忆按宿主规则只读，本轮没有直接修改记忆文件。
+- `[状态]` 知识收尾完成；未删除历史文档、构建目录、独立验证快照或其他残留现场。删除候选需在本次汇报后由用户明确确认，当前保留以便复核。

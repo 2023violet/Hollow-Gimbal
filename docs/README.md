@@ -3,6 +3,8 @@
 `docs/` is the formal documentation root for the current FalconFoc AT32
 repository.
 
+Current handoff entry: [code-wiki/AI-handoff-2026-11-15.md](./code-wiki/AI-handoff-2026-11-15.md). It is the current software status entry; dated debugging and review documents remain historical evidence.
+
 Read in this order:
 
 1. [code-wiki/README.md](./code-wiki/README.md) — 当前 AT32F415 源码地图、Board1 硬件理解与无板验证

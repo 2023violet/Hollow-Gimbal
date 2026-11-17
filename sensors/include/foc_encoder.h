@@ -141,7 +141,7 @@ struct foc_encoder_feedback {
     uint32_t raw_code;
     /** Directed single-turn angle in [0, 2*pi) when the sample is accepted. */
     float single_turn_rad;
-    /** Continuous mechanical position in radians. */
+    /** Continuous mechanical position in radians; Float32 resolution falls with magnitude. */
     float mechanical_rad;
     /** Directed position change from the previous accepted frame. */
     float delta_rad;
@@ -163,6 +163,13 @@ struct foc_encoder_feedback {
     uint32_t invalid_count;
     /** Quality of this result. */
     enum foc_encoder_quality quality;
+    /**
+     * Directed integer cycle in [0, config.counts_per_revolution), from this
+     * accepted raw observation; equal to mathematical_mod(position_counts, CPR).
+     * Present on the first position-only frame without making speed/valid true.
+     * Cleared on rejected observations; zero alone never implies validity.
+     */
+    uint32_t mechanical_phase_count;
 };
 
 /** Caller-owned state for one encoder instance. */

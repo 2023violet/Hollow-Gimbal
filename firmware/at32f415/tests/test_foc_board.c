@@ -109,6 +109,10 @@ static int test_encoder(void)
         foc_board_encoder_complete(&runtime, &encoder, base + 70U, FOC_BOARD_ENCODER_OK, 0U) ==
         FOC_RUNTIME_ERR_INPUT
     );
+    CHECK(
+        !encoder.feedback.valid && !encoder.feedback.speed_valid &&
+        !runtime.sensor_slots[atomic_load(&runtime.sensor_slot)].sample.electrical_phase_valid
+    );
     for (uint32_t offset = 80U; offset < 500U; offset += FOC_BOARD_H0_US) {
         CHECK(foc_board_adc_begin(&runtime, &adc, base + offset));
         CHECK(
@@ -124,6 +128,12 @@ static int test_encoder(void)
     const struct foc_runtime_sensor sample =
         runtime.sensor_slots[atomic_load(&runtime.sensor_slot)].sample;
     CHECK(sample.valid && sample.captured_us == 0U && sample.seq == 1U);
+    CHECK(sample.electrical_phase_valid && encoder.feedback.mechanical_phase_count == 1U);
+    CHECK(
+        fabs(
+            (double)sample.theta_elec_rad - 7.0 * 6.283185307179586476925286766559005768 / 65536.0
+        ) < 1e-5
+    );
     CHECK(fabsf(sample.mechanical_rad - 0.00009587f) < 1e-8f);
     CHECK(fabsf(sample.mechanical_rad_s - 0.191748f) < 1e-5f);
     CHECK(encoder.feedback.quality == FOC_ENCODER_QUALITY_VALID);
@@ -139,6 +149,7 @@ static int test_encoder(void)
         FOC_RUNTIME_ERR_INPUT
     );
     CHECK(encoder.result == FOC_BOARD_ENCODER_OVERLAP && encoder.losses == 1U);
+    CHECK(!runtime.sensor_slots[atomic_load(&runtime.sensor_slot)].sample.electrical_phase_valid);
     CHECK(foc_board_encoder_begin(&encoder, 1000U));
     CHECK(
         foc_board_encoder_complete(&runtime, &encoder, 1070U, FOC_BOARD_ENCODER_FRAME, 0U) ==

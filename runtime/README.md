@@ -79,7 +79,29 @@ Safety INHIBIT.
 
 ## NEXT-FOC-02 sensored modes
 
-Enable `config.motion` and supply H1 with coherent continuous mechanical position, speed and source time. H0 predicts electrical phase forward to the ADC source instant when age, prediction horizon, and extrapolation error limits all permit it. The H1 capture timestamp stays intact. `angle_prediction_us` in the H0 snapshot reports the interval applied. The configured acceleration bound is a sensor/motor assumption. H0 rejects a future capture or invalid prediction.
+Enable `config.motion` and supply H1 with coherent continuous mechanical position,
+speed, source time, and an independent bounded `theta_elec_rad`. Set
+`electrical_phase_valid` only for a same-observation phase with direction,
+pole pairs and electrical offset already resolved using this Runtime's immutable
+rotor configuration. Encoder producers use `foc_rotor_phase_from_counts()` and
+their own Sensor CPR; ideal Host models reduce their original double coordinate
+before converting to Float32. Do not derive phase from large Float32 position.
+
+Motion-enabled H1 requires both validity flags, finite continuous position/speed,
+finite electrical speed, and phase in `[0, Float32 2*pi)`. Missing/invalid phase
+publishes an invalid candidate; it never falls back to accumulated position or
+treats default zero as valid. Existing time/sequence rejection, mailbox and H0
+ownership remain in force. Producers must construct one coherent snapshot;
+H1 cannot reconstruct provenance from falsely labeled numeric fields. Appended
+Sensor/Feedback fields require all binary consumers to rebuild. Motion-disabled
+direct-angle input still accepts a finite angle with exact ADC-time alignment
+and does not require the new phase flag.
+
+H0 predicts phase forward to the ADC source instant when age, prediction horizon,
+and extrapolation error limits all permit it. The H1 capture timestamp stays
+intact. `angle_prediction_us` reports the applied interval. Continuous position
+continues unwrapped to Position/Trajectory/telemetry. The acceleration bound is a
+sensor/motor assumption; H0 rejects a future capture or invalid prediction.
 
 CURRENT uses `foc_runtime_publish_command` with d/q current. VELOCITY and POSITION use `foc_runtime_publish_motion_command` with mechanical rad/s or continuous rad. H1 limits speed references, produces `Id=0` and a limited `Iq`, and publishes the result with its original command sequence/time and the H0 mode/session. H0 updates the observed source only for a new command. Reusing or recomputing a derived current target leaves the source timeout unchanged. H1 commits a staged velocity integral after observing the matching accepted target from H0. Rejected targets cannot accumulate across H1 steps.
 

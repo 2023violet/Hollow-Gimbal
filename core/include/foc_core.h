@@ -207,11 +207,26 @@ int foc_reset(struct foc_context *context);
 
 /* Pure mathematical transforms ----------------------------------------------- */
 
-/** Normalize a finite angle in radians to [0, 2π), clearing output on error. */
+/**
+ * Normalize a finite angle in radians to [0, 2π), clearing output on error.
+ *
+ * Acceptance and precision are separate: every finite float remains accepted,
+ * using the existing Float32 approximation of 2π as the reduction period.
+ * For IEEE-754 binary32, round-to-nearest, a correct fmodf remainder, and no
+ * fast-math transformations, abs(angle_rad) <= 6.2831854820251465f has circular
+ * reduction error at most 5e-7 rad relative to the exact stored float value.
+ * This bound excludes sensor error and conversion of an original angle to float.
+ * Larger finite inputs are reduced, but have no phase-accuracy guarantee here.
+ * Keep periodic phase separate from continuous multi-turn mechanical position.
+ */
 int foc_angle_normalize(float angle_rad, float *wrapped_rad);
 
 /**
  * Apply the amplitude-invariant Clarke transform without mutating input.
+ *
+ * This reduced form uses alpha = a and beta = (b - c) / sqrt(3). Supply coherent,
+ * balanced three-phase quantities (a + b + c = 0), or quantities reconstructed
+ * under that convention. It does not check balance or remove zero sequence.
  *
  * @param input Phase-domain vector in physical phase order.
  * @param output Destination for the stationary alpha/beta vector.
@@ -223,7 +238,9 @@ int foc_clarke(const struct foc_vector_abc *input, struct foc_vector_alpha_beta 
  * Apply the Legacy-compatible Park sign convention without mutating input.
  *
  * @param input Stationary alpha/beta vector.
- * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted.
+ * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted;
+ *        the reduction accuracy domain is specified by foc_angle_normalize().
+ *        Trigonometric and vector arithmetic introduce their own rounding error.
  * @param output Destination for the rotating d/q vector.
  * @return FOC_STATUS_OK or a pointer/non-finite error.
  */
@@ -235,7 +252,9 @@ int foc_park(const struct foc_vector_alpha_beta *input,
  * Apply inverse Park using the Legacy-compatible sign convention.
  *
  * @param input Rotating d/q vector.
- * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted.
+ * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted;
+ *        the reduction accuracy domain is specified by foc_angle_normalize().
+ *        Trigonometric and vector arithmetic introduce their own rounding error.
  * @param output Destination for the stationary alpha/beta vector.
  * @return FOC_STATUS_OK or a pointer/non-finite error.
  */

@@ -1,0 +1,173 @@
+# FalconFOC Host Virtual Motor
+
+`simulation/` is a Host-only VM-01a project. It connects the existing Runtime,
+Device, Safety, Current PI, Encoder, and a deterministic average-value PMSM
+plant without changing the AT32F415 Board1 target.
+
+The default profile is `GENERIC_RESEARCH_MOTOR`: 12 V VBUS, four pole pairs,
+the synthetic R/L/flux/inertia values used by the Host research model, H0 at
+200 us, and H1 at 500 us. It is not Board1 calibration data and does not prove
+MCU timing or physical output behavior.
+
+## Build and run
+
+```powershell
+cmake -S simulation -B build/vm01a-simulation -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/vm01a-simulation --parallel 4
+ctest --test-dir build/vm01a-simulation --output-on-failure
+build/vm01a-simulation/falconfoc-virtual-current.exe --csv build/vm01a-simulation/vm01a.csv
+```
+
+The `falconfoc-virtual-current.exe` executable runs five deterministic Host
+scenarios: Current step, Current reverse, rejected UPDATE, STOP, and replay.
+The VM-01b `falconfoc-virtual-motion.exe` executable reuses the same harness
+for velocity and position control, load disturbance, reverse command, mode
+transition, command timeout, and sensor fault scenarios:
+
+```powershell
+build/vm01a-simulation/falconfoc-virtual-motion.exe --scenario all
+build/vm01a-simulation/falconfoc-virtual-motion.exe --scenario V01-velocity-step
+build/vm01a-simulation/falconfoc-virtual-motion.exe --csv build/vm01a-simulation/vm01b.csv
+```
+
+The `falconfoc-virtual-device.exe` target connects the same VM-01b Runtime to
+the production V1 COBS/CRC/Session/Sequence adapter over binary stdin/stdout.
+It is explicitly initialized with `VIRTUAL_ONLY`; its stdout remains protocol
+bytes, while lifecycle results and virtual/physical telemetry separation are
+reported as JSON metadata on stderr. The Python CLI keeps the process alive for
+the complete workflow:
+
+```powershell
+python tools/falconfoc-cli/falconfoc_cli.py `
+  --simulator build/vm01a-simulation/falconfoc-virtual-device.exe `
+  virtual-demo --virtual-scenario current
+python tools/falconfoc-cli/falconfoc_cli.py `
+  --simulator build/vm01a-simulation/falconfoc-virtual-device.exe `
+  virtual-demo --virtual-scenario velocity
+python tools/falconfoc-cli/falconfoc_cli.py `
+  --simulator build/vm01a-simulation/falconfoc-virtual-device.exe `
+  virtual-demo --virtual-scenario position
+```
+
+The complete Host acceptance set uses five scenario names:
+
+```powershell
+# Current, short control loop with CSV/JSON exports
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario current --duration-us 10000 --csv build/vm01a-simulation/demo-current.csv --json build/vm01a-simulation/demo-current.json
+
+# Velocity with a fixed mechanical load on/off timeline
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario load --advance-us 500 --duration-us 30000 --csv build/vm01a-simulation/demo-load.csv --json build/vm01a-simulation/demo-load.json
+
+# Velocity sensor transport failure at a fixed virtual time
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario fault --advance-us 500 --duration-us 20000 --csv build/vm01a-simulation/demo-fault.csv --json build/vm01a-simulation/demo-fault.json
+
+# Position long run; the 500 us step preserves H0/H1 deadline margins while
+# the duration crosses one continuous mechanical revolution.
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario position --advance-us 500 --duration-us 1200000 --csv build/vm01a-simulation/demo-position.csv --json build/vm01a-simulation/demo-position.json
+```
+
+`load` applies `0.03 N·m` from `5000 us` through `15000 us`; the parameters can
+be overridden with `--load-on-us`, `--load-off-us`, and `--load-torque-nm`.
+`fault` injects one real Encoder transport failure at `5000 us` via
+`--sensor-fault-us`. Both timelines act on the Plant or Sensor Adapter; they do
+not write speed, position, or Safety state directly.
+
+The CSV contains virtual time, mode/session, measured current, target and
+measured motion values, bus voltage, saturation, update counts, faults, load
+torque and event-level fault timestamps. The JSON contains the same scenario
+identity plus the historical full-window RMSE, state-qualified RUNNING RMSE and
+tail RMSE, transient peak, steady-state error, settling time, saturation
+duration, integration status, control-quality status and replay hash.
+`metrics_schema_version=2` identifies the new fields; historical `rmse` and
+`tail_rmse` remain for audit comparison. `EXPECTED_DEGRADED` remains a research
+result and is never renamed to a control-quality pass.
+
+The default velocity and position commands are short-horizon demonstrations.
+Run `--horizon long` for the independent 100 ms velocity and 2 s position
+observations; these do not replace the historical short-horizon artifacts. The
+Python Host tests also run a paired Load counterfactual with identical virtual
+time and commands and require a measurable Plant delta. A Load no-op mutation
+must fail that oracle.
+
+`ARM` and `START` still travel as existing V1 messages. Mode choice and virtual
+time advance are process arguments, not wire messages. The metadata distinguishes
+`request_accepted`, `request_applied_by_h0`, `virtual_update_accepted`,
+`simulated_current_valid`, `simulated_sensor_valid`, and
+`physical_applied=false`; existing V1 STATUS/TELEMETRY fields are unchanged.
+
+Both executables use the production Runtime H0/H1 paths. The output adapter
+accepts only a validated Host UPDATE. An accepted UPDATE becomes the next
+zero-order-held average voltage applied to the Plant. INHIBIT switches to the
+documented high-impedance approximation: stator voltage is removed while
+inertia, damping, and external load continue to evolve. It is not a physical
+bridge shutdown or active-brake model.
+
+Motion metrics are research measurements, not pass/fail product limits. A
+scenario whose final error remains outside the stated tolerance is marked
+`EXPECTED_DEGRADED`; that marker records a physically or configuration-limited
+case and does not turn poor tracking into an acceptance claim.
+
+The Plant state is converted to raw ADC ranks and encoder codes. ADC samples go
+through the existing Device decoder; encoder codes go through
+`foc_encoder_update()` before H1 publication. The Runtime owns H0/H1/Safety and
+Current PI state, so a rejected UPDATE cannot commit a staged PI state.
+
+## Independent periodic phase
+
+The motion-enabled Virtual producer takes directed integer phase count and CPR
+from the same accepted Encoder observation as continuous position. Core applies
+the **controller Runtime's** pole pairs and offset, rather than substituting
+the Plant's true motor parameters. H1 consumes the bounded phase only when its
+explicit phase flag and existing source admission both hold. No accumulated
+Float32 mechanical position is used to recover phase.
+
+Motion-disabled mode preserves its original direct-angle producer and exact
+ADC-time alignment contract; it does not require a configured motion rotor or
+the new phase flag. Its legacy angle source keeps the prior precision limits.
+
+Host first-frame compatibility is unchanged: an accepted absolute position can
+be used with the existing zero-speed assumption before Encoder difference speed
+is established. Encoder `valid`/`speed_valid` are not forged. Normal startup
+first accepts UPDATE at 600 us; ARM queued before run_until(0) and START before
+200 us can still produce UPDATE at 400 us. This Host-only source policy does
+not change Board1's full Feedback admission or its locked output policy.
+
+`test-foc-periodic-chain` traces real signed Encoder updates through Core,
+H1/H0/Current/SVPWM and the production virtual adapter at long-count milestones,
+including timestamp wrap. It independently checks phase/dq error, continuous
+position, raw source identity and startup STOP/FAULT behavior. The virtual
+Current tests also execute positive and negative multi-turn trajectories.
+The `1e-5 rad` phase budget is a declared Host numerical test budget, not a
+hardware accuracy or real-time guarantee.
+
+## Host control-tuning research
+
+`tools/falconfoc-cli/control_tuning.py` runs the deterministic
+`NEXT-CONTROL-TUNING-01` study. It reuses the V1 virtual-device workflow and
+passes copied Host profile values into `foc_virtual_current_init()` before the
+Runtime is initialized. The production defaults, Board1 parameters, UART V1,
+Safety, and output lock are not changed.
+
+```powershell
+python tools/falconfoc-cli/control_tuning.py `
+  --simulator build/vm01a-simulation/falconfoc-virtual-device.exe `
+  --output-dir build/control-tuning-01
+```
+
+The runner searches Current first, then Velocity, then Position, and stores
+every candidate under `optimization/`. It freezes the selected Host profile
+for `holdout/` and exact long-horizon `confirmation/` runs. Each trial has
+JSON and CSV output plus stdout/stderr logs. `profile_id`, research
+parameters, safety feasibility, and metrics are collected in `study.json`.
+
+The supported simulator overrides are Host-only: Current Kp/Ki, Velocity
+Kp/Ki, Position Kp, current/voltage/VBUS limits, and selected synthetic motor
+parameters. They are initialization-time copies; the Runtime controller
+integrators are never edited while a trial is running. A selected profile is
+a research candidate, not a production firmware configuration or a real-motor
+tuning result.
+
+This project does not call `foc_board_init()`, does not alter
+`foc_board_output_submit()`, and cannot unlock real Board1 PWM.
+
+/* ---------------------------------------- end of file ----------------------------------------- */

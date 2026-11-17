@@ -32,7 +32,16 @@
 
 /* Private Types ---------------------------------------------------------------- */
 
+enum {
+    MODEL_STEPS = 5000U,
+    MODEL_MEASUREMENT_START = 1000U
+};
+
 struct model_metrics {
+    bool completed;
+    int status;
+    unsigned int completed_steps;
+    unsigned int measured_samples;
     float rmse_d;
     float rmse_q;
     float max_error;
@@ -97,27 +106,33 @@ run_model(bool enabled, float omega_e_rad_s, struct foc_current_feedforward_mode
     const float ld = 0.001f;
     const float lq = 0.0015f;
     const float psi_f = 0.05f;
-    struct model_metrics metrics = {0};
+    struct model_metrics metrics = {.rmse_d = NAN, .rmse_q = NAN};
     float sum_d = 0.0f;
     float sum_q = 0.0f;
-    unsigned int measured = 0U;
 
-    (void)foc_current_init(&controller, &config);
-    (void)foc_current_feedforward_init(&feedforward, &feedforward_model, enabled);
-    for (unsigned int step = 0U; step < 5000U; ++step) {
+    metrics.status = foc_current_init(&controller, &config);
+    if (metrics.status != FOC_STATUS_OK) {
+        fprintf(stderr, "pmsm current_init status=%d\n", metrics.status);
+        return metrics;
+    }
+    metrics.status = foc_current_feedforward_init(&feedforward, &feedforward_model, enabled);
+    if (metrics.status != FOC_STATUS_OK) {
+        fprintf(stderr, "pmsm feedforward_init status=%d\n", metrics.status);
+        return metrics;
+    }
+    for (unsigned int step = 0U; step < MODEL_STEPS; ++step) {
         struct foc_current_input input = empty_input;
         input.phase_current_a = phase_from_dq(current);
         input.target_a = (struct foc_vector_dq){0.0f, step < 500U ? 0.0f : 3.0f};
-        const int status = enabled ? foc_current_step_with_feedforward(
-                                         &controller,
-                                         &input,
-                                         &feedforward,
-                                         omega_e_rad_s,
-                                         &output
-                                     )
-                                   : foc_current_step(&controller, &input, &output);
-        if (status != FOC_STATUS_OK) {
-            metrics.max_error = INFINITY;
+        metrics.status = enabled ? foc_current_step_with_feedforward(
+                                       &controller,
+                                       &input,
+                                       &feedforward,
+                                       omega_e_rad_s,
+                                       &output
+                                   )
+                                 : foc_current_step(&controller, &input, &output);
+        if (metrics.status != FOC_STATUS_OK) {
             return metrics;
         }
         if (output.svpwm.saturated != 0U) {
@@ -125,10 +140,10 @@ run_model(bool enabled, float omega_e_rad_s, struct foc_current_feedforward_mode
         }
         const float error_d = input.target_a.d - current.d;
         const float error_q = input.target_a.q - current.q;
-        if (step >= 1000U) {
+        if (step >= MODEL_MEASUREMENT_START) {
             sum_d += error_d * error_d;
             sum_q += error_q * error_q;
-            ++measured;
+            ++metrics.measured_samples;
         }
         const float magnitude = sqrtf(error_d * error_d + error_q * error_q);
         if (magnitude > metrics.max_error) {
@@ -142,10 +157,51 @@ run_model(bool enabled, float omega_e_rad_s, struct foc_current_feedforward_mode
             (vq - resistance * current.q - omega_e_rad_s * (ld * current.d + psi_f)) / lq;
         current.d += dt_s * did;
         current.q += dt_s * diq;
+        if (!isfinite(current.d) || !isfinite(current.q)) {
+            metrics.status = FOC_STATUS_ERR_NONFINITE;
+            return metrics;
+        }
+        ++metrics.completed_steps;
     }
-    metrics.rmse_d = sqrtf(sum_d / (float)measured);
-    metrics.rmse_q = sqrtf(sum_q / (float)measured);
+    if (metrics.completed_steps != MODEL_STEPS ||
+        metrics.measured_samples != MODEL_STEPS - MODEL_MEASUREMENT_START ||
+        metrics.measured_samples == 0U) {
+        return metrics;
+    }
+    metrics.rmse_d = sqrtf(sum_d / (float)metrics.measured_samples);
+    metrics.rmse_q = sqrtf(sum_q / (float)metrics.measured_samples);
+    if (!isfinite(metrics.rmse_d) || !isfinite(metrics.rmse_q) || !isfinite(metrics.max_error)) {
+        metrics.status = FOC_STATUS_ERR_NONFINITE;
+        return metrics;
+    }
+    metrics.completed = true;
     return metrics;
+}
+
+static bool model_is_valid(const char *name, struct model_metrics metrics)
+{
+    const bool valid = metrics.completed && metrics.status == FOC_STATUS_OK &&
+        metrics.completed_steps == MODEL_STEPS &&
+        metrics.measured_samples == MODEL_STEPS - MODEL_MEASUREMENT_START &&
+        metrics.measured_samples > 0U && isfinite(metrics.rmse_d) && isfinite(metrics.rmse_q) &&
+        isfinite(metrics.max_error);
+
+    fprintf(
+        valid ? stdout : stderr,
+        "pmsm trial=%s completed=%u status=%d steps=%u/%u samples=%u/%u "
+        "rmse=(%.7g,%.7g) max=%.7g\n",
+        name,
+        (unsigned int)metrics.completed,
+        metrics.status,
+        metrics.completed_steps,
+        (unsigned int)MODEL_STEPS,
+        metrics.measured_samples,
+        (unsigned int)(MODEL_STEPS - MODEL_MEASUREMENT_START),
+        metrics.rmse_d,
+        metrics.rmse_q,
+        metrics.max_error
+    );
+    return valid;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -262,11 +318,13 @@ static int test_model_comparison(void)
     mismatch.psi_f_wb *= 0.8f;
     const struct model_metrics ff_mismatch = run_model(true, 100.0f, mismatch);
 
-    TEST_ASSERT(isfinite(base_forward.rmse_q) && isfinite(ff_forward.rmse_q));
-    TEST_ASSERT(isfinite(base_reverse.rmse_q) && isfinite(ff_reverse.rmse_q));
+    TEST_ASSERT(model_is_valid("forward-baseline", base_forward));
+    TEST_ASSERT(model_is_valid("forward-feedforward", ff_forward));
+    TEST_ASSERT(model_is_valid("reverse-baseline", base_reverse));
+    TEST_ASSERT(model_is_valid("reverse-feedforward", ff_reverse));
+    TEST_ASSERT(model_is_valid("model-mismatch", ff_mismatch));
     TEST_ASSERT(ff_forward.rmse_q < base_forward.rmse_q);
     TEST_ASSERT(ff_reverse.rmse_q < base_reverse.rmse_q);
-    TEST_ASSERT(isfinite(ff_mismatch.rmse_q) && isfinite(ff_mismatch.max_error));
     TEST_ASSERT(ff_forward.saturated_steps <= base_forward.saturated_steps + 500U);
     printf(
         "pmsm omega=+100 base_rmse=(%.7g,%.7g) ff_rmse=(%.7g,%.7g) "

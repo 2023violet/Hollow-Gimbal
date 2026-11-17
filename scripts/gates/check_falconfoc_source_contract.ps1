@@ -115,6 +115,7 @@ $sourceRoots = @(
     (Join-Path $resolvedRoot "g3\np"),
     (Join-Path $resolvedRoot "g3\safe"),
     (Join-Path $resolvedRoot "runtime"),
+    (Join-Path $resolvedRoot "simulation"),
     (Join-Path $resolvedRoot "firmware\at32f415"),
     (Join-Path $resolvedRoot "protocol")
 )

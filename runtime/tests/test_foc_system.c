@@ -113,13 +113,21 @@ static uint32_t fold(uint32_t hash, uint32_t value)
 
 static struct foc_runtime_sensor system_sensor(uint32_t captured_us, uint32_t seq, float speed)
 {
-    const float mechanical = (float)captured_us * 1.0e-5f;
+    const double mechanical = (double)captured_us * 1.0e-5;
+    const double tau = 6.283185307179586476925286766559005768;
+    const float phase = (float)fmod(
+        fmod(mechanical, tau) * system_runtime.motion.rotor.pole_pairs +
+            system_runtime.motion.rotor.electrical_offset_rad,
+        tau
+    );
     return (struct foc_runtime_sensor){
+        .theta_elec_rad = phase < 6.28318530717958647692f ? phase : 0.0f,
         .captured_us = captured_us,
         .seq = seq,
         .valid = true,
-        .mechanical_rad = mechanical,
+        .mechanical_rad = (float)mechanical,
         .mechanical_rad_s = speed,
+        .electrical_phase_valid = true,
     };
 }
 

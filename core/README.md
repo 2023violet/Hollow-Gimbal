@@ -34,6 +34,26 @@ The public declarations are in `include/foc_core.h`. Physical quantities use SI 
 
 The later Runtime API may expose command publication and a fast-tick adapter. G2 keeps those ownership and scheduling concerns out of the Core and uses `foc_step` as its explicit, host-testable entry point.
 
+## Periodic electrical phase
+
+`foc_rotor_phase_from_counts()` in `include/foc_motion.h` converts a directed
+integer mechanical cycle count to electrical phase. Supply the source Sensor's
+CPR in `[2,65536]`, count in `[0,CPR)`, nonzero uint16 pole pairs, and finite
+electrical offset. The count/poles product fits uint32 and is reduced modulo
+CPR before Float32 scaling; direction is already applied by the Sensor.
+Offset is applied once, from the controller's immutable rotor configuration.
+
+The helper clears its output on error and grants no Sensor validity or output
+authority. Large finite offsets retain `foc_angle_normalize()`'s documented
+precision limits. The independent Host phase test uses a `1e-5 rad` circular
+error budget over its declared CPR/poles/count/offset matrix; this is not a
+physical encoder or MCU accuracy guarantee.
+
+Keep continuous mechanical position for Position, Trajectory and telemetry.
+Do not recover periodic phase from a large Float32 accumulated position. The
+legacy `foc_rotor_electrical()` API remains available with its existing behavior
+and the same large-input precision limitations.
+
 ## Optional trajectory planner
 
 `include/foc_trajectory.h` provides a small Float32 reference generator for

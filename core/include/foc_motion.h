@@ -130,6 +130,27 @@ struct foc_position_output {
 
 /* Rotor coordinates ------------------------------------------------------------ */
 
+/**
+ * Convert a directed integer mechanical cycle to bounded electrical phase.
+ *
+ * The caller supplies a same-observation count in [0, counts_per_revolution).
+ * CPR must be in [2, 65536]; direction is already applied by the sensor.
+ * Integer multiplication/modulo precedes Float32 scaling. The offset belongs
+ * to the rotor config and is applied exactly once. Large finite offsets have
+ * the precision limits of foc_angle_normalize(); success grants no sensor
+ * validity or output authority. Continuous mechanical position is untouched.
+ *
+ * @param config Immutable pole pairs (nonzero uint16) and finite offset.
+ * @param mechanical_phase_count Directed nonnegative cycle count.
+ * @param counts_per_revolution Resolution owned by the source sensor instance.
+ * @param electrical_phase_rad Output in [0, Float32 2*pi), cleared on error.
+ * @return FOC_STATUS_OK, ERR_NULL, ERR_INVALID_CONFIG, or ERR_NONFINITE.
+ */
+int foc_rotor_phase_from_counts(const struct foc_rotor_config *config,
+                                uint32_t mechanical_phase_count,
+                                uint32_t counts_per_revolution,
+                                float *electrical_phase_rad);
+
 /** Convert continuous position and speed in mechanical rad and rad/s to electrical units. */
 int foc_rotor_electrical(const struct foc_rotor_config *config,
                          float mechanical_rad,

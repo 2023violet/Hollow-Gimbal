@@ -338,6 +338,14 @@ int foc_board_encoder_complete(
         sample.valid = encoder->feedback.valid;
         sample.mechanical_rad = encoder->feedback.mechanical_rad;
         sample.mechanical_rad_s = encoder->feedback.filtered_velocity_rad_s;
+        sample.electrical_phase_valid = sample.valid &&
+            encoder->feedback.captured_us == sample.captured_us &&
+            foc_rotor_phase_from_counts(
+                &runtime->config.motion.rotor,
+                encoder->feedback.mechanical_phase_count,
+                encoder->sensor.config.counts_per_revolution,
+                &sample.theta_elec_rad
+            ) == FOC_STATUS_OK;
         if (sensor_status != FOC_ENCODER_STATUS_OK && encoder->result == FOC_BOARD_ENCODER_OK) {
             encoder->result = foc_board_encoder_quality(encoder->feedback.quality);
         }

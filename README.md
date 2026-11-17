@@ -1,4 +1,92 @@
-# FalconFoc AT32
+# FalconFOC V2
+
+FalconFOC V2 is a pure-C, C11-compatible FOC control and Runtime library with
+an independent Host Virtual Motor and an AT32F415 reference target. The Core
+does not require an RTOS, MCU headers, vendor SDK, shell, transport, or board
+code. The Runtime adds scheduling-domain ownership, lifecycle, Safety, and an
+explicit output-submission contract around that Core.
+
+The repository also retains the earlier FalconFoc AT32 firmware and Legacy
+host-test entry points. Those are reference and compatibility surfaces; the V2
+library boundary is defined by `core/`, `runtime/`, `g3/`, `sensors/`,
+`calibration/`, `protocol/`, `simulation/`, and `tools/falconfoc-cli/`.
+
+## V2 product map
+
+- **FalconFOC Core** — Clarke/Park, SVPWM, Current PI, Velocity PI, Position P,
+  and Trajectory in portable C11.
+- **FalconFOC Runtime** — H0/H1/Foreground execution domains, lifecycle,
+  command and sensor publication, Safety, and output submission.
+- **Reference targets** — Host Virtual Motor and the locked AT32F415 Board1
+  reference firmware.
+- **Tools** — Python V1 CLI, virtual-device demonstrations, control-quality
+  measurements, and Host-only tuning research.
+
+## Quick start
+
+Build and test the portable Core:
+
+```powershell
+cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/core --parallel 4
+ctest --test-dir build/core --output-on-failure
+```
+
+Build and test the Host Virtual Motor:
+
+```powershell
+cmake -S simulation -B build/vm01a-simulation -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/vm01a-simulation --parallel 4
+ctest --test-dir build/vm01a-simulation --output-on-failure
+```
+
+The external Core-consumer fixture used for release preparation is documented
+at [docs/evidence/2026-11-16-next-release-prep-01.md](docs/evidence/2026-11-16-next-release-prep-01.md).
+
+## Supported and explicitly unverified
+
+The portable Core is intended for caller-owned, sensored FOC integrations with
+explicit phase-current, electrical-angle, bus-voltage, timing, and output
+contracts. AT32F415 is the first reference target, not the permanent library
+boundary. The project does not currently claim support for every MCU, motor,
+ADC sampling topology, or automatic motor identification flow.
+
+The following remain unverified or locked:
+
+- real-motor control-quality acceptance;
+- physical power-stage shutdown and bridge timing;
+- AT32F415 WCET, interrupt jitter, and stack high-water measurement;
+- arbitrary-MCU plug-and-play portability;
+- automatic end-to-end motor identification;
+- product-quality acceptance for every control condition;
+- real Board1 PWM/MOE enablement.
+
+Host Virtual outputs are software-model evidence and always report
+`physical_applied=false`. The Host Research Profile from the tuning study is
+not written to Board1 defaults.
+
+## Documentation
+
+- [Core README](core/README.md)
+- [Runtime README](runtime/README.md)
+- [Simulation README](simulation/README.md)
+- [Protocol README](protocol/README.md)
+- [Host Virtual Quickstart](docs/code-wiki/FalconFOC_VM_virtual_quickstart.md)
+- [Release-preparation evidence](docs/evidence/2026-11-16-next-release-prep-01.md)
+- [Current software handoff](docs/code-wiki/AI-handoff-2026-11-15.md)
+
+## Current release status
+
+The V2 software has a reproducible Host baseline, independent Core-consumer
+evidence, virtual-device demonstrations, and staged research evidence. This is
+an engineering preparation state. It is not a formal public release: the
+repository has no selected root project license, the source provenance review
+for bundled vendor/CMSIS material is incomplete, and the full `Scope all` gate
+is blocked on a supported Bash environment.
+
+---
+
+## Legacy AT32 firmware
 
 FalconFoc AT32 is the current FalconFoc firmware repository aligned to the
 Themis layering style, but intentionally without the full `device/` and

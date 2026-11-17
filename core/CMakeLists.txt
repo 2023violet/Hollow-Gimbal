@@ -45,6 +45,7 @@ themis_add_falconfoc_test(test-foc-current-reference tests/test_foc_current_refe
 themis_add_falconfoc_test(test-foc-pmsm-reference tests/test_foc_pmsm_reference.c)
 themis_add_falconfoc_test(test-foc-motion tests/test_foc_motion.c)
 themis_add_falconfoc_test(test-foc-motion-reference tests/test_foc_motion_reference.c)
+themis_add_falconfoc_test(test-foc-periodic-phase tests/test_foc_periodic_phase.c)
 
 add_executable(test-foc-baseline tests/test_foc_baseline.c ../g3/np/src/foc_device.c)
 target_link_libraries(test-foc-baseline PRIVATE falconfoc-core)

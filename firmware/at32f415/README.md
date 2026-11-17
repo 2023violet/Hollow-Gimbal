@@ -54,6 +54,17 @@ PWM. The calibration source direction and CAL-01 rotor direction are multiplied
 once to resolve the Sensor raw-code direction; the Core continues to receive a
 positive-pole-pair mechanical coordinate.
 
+## Periodic phase source
+
+Encoder completion publishes the same Feedback's directed integer
+`mechanical_phase_count`, Sensor-instance CPR and source capture time through
+the Core phase helper, using this Runtime's immutable rotor pole pairs/offset.
+Motion-enabled H1 requires `electrical_phase_valid` as well as valid continuous
+position/speed. The first position-only Encoder frame remains invalid for Board
+publication. Rejected frames never borrow an old phase. Continuous position
+still goes to Position/Trajectory/telemetry without wrapping. No timer, ADC,
+SPI, Safety, UART V1 or locked output admission changes accompany this mapping.
+
 ## Board1 mapping
 
 | Resource | V2 binding |

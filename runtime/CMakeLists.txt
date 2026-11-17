@@ -48,6 +48,10 @@ add_executable(test-foc-runtime tests/test_foc_runtime.c)
 target_link_libraries(test-foc-runtime PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-runtime COMMAND test-foc-runtime)
 
+add_executable(test-foc-runtime-mailbox tests/test_foc_runtime_mailbox.c)
+target_link_libraries(test-foc-runtime-mailbox PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-runtime-mailbox COMMAND test-foc-runtime-mailbox)
+
 add_executable(test-foc-motion-model tests/test_foc_motion_model.c)
 target_link_libraries(test-foc-motion-model PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-motion-model COMMAND test-foc-motion-model)

@@ -58,12 +58,23 @@ static int sense(
     bool valid
 )
 {
+    /* This fixture's original float position is its exact analytic source. */
+    const double tau = 6.283185307179586476925286766559005768;
+    double phase = fmod((double)position, tau) * runtime->config.motion.rotor.pole_pairs +
+        runtime->config.motion.rotor.electrical_offset_rad;
+    phase = fmod(phase, tau);
+    if (phase < 0) {
+        phase += tau;
+    }
+    const float bounded = (float)phase;
     const struct foc_runtime_sensor sensor = {
+        .theta_elec_rad = bounded < 6.28318530717958647692f ? bounded : 0.0f,
         .captured_us = captured,
         .seq = seq,
         .valid = valid,
         .mechanical_rad = position,
         .mechanical_rad_s = velocity,
+        .electrical_phase_valid = valid,
     };
     return foc_runtime_h1_step(runtime, &sensor, now_us, 0U);
 }
@@ -593,9 +604,93 @@ static int test_command_expiry(void)
 
 /* Test Entry ------------------------------------------------------------------ */
 
+static int test_periodic_phase_rejections(void)
+{
+    for (unsigned which = 0U; which < 8U; ++which) {
+        struct foc_runtime runtime = {0};
+        TEST_ASSERT(start_current(&runtime, &config, 0U) == 0);
+        struct foc_runtime_sensor bad = {
+            /* Reusing a finite prior phase must not rescue an invalid source. */
+            .theta_elec_rad = .37f,
+            .captured_us = 400U,
+            .seq = 4U,
+            .valid = true,
+            .mechanical_rad = 1e8f,
+            .electrical_phase_valid = true,
+        };
+        switch (which) {
+        case 0U:
+            bad.valid = false;
+            break;
+        case 1U:
+            bad.theta_elec_rad = NAN;
+            break;
+        case 2U:
+            bad.theta_elec_rad = -.01f;
+            break;
+        case 3U:
+            bad.theta_elec_rad = 6.28318530717958647692f;
+            break;
+        case 4U:
+            bad.mechanical_rad = NAN;
+            break;
+        case 5U:
+            bad.mechanical_rad_s = NAN;
+            break;
+        case 6U:
+            bad.mechanical_rad_s = INFINITY;
+            break;
+        default:
+            bad.mechanical_rad_s = 3.0e38f;
+            break;
+        }
+        const int h1_status = foc_runtime_h1_step(&runtime, &bad, 400U, 0U);
+        const unsigned updates = runtime.pipeline.mock.updates;
+        const int h0_status =
+            h0(&runtime, 400U, 4U, FOC_RUNTIME_ACTION_NONE, FOC_RUNTIME_MODE_CURRENT);
+        printf(
+            "invalid phase case=%u H1=%d H0=%d updates_before=%u updates_after=%u action=%d\n",
+            which,
+            h1_status,
+            h0_status,
+            updates,
+            runtime.pipeline.mock.updates,
+            runtime.pipeline.mock.last_request.action
+        );
+        TEST_ASSERT(
+            runtime.pipeline.mock.updates == updates &&
+            runtime.pipeline.mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT
+        );
+        TEST_ASSERT(h1_status == FOC_RUNTIME_ERR_INPUT && h0_status < 0);
+    }
+    return 0;
+}
+
+static int test_missing_periodic_phase(void)
+{
+    struct foc_runtime runtime = {0};
+    TEST_ASSERT(start_current(&runtime, &config, 0U) == 0);
+    const struct foc_runtime_sensor missing = {
+        .theta_elec_rad = .5f,
+        .captured_us = 400U,
+        .seq = 4U,
+        .valid = true,
+        .mechanical_rad = 1e8f,
+    };
+    TEST_ASSERT(foc_runtime_h1_step(&runtime, &missing, 400U, 0U) == FOC_RUNTIME_ERR_INPUT);
+    const unsigned updates = runtime.pipeline.mock.updates;
+    TEST_ASSERT(h0(&runtime, 400U, 4U, FOC_RUNTIME_ACTION_NONE, FOC_RUNTIME_MODE_CURRENT) < 0);
+    TEST_ASSERT(
+        runtime.pipeline.mock.updates == updates &&
+        runtime.pipeline.mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT
+    );
+    return 0;
+}
+
 int main(void)
 {
-    return test_mode_and_ack() || test_sensed_failures() || test_command_expiry();
+    return test_missing_periodic_phase() || test_periodic_phase_rejections() ||
+        test_mode_and_ack() || test_sensed_failures() || test_command_expiry();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

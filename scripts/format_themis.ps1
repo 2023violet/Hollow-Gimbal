@@ -136,7 +136,7 @@ function Get-ThemisOwnedCFiles
 
     $result = @()
     foreach ($path in $RepoRelativePaths) {
-        if ($path -notmatch '^(applications|bsp|calibration|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|sensors|subsys|tests)/.+\.(c|h)$') {
+        if ($path -notmatch '^(applications|bsp|calibration|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|sensors|simulation|subsys|tests)/.+\.(c|h)$') {
             continue
         }
 
@@ -172,6 +172,7 @@ function Get-ThemisCMakeFiles
         "g3/np/CMakeLists.txt",
         "g3/safe/CMakeLists.txt",
         "runtime/CMakeLists.txt",
+        "simulation/CMakeLists.txt",
         "firmware/at32f415/CMakeLists.txt",
         "protocol/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
@@ -435,13 +436,13 @@ if (-not (Test-Path -LiteralPath $clangFormat)) {
 }
 
 if ($Scope -in @("all", "c")) {
-    $cFiles = Get-ThemisOwnedCFiles -RepoRoot $paths.RepoRoot -RepoRelativePaths $repoCandidates
+    $cFiles = @(Get-ThemisOwnedCFiles -RepoRoot $paths.RepoRoot -RepoRelativePaths $repoCandidates)
     Normalize-CSectionBanners -Files $cFiles -ModeName $Mode
     Invoke-ClangFormatPass -Files $cFiles -ModeName $Mode -ClangFormatter $clangFormat
 }
 
 if ($Scope -in @("all", "cmake")) {
-    $cmakeFiles = Get-ThemisCMakeFiles -RepoRoot $paths.RepoRoot -RepoRelativePaths $repoCandidates -UseAllTracked ([bool]$AllTracked)
+    $cmakeFiles = @(Get-ThemisCMakeFiles -RepoRoot $paths.RepoRoot -RepoRelativePaths $repoCandidates -UseAllTracked ([bool]$AllTracked))
     $cmakeCommand = Get-CMakeFormatCommand
     if (($null -eq $cmakeCommand) -and $BootstrapCMakeFormatter) {
         Install-CMakeFormatter

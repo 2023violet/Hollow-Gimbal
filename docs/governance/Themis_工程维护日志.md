@@ -2743,3 +2743,96 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[清理]` 按用户确认删除独立源码快照 `Hollow-Gimbal_RC0_Verification_20261115_01`、独立构建验证副本 `Hollow-Gimbal_RC0_Verification_20261115_01_build`，以及仓库内未跟踪的构建缓存、`build-rel` 和 `tmp`。
 - `[保留]` `build/` 中被 Git 跟踪的历史探针脚本和 `work/` 中被 Git 跟踪的平台工程源文件均保留，没有删除任何版本控制内容；`docs/evidence`、源码、测试和维护文档保持完整。
 - `[复核]` 清场后 `git status --short --untracked-files=all` 为空，远端 `origin/codex/falconfoc-v2-rc0` 与本地保持同步。当前没有外部验证现场或忽略构建缓存残留。
+
+## 2026-11-15 FalconFOC V2 NEXT-VM-01a Host 虚拟电机 Current 闭环
+
+- `[实现]` 在隔离分支 `codex/falconfoc-v2-vm01a` 新增 `simulation/` Host-only 项目，提取可复用的双精度 PMSM RK4 Plant、ADC/Encoder 量化边界、确定性虚拟时钟和接受输出适配器；真实 Runtime、Device、Safety、Current PI 和 Encoder 通过现有接口运行。
+- `[边界]` Virtual UPDATE 只有在 `foc_device_sim_submit()` 接受后才推进 Plant；INHIBIT 使用高阻近似并保留惯性/阻尼演化。没有调用 `foc_board_init()`，没有修改 Board1 输出锁、真实硬件配置、Serial、Protocol 或生产 Runtime API。
+- `[验证]` 新增 Virtual Plant/Sensor/Current 测试，simulation CTest `13/13` 通过；五个确定性 Current 场景和 CSV 重放指纹通过，现有 `test-foc-motion-model` 在 simulation 构建中额外调用共享 Plant 契约，原有独立模型保留为交叉校验。`NEXT-SW-AUDIT-01` 仍 pending。
+- `[状态]` `NEXT-VM-01a PASS`（Host Current 闭环范围）。`Scope falconfoc` 通过；`Scope all` 在 Firmware CLI contract 处因当前环境缺少 Bash 阻断，未修改门禁绕过。真实 Board1 输出、MCU WCET、G3-SAFE/G3-PWR 和电机实机行为仍未验证；未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-15 FalconFOC V2 NEXT-VM-01b Host 虚拟运动闭环
+
+- `[实现]` 在 VM-01a 独立工作树的共享虚拟 PMSM、ADC/Encoder、输出适配器和确定性时钟上增加 `falconfoc-virtual-motion.exe`。Velocity 和 Position 均通过生产 `foc_runtime_publish_motion_command()`、H1、H0、Velocity PI、Position P、Current PI、SVPWM 和接受 UPDATE 驱动 Plant；没有新增第二套控制器或虚拟调度器。
+- `[生命周期]` 增加 Host-only 的 SET_MODE、ARM、START、STOP、命令超时和下一次 Encoder 传输失败注入。测试覆盖 CURRENT→VELOCITY、VELOCITY→POSITION、POSITION→CURRENT、STOP 后新 Session、传感器故障锁存以及旧命令不能自动恢复；未修改生产 Runtime 生命周期 API 或 Safety 实现。
+- `[测量]` V01/V02/V03/P01/P02/S01/S02 七组场景输出 RMSE、Tail RMSE、Peak Error、Overshoot、Settling Time、Iq 目标/实际值、饱和次数、UPDATE 计数、Safety 状态、Fault Bits、Motion Session 和重放指纹。当前研究 Profile 下闭环可运行，但跟踪指标仍标记 `EXPECTED_DEGRADED`，不能当作 Board1 控制品质验收。
+- `[设计]` 记录了下一阶段 Foreground→H0 生命周期请求邮箱和默认锁定的 Serial Target Policy 设计，区分 Request Accepted、Applied、Rejected、Cancelled 与 Actual Output Applied；本轮没有增加 UART V1 消息、没有开放 Board1 虚拟解锁权限。
+- `[验证]` Simulation CTest `13/13`、Clang ASan/UBSan `13/13`、Runtime `10/10`、Board Host `4/4`、Legacy Host `45/45`、Source contract `77/9/9`、CMake/格式检查、`Scope falconfoc` 和 V2 ARM 构建通过。VM-01a Current CSV SHA-256 仍为 `521D4B9DB6B712B9E0E9256E6EBE3B2498D73BF5354A1A9DDF057E44DFD8AEEF`；VM-01b motion CSV 两次重放均为 `3F17D3358513FA937FACAE67851EDAFEAA255F2150557B30FF6C4B153CC8756F`；ARM BIN `9806ADBFA3282450527F40BB97CB1DA75FAFE41FB405F1126114187C6393B029` 保持不变。
+- `[门禁与边界]` `Scope all` 继续在 `test_firmware_cli_contract.ps1` 因当前环境没有 Bash 而报告 `SCOPE_ALL_ENVIRONMENT_BLOCKED`，没有修改门禁或跳过该测试。`NEXT-VM-01b PASS` 仅限 Host 虚拟运动闭环；`NEXT-SW-AUDIT-01` 仍 pending，`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-15 FalconFOC V2 NEXT-VM-01c 生命周期邮箱与虚拟设备集成评审
+
+- `[基线]` 在 VM-01a/VM-01b 独立工作树上重新构建 `foc-serial-sim`，Python/C CLI 基线 `4/4` 通过；Current CSV、Motion CSV 和 V2 ARM BIN 指纹保持既有证据值。
+- `[发现]` 现有 `foc_serial_poll()` 将协议消费、Foreground 服务和零输入 H0 调用耦合在一起；直接用于 VM-01b 虚拟时间会在正式事件调度之外多执行一次 H0。V1 STATUS/TELEMETRY 布局没有可安全复用的生命周期 request-result 字段。
+- `[门禁]` NEXT-VM-01c 要求在修改共享 Runtime ARM/START 准入和 Serial Target Policy 前取得单独明确批准。已记录最小 mailbox、原子发布、STOP/FAULT 优先级、默认 LOCKED/VIRTUAL_ONLY 策略、服务解耦方案和负向测试清单；本轮尚未修改 Runtime、Serial、Protocol、Board1 或 ARM 授权路径。
+- `[状态]` `AWAITING SAFETY CHANGE APPROVAL`，不是 `NEXT-VM-01c PASS`。继续保持 `NEXT-SW-AUDIT-01 PENDING`、`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED`。未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。详见 `docs/evidence/2026-11-15-next-vm-01c.md`。
+
+## 2026-11-16 FalconFOC V2 NEXT-VM-01c Host Virtual 设备集成完成
+
+- `[批准]` 技术负责人批准 `APPROVED WITH CONSTRAINTS`：允许 Runtime 生命周期邮箱、默认锁定/显式 Host Virtual Target Policy、复用 V1 Serial/Protocol、同进程 CLI 和负向安全测试；禁止 Board1 解锁、V1 报文变更、硬件输出或自动提交。
+- `[邮箱]` Runtime 增加双槽 Foreground→H0 请求/结果协议，支持 ARM/START/SET_MODE、PENDING/APPLIED/REJECTED/CANCELLED；使用 release/acquire 原子索引，H0 独占状态/Safety/PI/输出提交，STOP/FAULT/旧 Session/超时优先或拒绝。新增 `test-foc-runtime-mailbox` 负向契约。
+- `[策略]` `foc_serial_init()` 保持 `LOCKED`，只有 Host Virtual 初始化路径能注入 `VIRTUAL_ONLY`；UART、HELLO、Session 和 PARAM_WRITE 不能切换策略，Board1 ARM/START 与 UPDATE 锁定保持。
+- `[虚拟设备]` 新增 `falconfoc-virtual-device`，复用现有 COBS/CRC/Session/Sequence、UART buffer、Serial Adapter 和 VM-01b 虚拟 Runtime。stdout 仅输出 V1 二进制，stderr 输出实际生命周期与虚拟/物理隔离元数据；Python CLI 新增同进程 `virtual-demo`，Current/Velocity/Position 三个流程均完成 ARM/START/UPDATE/Telemetry/STOP。
+- `[验证]` Simulation `14/14`、ASan/UBSan Simulation `14/14`、Runtime `11/11`、Board Host `4/4`、Legacy Host `45/45`、Python/C CLI `5/5`、Source contract `79/9/9`、C/H/CMake formatter、`Scope falconfoc` 均通过。VM-01a Current 与 VM-01b Motion replay 指纹保持。ARM BIN 从共享变更前 `36,736 B / 9806ADBFA3282450527F40BB97CB1DA75FAFE41FB405F1126114187C6393B029` 变为 `37,864 B / BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806`；`.text/.data/.bss` 和 Flash/RAM 增量已在证据报告解释，Host-only simulation/Python 未进入 ARM。
+- `[门禁与边界]` `Scope all` 的 Source/CMake/Platform/Smoke/Cache/Shell 阶段通过，Firmware CLI contract 仍因无 Bash 报告 `SCOPE_ALL_ENVIRONMENT_BLOCKED`，没有伪造通过。`NEXT-VM-01c PASS` 仅限批准的软件范围；停止在 VM-01c，不自动进入 VM-01d。`NEXT-SW-AUDIT-01 PENDING`、`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+
+## 2026-11-16 FalconFOC V2 NEXT-VM-01d Host 虚拟产品验收
+
+- `[产品链]` 在 VM-01a/VM-01b/VM-01c 基础上完成同一 Host Virtual device 的 Current、Velocity、Position、Load disturbance 和 Sensor Fault 五条 CLI 端到端演示。每条都经过 V1 HELLO/SETPOINT/ARM/START、Telemetry、STOP；输出同时包含 CSV、JSON、生命周期状态、虚拟/物理语义和确定性 Replay hash。Position 目标 `7 rad` 的轨迹跨越单圈，Load 通过 `foc_virtual_motor_set_load()` 注入，Fault 通过 Virtual Encoder 下一帧传输失败进入 H1/H0/Safety/INHIBIT。
+- `[指标]` 五条演示均为 `INTEGRATION_PASS`。Current 按运行前固定 `0.1 A` 容差记录 `CONTROL_QUALITY_FAIL`；Velocity/Position/Load 记录 `EXPECTED_DEGRADED`；Fault 因故障提前终止跟踪窗口记录 `NOT_MEASURED`。Load 的固定窗口测得速度下降为 `0`，原样保留，没有伪造恢复结论。Fault 的最终状态为 `FAULT_LATCHED`、Fault `4`，`no_update_after_inhibit=true`。
+- `[验证]` Simulation `14/14`、Clang ASan/UBSan Simulation `14/14`、Runtime `11/11`、Board Host `4/4`、Python/C CLI `6/6`、Legacy Host `45/45`、Source contract `79/9/9`、CMake/格式检查和 `Scope falconfoc` 均通过。五个 CSV/JSON 两次重放 SHA-256 完全一致；证据和开发者入口分别为 `docs/evidence/2026-11-16-next-vm-01d.md` 与 `docs/code-wiki/FalconFOC_VM_virtual_quickstart.md`。
+- `[ARM 与边界]` 当前 ARM `MinSizeRel` BIN `37,864 B`，SHA-256 `BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806`，与 VM-01c 一致。VM-01d 的启动补偿留在 Host Virtual 调度器，没有改变 Timer/ADC/SPI、PI 默认参数、Board1 输出锁或 UART V1 布局。`Scope all` 在 Firmware CLI contract 因当前环境缺少 Bash 报告 `SCOPE_ALL_ENVIRONMENT_BLOCKED`；没有修改门禁或伪造通过。`NEXT-SW-AUDIT-01 PENDING`、`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持；未刷机、未上电、未启用 PWM、未写 Flash、未 commit、未 push。
+- `[状态]` `NEXT-VM-01d PASS — HOST VIRTUAL PRODUCT`。控制品质结果仍按 `CONTROL_QUALITY_FAIL`、`EXPECTED_DEGRADED` 和 `NOT_MEASURED` 分开报告，不把研究 Profile 的跟踪误差包装为产品品质通过；本阶段停止在 Host Virtual Product，不自动进入 VM-01e 或硬件阶段。
+
+## 2026-11-16 FalconFOC V2 NEXT-CONTROL-QUALITY-01 控制品质测量与 Oracle 整改
+
+- `[窗口]` Host CLI 保留历史 full-window `rmse`/`tail_rmse`，新增 `metrics_schema_version=2`、RUNNING/RUNNING-tail 窗口、transient peak、steady-state error、Settling Time 和显式 measurement_window。启动、STOP/INHIBIT 记录不再进入新的 RUNNING 品质窗口；Velocity/Position 增加 `--horizon long` 独立观察，分别为 100 ms 和 2 s，不替换 VM-01d 短时证据。
+- `[负载]` Load 仍使用原始 `0.03 N·m / 5000–15000 us` 场景；Host 测试新增同初始状态、同命令和同虚拟时间的 0 N·m 反事实对照，计算同一时间点的速度、位置和 Iq 差异。Load no-op 变异现在由独立 Oracle 检出。
+- `[故障]` Virtual device 增加 Host-only 事件 journal 和 CSV/JSON 字段，区分 fault injection、Sensor/H1 invalid、H0 failure observation、software INHIBIT request/accept、FAULT_LATCHED、最后 accepted UPDATE 及各事件的 H0 UPDATE 计数。软件抑制延迟与故障锁存延迟分开报告；未观察事件以 `-1`/空值表达，不伪造 `0 us`。
+- `[Oracle]` Virtual Sensor 增加独立 Clarke/Park 方向参考，覆盖带非零 d/q 电流的 ADC 符号；Virtual Motor 测试增加有/无负载轨迹差异断言。Python Host 测试覆盖状态窗口边界、Load counterfactual 和 Fault event metrics。既有 Board1 LOCKED、ARM/START OUTPUT_LOCKED、UPDATE 拒绝和 V1 协议保持不变。
+- `[验证]` Simulation `14/14`、ASan/UBSan Simulation `14/14`、Runtime `11/11`、Board Host `4/4`、Python/C CLI `8/8`、Legacy Host `45/45`、Source contract、CMake/格式门禁通过；`Scope falconfoc` 通过，`Scope all` 仍因缺 Bash 为 `SCOPE_ALL_ENVIRONMENT_BLOCKED`。ARM BIN 保持 `37,864 B / BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806`。
+- `[状态]` `NEXT-CONTROL-QUALITY-01 PASS`。控制品质结果仍按 `CONTROL_QUALITY_FAIL`、`CONTROL_QUALITY_PASS` 和 `EXPECTED_DEGRADED` 分开报告；本轮修复测量语义、故障证据和测试 Oracle，没有修改生产 PI、Runtime Safety、UART V1 或真实输出权限。`G3-SAFE HARDWARE NOT VERIFIED`、`G3-PWR LOCKED`、`AT32F415 WCET NOT VERIFIED`、`MOTOR PHYSICAL OPERATION UNVERIFIED` 保持。
+
+## 2026-11-16 FalconFoc V2 NEXT-CONTROL-TUNING-01 Host 参数整定研究
+
+- `[研究入口]` 新增 `tools/falconfoc-cli/control_tuning.py`，复用同一个 V1 Virtual device、生产 Runtime、Current/Velocity/Position 控制器和确定性 PMSM Plant。研究 Profile 在 `foc_virtual_current_init()` 前注入，只复制 Host 配置；没有运行中改写 PI 积分器，也没有创建第二套 Plant 或控制算法。
+- `[方法]` 采用固定小网格，严格按 Current → Velocity → Position 搜索；每个候选保留 JSON/CSV/stdout/stderr。硬约束先检查积分/故障/UPDATE/有限值/持续饱和，再用 Tail RMSE、Final Error、Settling Time、Saturation 和 Overshoot 做可解释排序，并记录 Pareto 前沿。
+- `[结果]` 选出的 Host 研究候选为 `current_kp=1.26`、`current_ki=630`、`velocity_kp=0.225`、`velocity_ki=1.75`、`position_kp=5.0`（标量覆盖 d/q；Current/Velocity/Position 仍属研究参数）。与名义配置的精确长时域复核：Velocity 100 ms RUNNING-tail RMSE `0.592805 -> 0.338711`、Settling `95500 -> 79500 us`；Position 2 s RUNNING-tail RMSE `0.016434 -> 0.006548`、Settling `1383000 -> 1215500 us`。电流 10 ms Full RMSE `0.152791 -> 0.152713`，RUNNING-tail `0.005697 -> 0.003036`。
+- `[Holdout]` 反向 Current、带负载/参数扰动 Velocity、反向/低 VBUS/惯量扰动 Position 均通过 Runtime 硬约束；Current 反向短窗口仍为 `CONTROL_QUALITY_FAIL`，这是独立保留的控制品质结果，不改成 PASS。研究报告与全部机器结果见 `docs/evidence/2026-11-16-next-control-tuning-01.md` 和 `build/control-tuning-01/study.json`。
+- `[状态与边界]` `NEXT-CONTROL-TUNING-01 RESEARCH COMPLETE`、`IMPROVEMENT_CONFIRMED`、`HOLDOUT_PASS` 仅表示 Host 研究证据；不表示真实电机已整定、Board1 已验收、AT32F415 WCET 已证明、全局最优或 PWM 已解锁。生产 PI 默认值、Board1 限制、Runtime Safety、UART V1、Feedforward 准入和 ARM 固件均保持不变；未刷机、未上电、未 commit、未 push。
+
+## 2026-11-16 FalconFoc V2 NEXT-RELEASE-PREP-01 发布前工程收口
+
+- `[定位]` 根 README、docs 索引和 Host Quickstart 统一到 V2 的正式产品定位：纯 C11 Core、Runtime、Host Virtual Motor、AT32F415 reference target 和研究工具；AT32F415 不是所有 MCU 的永久边界，真实电机、功率级关断、WCET 和任意 MCU 即插即用仍未验证。
+- `[独立集成]` 在仓库外 `D:\study\Software\FalconFOC-core-consumer-release-prep-01` 创建最小 C11 消费者，只包含公开 `foc_current.h`、Current PI 输入和 SVPWM 输出检查。Clang 22 与 MinGW GCC 均独立 Configure/Build/Run 通过，证明 Core 可离开仓库内部测试图使用；Runtime/Device/Safety 接缝未被过度宣称为完全独立包。
+- `[盘点]` 生成 `docs/evidence/2026-11-16-next-release-prep-01-source-inventory.tsv`，分类全部 tracked/untracked 项目文件、VM/Quality/Tuning evidence、测试、工具、文档、build artifacts 和外部验证树；没有删除或移动当前未提交成果。
+- `[许可]` 确认 FreeRTOS LICENSE 在库内；CMSIS-DSP 本地 README 说明 MIT/Apache-2.0 混合覆盖；AT32F415 generated/BSP 含 Artery custom copyright/disclaimer；根项目尚无选定 LICENSE，权利人/版权链和第三方 NOTICE 尚未完成，因此当前发布结论保持 `RELEASE_BLOCKED`，本轮不添加正式 LICENSE。
+- `[回归]` Core `14/14`、Runtime `11/11`、Simulation `14/14`、ASan/UBSan `14/14`、Sensors `2/2`、Calibration `1/1`、G3-NP `2/2`、G3-SAFE `1/1`、Board Host `4/4`、Protocol `1/1`、Python/C CLI `11/11`、Legacy Host `45/45` 均通过。发现本机已有 `D:\Git\usr\bin\bash.exe`，临时加入 PATH 后原始 `Scope all`（含 Firmware CLI contract）通过；没有安装系统依赖或修改门禁。ARM BIN 保持 `37,864 B / BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806`。
+- `[状态]` `NEXT-RELEASE-PREP-01 PREPARATION COMPLETE`；实际发布准入 `RELEASE_BLOCKED`。后续最小任务为许可/来源收口、Runtime 可移植性接缝评估、带 Bash 的 CI 发布门禁和授权后的 MCU 实时性测量。未 commit、未 push、未 tag、未发布、未刷机、未上电。
+
+## 2026-11-16 FalconFOC V2 NEXT-CODE-IMPROVE-01 Feedforward 测试闭环
+
+- `[反例]` 独立 Core 副本复现审计 F01/P2：正向/反向第 1234 个零基周期计算失败、4999 周期、3999 样本、Current/FF 初始化失败及非有限 d 轴统计，原测试七项均错误 PASS；各自源码、变异及 stdout/stderr 保留在 `D:/study/Software/FalconFOC-code-improve-01-20261116`。
+- `[最小修复]` 唯一代码修改为 `core/tests/test_foc_feedforward.c`：显式 completed/status/周期/样本契约，初始化与每次 Step 错误传播，完成前 RMSE=NAN，最终有限性检查；五组模型均通过有效性检查后才比较原有性能关系。未改变生产控制器、PI 参数、角度归一化、Anti-windup、Runtime Safety、Board1 或 UART V1。
+- `[验证]` 正常五组各完成 5000 周期、4000 样本，原有数值输出不变；七项错误变异全部 FAIL 并关联试验身份。Core 14/14、Core Clang ASan/UBSan 14/14、Runtime 11/11、Simulation 14/14、Board Host 4/4、Python/C CLI 11/11、Source 79/9/9、Formatter、CMake Quality 30 项格式检查、Scope falconfoc 和 Scope all（含 Legacy Host 45/45）均通过。Scope all 使用本机已有 Git Bash 的子进程 PATH，没有修改门禁。
+- `[产物与证据]` V2 ARM 完整重建 BIN 保持 `37,864 B / BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806`。本轮报告为 `docs/evidence/2026-11-16-next-code-improve-01.md`；原只读审计报告及全部 VM/Quality/Tuning/Release Prep 成果保留。超大累计角度与联合 Anti-windup 继续待证据，已列取证方式和下一复核触发条件。
+- `[状态]` `NEXT-CODE-IMPROVE-01 PASS` 仅关闭该测试有效性缺陷；真实输出仍锁定，硬件安全、MCU WCET 和真实电机运行仍未验证。未 commit、push、合并、发布或进行硬件操作；本轮停止，不自动开始下一文件评审。
+
+## 2026-11-16 FalconFOC V2 NEXT-CODE-IMPROVE-02 批准前取证与相位方案
+
+- `[复现]` 新隔离目录重算 float(1e8) 的表示/归约/Park 误差，并以真实 Encoder→Runtime H1→H0/Current、正常 ARM/START/UPDATE 复现约 −16383/−262143 圈处 0.01431164/0.14975086 rad 的退化；连续机械位置未截断。
+- `[Oracle/原型]` 独立整数数学模与 double 相位 Oracle 覆盖 2100 例及 12000 次 Encoder 方向/边界更新。方案 A 在名义 7 极对同码结果稳定；方案 B 整数周期乘模最大误差 7.66e−7 rad，已提出最小生产接入方案。六类相位/方向/poles/offset/时间/invalid 变异在 Host 原型层被检出，未冒充正式新 Runtime 回归。
+- `[启动边界]` 公开 Host API 提前排队 ARM/START 时可在速度尚未建立的 400 µs 提交 UPDATE；正常顺序在 600 µs。提案撤回首个 UPDATE 必然使用完整速度反馈的普遍承诺，保留既有 Host-only 源准入及零速假设；更强 readiness 规则需独立设计，不扩散到 Board。
+- `[已实施]` 仅修改 core/include/foc_core.h 文档（+22/−3）：给出受条件限制的 5e−7 rad 小角归约精度域、区分 finite 准入与精度、补 Clarke 平衡/重构及不去零序前提。无函数体、公开字段/函数声明、接受规则、PI/AW/Safety 或硬件变化。
+- `[回归]` Core 14/14、Core Clang ASan/UBSan 14/14、Sensors 2/2、Runtime 11/11、Simulation 14/14、Board 4/4、Python/C CLI 11/11、Source 79/9/9、Formatter、Scope falconfoc/all（含 Legacy Host 45/45）实际通过；全部使用新目录，门禁中的 Legacy ELF/MAP 为逐字节复制的历史产物，未当作新 ARM 构建。
+- `[批准门]` 按用户任务第六节停在共享生产 API/正式 H1 相位源变更之前。待批准提案是 D:/study/Software/FalconFOC-code-improve-02-20261116/PRODUCTION_CHANGE_PROPOSAL.md 第 8 节：Sensor integer phase count、新 Core helper、Runtime phase-valid flag 及 producer/consumer/测试迁移；正式生产链尚未接入。NEXT-CODE-IMPROVE-02 PARTIAL — AWAITING PRODUCTION CHANGE APPROVAL。
+- `[保护]` 报告 docs/evidence/2026-11-16-next-code-improve-02.md。原 ARM BIN 37864 B / BDEC4D2706049080FF758EE308ADDC1304294DFD5805F05A0CAE7D56D4191806 保留；未 clean-first、删除历史构建、改 Golden、提交、推送、合并、发布或进行硬件操作。Board1 输出锁及实机未验证边界保持。
+
+## 2026-11-16 FalconFOC V2 NEXT-CODE-IMPROVE-02B 整数周期相位生产迁移
+
+- `[批准/实现]` 按 IM02 提案第 8 节与用户 IM02B 正式批准：Feedback 新增 uint32 周期计数，Core 新增 counts-to-phase helper，Runtime 新增显式 phase-valid 并消费同帧周期相位；Board/Virtual 及 motion-enabled fixtures 迁移。连续位置/Trajectory 保留，旧 Rotor API 与直接角度模式保持。
+- `[精度/反例]` 起始真实 Encoder→H1→H0/Current 反例先 RED；正式生产 Oracle 2100 组最大 7.65757044441e−7 rad，24 组长多圈 H1/H0 快照最大相位误差 3.28188485858e−7 rad、dq 误差 3.30374200523e−7 A。两个方向各 16777216 次合法更新，包含时戳回绕；另有正负多圈 Trajectory。
+- `[负向/复核]` 六类最终生产源变异均编译成功并被行为断言检出；invalid 旧相位变异导致 UPDATE 1→2，被测试拒绝。独立审查发现并修复一项 P2 直接角度兼容回归，先 RED→GREEN。Host 正常/提前首 UPDATE 600/400 µs 保持；首帧传输失败前后均 DISABLED、零 UPDATE，不重设计 readiness。
+- `[回归]` Core 15/15、Sensors 2/2、Runtime 11/11、Simulation 15/15、Board 4/4、Python/C CLI 11/11、Legacy Host 45/45；Core/Sensor/Simulation/Board Clang ASan/UBSan 通过。Source 81/9/9、Formatter、CMake Quality、Scope falconfoc/all 退出 0。五个 CLI 工作流集成通过，既有 Current 短窗口 CONTROL_QUALITY_FAIL 与 Position/Load EXPECTED_DEGRADED 标签保留，未改阈值/PI。
+- `[ARM]` 起始源码隔离重建匹配原 37864 B SHA；新 BIN 38304 B，SHA-256 73EE73C4FB1570417DF7842520CCA8BA07204C86FE644D837F00DBDDB7EA9E89。原始 .text +440 B、.data +0、.bss +20 B；Sensor/Feedback/Encoder/Runtime 大小 28/52/192/1236 B。H1 自身静态栈 288→328 B，非调用链高水位/WCET。
+- `[边界/保护]` 详见 docs/evidence/2026-11-16-next-code-improve-02b.md 与外部 FalconFOC-code-improve-02b-20261116。仅本授权的软件相位链验收 PASS；Board1 LOCKED、ARM/START OUTPUT_LOCKED、真实 UPDATE REJECTED、physical_applied=false。Safety、PI、UART V1、Target Policy、外设/功率输出未改变；不删除/覆盖历史构建或 CSV/JSON/Golden/evidence，不提交/推送/合并/发布/刷机/上电/运行真实电机。

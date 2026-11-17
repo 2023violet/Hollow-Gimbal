@@ -36,6 +36,14 @@ enum foc_serial_limits {
     FOC_SERIAL_RX_DEFAULT = 24,
 };
 
+/** Immutable authorization target selected before the adapter starts. */
+enum foc_serial_target_policy {
+    /** Board1 default: ARM/START and physical UPDATE remain locked. */
+    FOC_SERIAL_TARGET_LOCKED,
+    /** Explicit Host-only virtual target; never selectable over UART. */
+    FOC_SERIAL_TARGET_VIRTUAL_ONLY,
+};
+
 /** SPSC transport state. Only atomics are written by one domain and read by both. */
 struct foc_uart_buffer {
     /** RX ring elements, with one out-of-band gap marker. */
@@ -91,6 +99,10 @@ struct foc_serial {
     bool stop_pending;
     /** Whether a parameter has changed since initialization. */
     bool dirty;
+    /** Immutable target policy selected at initialization. */
+    enum foc_serial_target_policy target_policy;
+    /** Monotonic lifecycle request identity, separate from wire sequence. */
+    uint32_t lifecycle_sequence;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -112,6 +124,16 @@ bool foc_uart_tx_pop(struct foc_uart_buffer *buffer, uint8_t *byte);
 
 /** Initialize the Foreground adapter for a fresh boot before receiving bytes. */
 void foc_serial_init(struct foc_serial *serial, const struct foc_runtime *runtime);
+
+/** Initialize an explicit target policy; Board1 callers should use foc_serial_init(). */
+void foc_serial_init_with_policy(struct foc_serial *serial,
+                                 const struct foc_runtime *runtime,
+                                 enum foc_serial_target_policy policy);
+
+/** Read the Runtime lifecycle result associated with the latest Host request. */
+int foc_serial_read_lifecycle_result(const struct foc_serial *serial,
+                                     struct foc_runtime *runtime,
+                                     struct foc_runtime_lifecycle_result *result);
 
 /** After Runtime supervision, examine at most rx_budget bytes and one complete frame. */
 void foc_serial_poll(struct foc_serial *serial,

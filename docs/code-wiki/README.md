@@ -67,6 +67,9 @@
 | [motor-debugging-safety-and-procedure.md](motor-debugging-safety-and-procedure.md) | 实机调试安全协议、快速停机边界、停机后日志分析与分阶段开环排障流程 |
 | [motor-real-bench-test-plan.md](motor-real-bench-test-plan.md) | 带门禁的实机测试步骤、低能量参数包线、命令顺序、停机判据和失败回退决策树 |
 | [operations-and-validation.md](operations-and-validation.md) | 构建运行方式、无板模拟测试矩阵和本轮实际结果 |
+| [FalconFOC_VM_virtual_quickstart.md](FalconFOC_VM_virtual_quickstart.md) | VM-01a 至 VM-01d Host 虚拟电机独立使用、五个演示和结果解释 |
+| [../evidence/2026-11-16-next-control-tuning-01.md](../evidence/2026-11-16-next-control-tuning-01.md) | NEXT-CONTROL-TUNING-01 Host 参数搜索、Holdout 与长时域复核 |
+| [../evidence/2026-11-16-next-release-prep-01.md](../evidence/2026-11-16-next-release-prep-01.md) | NEXT-RELEASE-PREP-01 发布前工程收口、独立 Core 消费者、许可与阻断项 |
 | [deep-analysis.md](deep-analysis.md) | 深度剖析、风险分级、行为模拟、迁移缺口与后续建议 |
 | [open-loop-root-cause-deep-analysis.md](open-loop-root-cause-deep-analysis.md) | 停止新增测试后，基于同镜像实板证据完成的低压开环因果分层、反证、根因排序与结论边界 |
 | [project-summary.md](project-summary.md) | 项目级架构、模块、硬件、运行方式和当前状态总结 |

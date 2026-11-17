@@ -261,42 +261,46 @@ static int test_snapshot_reaches_control_inputs(void)
 
     struct foc_encoder_feedback feedback;
     CHECK(
-        foc_encoder_update(&encoder.sensor, 0U, 1000U, FOC_ENCODER_TRANSPORT_OK, &feedback) ==
-        FOC_ENCODER_STATUS_OK
+        foc_encoder_update(
+            &encoder.sensor,
+            UINT32_MAX - 999U,
+            1000U,
+            FOC_ENCODER_TRANSPORT_OK,
+            &feedback
+        ) == FOC_ENCODER_STATUS_OK
     );
     CHECK(
-        foc_encoder_update(&encoder.sensor, 1000U, 1010U, FOC_ENCODER_TRANSPORT_OK, &feedback) ==
+        foc_encoder_update(&encoder.sensor, 0U, 1010U, FOC_ENCODER_TRANSPORT_OK, &feedback) ==
             FOC_ENCODER_STATUS_OK &&
         feedback.valid && feedback.mechanical_rad > 0.0f
     );
-    struct foc_electrical_state electrical;
+    float phase;
     CHECK(
-        foc_rotor_electrical(
+        foc_rotor_phase_from_counts(
             &runtime.config.motion.rotor,
-            feedback.mechanical_rad,
-            feedback.filtered_velocity_rad_s,
-            &electrical
+            feedback.mechanical_phase_count,
+            encoder.sensor.config.counts_per_revolution,
+            &phase
         ) == FOC_STATUS_OK
     );
     CHECK(
-        fabsf(
-            electrical.angle_rad -
-            wrap_2pi(7.0f * feedback.mechanical_rad + calibrated.electrical_offset_rad)
-        ) < 1.0e-5f
+        fabsf(phase - wrap_2pi(7.0f * feedback.mechanical_rad + calibrated.electrical_offset_rad)) <
+        1.0e-5f
     );
 
     const struct foc_runtime_sensor sample = {
-        .theta_elec_rad = electrical.angle_rad,
-        .captured_us = 0U,
+        .theta_elec_rad = phase,
+        .captured_us = feedback.captured_us,
         .seq = 0U,
         .valid = true,
         .mechanical_rad = feedback.mechanical_rad,
         .mechanical_rad_s = feedback.filtered_velocity_rad_s,
+        .electrical_phase_valid = feedback.valid,
     };
     CHECK(foc_runtime_h1_step(&runtime, &sample, 0U, 0U) == FOC_RUNTIME_OK);
     const unsigned int slot = atomic_load(&runtime.sensor_slot);
     CHECK(slot < 2U && runtime.sensor_slots[slot].sample.valid);
-    CHECK(fabsf(runtime.sensor_slots[slot].electrical.angle_rad - electrical.angle_rad) < 1.0e-5f);
+    CHECK(fabsf(runtime.sensor_slots[slot].electrical.angle_rad - phase) < 1.0e-5f);
 
     (void)nominal_runtime;
     (void)nominal_output;

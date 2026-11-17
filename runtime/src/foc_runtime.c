@@ -27,6 +27,10 @@
 
 enum {
     FOC_RUNTIME_UNPUBLISHED = 2,
+    FOC_RUNTIME_REQUEST_IDLE = 0,
+    FOC_RUNTIME_REQUEST_WRITING = 1,
+    FOC_RUNTIME_REQUEST_PUBLISHED = 2,
+    FOC_RUNTIME_REQUEST_CLAIMED = 3,
     SNAPSHOT_CONFIRMED = 1U << 0,
     SNAPSHOT_FAST_SEEN = 1U << 1,
     SNAPSHOT_COMMAND_SEEN = 1U << 2,
@@ -400,6 +404,114 @@ foc_runtime_lifecycle(struct foc_runtime *runtime, enum foc_runtime_action actio
     default:
         return FOC_PIPELINE_ERR_STATE;
     }
+}
+
+static bool foc_runtime_lifecycle_shape_valid(const struct foc_runtime_lifecycle_request *request)
+{
+    if (request == NULL) {
+        return false;
+    }
+    if (request->action == FOC_RUNTIME_ACTION_SET_MODE) {
+        return request->requested_mode == FOC_RUNTIME_MODE_CURRENT ||
+            request->requested_mode == FOC_RUNTIME_MODE_VELOCITY ||
+            request->requested_mode == FOC_RUNTIME_MODE_POSITION;
+    }
+    return request->action == FOC_RUNTIME_ACTION_ARM || request->action == FOC_RUNTIME_ACTION_START;
+}
+
+static void foc_runtime_lifecycle_write_result(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_lifecycle_request *request,
+    enum foc_runtime_request_result result,
+    uint32_t now_us,
+    int pipeline_status
+)
+{
+    const unsigned int current =
+        atomic_load_explicit(&runtime->lifecycle_result_slot, memory_order_relaxed);
+    const unsigned int next = current == 0U ? 1U : 0U;
+    runtime->lifecycle_results[next] = (struct foc_runtime_lifecycle_result){
+        .result = result,
+        .action = request == NULL ? FOC_RUNTIME_ACTION_NONE : request->action,
+        .requested_mode = request == NULL ? runtime->mode : request->requested_mode,
+        .request_sequence = request == NULL ? 0U : request->request_sequence,
+        .applied_session = runtime->motion_session,
+        .h0_us = now_us,
+        .state = runtime->pipeline.safety.state,
+        .faults = runtime->pipeline.safety.latched_faults,
+        .pipeline_status = pipeline_status,
+    };
+    atomic_store_explicit(&runtime->lifecycle_result_slot, next, memory_order_release);
+}
+
+static bool foc_runtime_lifecycle_claim(
+    struct foc_runtime *runtime,
+    struct foc_runtime_lifecycle_request *request
+)
+{
+    unsigned int expected = FOC_RUNTIME_REQUEST_PUBLISHED;
+    if (!atomic_compare_exchange_strong_explicit(
+            &runtime->lifecycle_request_pending,
+            &expected,
+            FOC_RUNTIME_REQUEST_CLAIMED,
+            memory_order_acquire,
+            memory_order_relaxed
+        )) {
+        return false;
+    }
+    const unsigned int slot =
+        atomic_load_explicit(&runtime->lifecycle_request_slot, memory_order_acquire);
+    *request = runtime->lifecycle_requests[slot];
+    return true;
+}
+
+static bool foc_runtime_lifecycle_applied(
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_lifecycle_request *request
+)
+{
+    switch (request->action) {
+    case FOC_RUNTIME_ACTION_ARM:
+        return runtime->pipeline.safety.state == FOC_SAFE_STATE_READY;
+    case FOC_RUNTIME_ACTION_START:
+        return runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING;
+    case FOC_RUNTIME_ACTION_SET_MODE:
+        return runtime->pipeline.safety.state == FOC_SAFE_STATE_DISABLED &&
+            runtime->mode == request->requested_mode;
+    default:
+        return false;
+    }
+}
+
+static bool foc_runtime_lifecycle_request_current(
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_lifecycle_request *request,
+    uint32_t now_us
+)
+{
+    return request->source_session == runtime->motion_session &&
+        foc_safe_timestamp_fresh(
+               now_us,
+               request->produced_us,
+               runtime->pipeline.safety.config.command_timeout_us
+        ) &&
+        runtime->pipeline.safety.state != FOC_SAFE_STATE_FAULT_LATCHED;
+}
+
+static void foc_runtime_lifecycle_finish(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_lifecycle_request *request,
+    enum foc_runtime_request_result result,
+    uint32_t now_us,
+    int pipeline_status
+)
+{
+    foc_runtime_lifecycle_write_result(runtime, request, result, now_us, pipeline_status);
+    atomic_store_explicit(
+        &runtime->lifecycle_request_pending,
+        FOC_RUNTIME_REQUEST_IDLE,
+        memory_order_release
+    );
 }
 
 static int
@@ -787,6 +899,16 @@ int foc_runtime_init(
     atomic_init(&runtime->telemetry_sequence, 1U);
     atomic_init(&runtime->telemetry_pipeline_status, FOC_PIPELINE_OK);
     atomic_init(&runtime->clear_result, FOC_RUNTIME_CLEAR_NONE);
+    atomic_init(&runtime->lifecycle_request_slot, 0U);
+    atomic_init(&runtime->lifecycle_request_pending, FOC_RUNTIME_REQUEST_IDLE);
+    atomic_init(&runtime->lifecycle_result_slot, 0U);
+    atomic_init(&runtime->lifecycle_last_sequence, 0U);
+    atomic_init(&runtime->lifecycle_sequence_seen, 0U);
+    runtime->lifecycle_results[0] = (struct foc_runtime_lifecycle_result){
+        .result = FOC_RUNTIME_REQUEST_NONE,
+        .state = FOC_SAFE_STATE_BOOT,
+    };
+    runtime->lifecycle_results[1] = runtime->lifecycle_results[0];
     for (unsigned int index = 0U; index < WORD_COUNT; ++index) {
         atomic_init(&runtime->telemetry_words[index], 0U);
     }
@@ -828,6 +950,109 @@ int foc_runtime_publish_motion_command(
     return foc_runtime_publish_reference(runtime, command, now_us);
 }
 
+int foc_runtime_publish_lifecycle_request(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_lifecycle_request *request,
+    uint32_t now_us
+)
+{
+    if (runtime == NULL || !runtime->initialized || !foc_runtime_lifecycle_shape_valid(request)) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    if (!foc_safe_timestamp_fresh(
+            now_us,
+            request->produced_us,
+            runtime->pipeline.safety.config.command_timeout_us
+        )) {
+        return FOC_RUNTIME_ERR_ORDER;
+    }
+    struct foc_runtime_snapshot snapshot;
+    if (foc_runtime_read_snapshot(runtime, &snapshot) != FOC_RUNTIME_OK) {
+        return FOC_RUNTIME_ERR_BUSY;
+    }
+    if (request->source_session != snapshot.motion_session) {
+        return FOC_RUNTIME_ERR_ORDER;
+    }
+    if (atomic_load_explicit(&runtime->lifecycle_request_pending, memory_order_acquire) !=
+        FOC_RUNTIME_REQUEST_IDLE) {
+        return FOC_RUNTIME_ERR_BUSY;
+    }
+    const bool sequence_seen =
+        atomic_load_explicit(&runtime->lifecycle_sequence_seen, memory_order_relaxed) != 0U;
+    const uint32_t previous_sequence =
+        atomic_load_explicit(&runtime->lifecycle_last_sequence, memory_order_relaxed);
+    if (!foc_safe_sequence_newer(request->request_sequence, previous_sequence, sequence_seen)) {
+        return FOC_RUNTIME_ERR_ORDER;
+    }
+    unsigned int expected = FOC_RUNTIME_REQUEST_IDLE;
+    if (!atomic_compare_exchange_strong_explicit(
+            &runtime->lifecycle_request_pending,
+            &expected,
+            FOC_RUNTIME_REQUEST_WRITING,
+            memory_order_acquire,
+            memory_order_relaxed
+        )) {
+        return FOC_RUNTIME_ERR_BUSY;
+    }
+    const unsigned int current =
+        atomic_load_explicit(&runtime->lifecycle_request_slot, memory_order_relaxed);
+    const unsigned int next = current == 0U ? 1U : 0U;
+    runtime->lifecycle_requests[next] = *request;
+    atomic_store_explicit(&runtime->lifecycle_request_slot, next, memory_order_relaxed);
+    atomic_store_explicit(
+        &runtime->lifecycle_last_sequence,
+        request->request_sequence,
+        memory_order_relaxed
+    );
+    atomic_store_explicit(&runtime->lifecycle_sequence_seen, 1U, memory_order_relaxed);
+    atomic_store_explicit(
+        &runtime->lifecycle_request_pending,
+        FOC_RUNTIME_REQUEST_PUBLISHED,
+        memory_order_release
+    );
+    return FOC_RUNTIME_OK;
+}
+
+int foc_runtime_read_lifecycle_result(
+    struct foc_runtime *runtime,
+    struct foc_runtime_lifecycle_result *result
+)
+{
+    if (runtime == NULL || !runtime->initialized || result == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const unsigned int pending =
+        atomic_load_explicit(&runtime->lifecycle_request_pending, memory_order_acquire);
+    if (pending == FOC_RUNTIME_REQUEST_WRITING) {
+        return FOC_RUNTIME_ERR_BUSY;
+    }
+    if (pending == FOC_RUNTIME_REQUEST_PUBLISHED || pending == FOC_RUNTIME_REQUEST_CLAIMED) {
+        const unsigned int slot =
+            atomic_load_explicit(&runtime->lifecycle_request_slot, memory_order_acquire);
+        const struct foc_runtime_lifecycle_request request = runtime->lifecycle_requests[slot];
+        struct foc_runtime_snapshot snapshot;
+        if (foc_runtime_read_snapshot(runtime, &snapshot) != FOC_RUNTIME_OK) {
+            return FOC_RUNTIME_ERR_BUSY;
+        }
+        *result = (struct foc_runtime_lifecycle_result){
+            .result = FOC_RUNTIME_REQUEST_PENDING,
+            .action = request.action,
+            .requested_mode = request.requested_mode,
+            .request_sequence = request.request_sequence,
+            .applied_session = snapshot.motion_session,
+            .h0_us = snapshot.fast_us,
+            .state = snapshot.state,
+            .faults = snapshot.faults,
+            .pipeline_status = snapshot.pipeline_status,
+        };
+        return FOC_RUNTIME_OK;
+    }
+    const unsigned int slot =
+        atomic_load_explicit(&runtime->lifecycle_result_slot, memory_order_acquire);
+    *result = runtime->lifecycle_results[slot];
+    return FOC_RUNTIME_OK;
+}
+
 int foc_runtime_h1_step(
     struct foc_runtime *runtime,
     const struct foc_runtime_sensor *sample,
@@ -859,13 +1084,16 @@ int foc_runtime_h1_step(
         if (snapshot_status != FOC_RUNTIME_OK) {
             return snapshot_status;
         }
-        candidate.sample.valid = sample->valid &&
-            foc_rotor_electrical(
-                &runtime->config.motion.rotor,
-                sample->mechanical_rad,
-                sample->mechanical_rad_s,
-                &candidate.electrical
-            ) == FOC_STATUS_OK;
+        const float electrical_speed =
+            (float)runtime->config.motion.rotor.pole_pairs * sample->mechanical_rad_s;
+        candidate.sample.valid = sample->valid && sample->electrical_phase_valid &&
+            isfinite(sample->mechanical_rad) && isfinite(sample->mechanical_rad_s) &&
+            isfinite(sample->theta_elec_rad) && sample->theta_elec_rad >= 0.0f &&
+            sample->theta_elec_rad < 6.28318530717958647692f && isfinite(electrical_speed);
+        if (candidate.sample.valid) {
+            candidate.electrical =
+                (struct foc_electrical_state){sample->theta_elec_rad, electrical_speed};
+        }
         foc_runtime_prepare_outer(runtime, &candidate, previous, &view, now_us);
     } else {
         candidate.sample.valid = sample->valid && isfinite(sample->theta_elec_rad);
@@ -902,14 +1130,49 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
         foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_FAST_HEARTBEAT);
     }
     const bool stopped = foc_runtime_drain_stop(runtime, input->now_us);
+    const bool clearing = atomic_load(&runtime->clear_result) == FOC_RUNTIME_CLEAR_PENDING;
+    struct foc_runtime_lifecycle_request lifecycle_request = {0};
+    bool lifecycle_claimed = false;
+    enum foc_runtime_request_result lifecycle_result = FOC_RUNTIME_REQUEST_NONE;
+    int lifecycle_status = FOC_RUNTIME_OK;
     int status = schedule;
     if (stopped && schedule >= 0) {
         status = FOC_RUNTIME_ERR_STOP;
+        lifecycle_claimed = foc_runtime_lifecycle_claim(runtime, &lifecycle_request);
+        if (lifecycle_claimed) {
+            lifecycle_result = FOC_RUNTIME_REQUEST_CANCELLED;
+            lifecycle_status = status;
+        }
+    } else if (schedule < 0) {
+        lifecycle_claimed = foc_runtime_lifecycle_claim(runtime, &lifecycle_request);
+        if (lifecycle_claimed) {
+            lifecycle_result = FOC_RUNTIME_REQUEST_CANCELLED;
+            lifecycle_status = status;
+        }
     } else if (schedule == FOC_RUNTIME_OK) {
-        const bool clearing = atomic_load(&runtime->clear_result) == FOC_RUNTIME_CLEAR_PENDING;
+        if (input->action == FOC_RUNTIME_ACTION_NONE) {
+            lifecycle_claimed = foc_runtime_lifecycle_claim(runtime, &lifecycle_request);
+            if (lifecycle_claimed &&
+                (clearing ||
+                 !foc_runtime_lifecycle_request_current(
+                     runtime,
+                     &lifecycle_request,
+                     input->now_us
+                 ))) {
+                lifecycle_result =
+                    clearing ? FOC_RUNTIME_REQUEST_CANCELLED : FOC_RUNTIME_REQUEST_REJECTED;
+                lifecycle_status = FOC_RUNTIME_ERR_CONTROL;
+            }
+        }
+        struct foc_runtime_fast_input control_input = *input;
+        if (lifecycle_claimed && lifecycle_result == FOC_RUNTIME_REQUEST_NONE) {
+            control_input.action = lifecycle_request.action;
+            control_input.requested_mode = lifecycle_request.requested_mode;
+        }
         if (clearing) {
-            struct foc_runtime_fast_input recovery = *input;
-            if (input->action == FOC_RUNTIME_ACTION_NONE &&
+            struct foc_runtime_fast_input recovery =
+                lifecycle_result == FOC_RUNTIME_REQUEST_NONE ? control_input : *input;
+            if (recovery.action == FOC_RUNTIME_ACTION_NONE &&
                 foc_runtime_timeout_clear_ready(runtime, input)) {
                 recovery.action = FOC_RUNTIME_ACTION_CLEAR_FAULT;
             }
@@ -922,7 +1185,19 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
                     : FOC_RUNTIME_CLEAR_REJECTED
             );
         } else {
-            status = foc_runtime_control(runtime, input);
+            status = lifecycle_result == FOC_RUNTIME_REQUEST_NONE
+                ? foc_runtime_control(runtime, &control_input)
+                : lifecycle_status;
+        }
+        if (lifecycle_claimed && lifecycle_result == FOC_RUNTIME_REQUEST_NONE) {
+            lifecycle_status = status;
+            lifecycle_result = status == FOC_RUNTIME_ERR_STOP ||
+                    runtime->pipeline.safety.state == FOC_SAFE_STATE_FAULT_LATCHED
+                ? FOC_RUNTIME_REQUEST_CANCELLED
+                : (status >= FOC_RUNTIME_IDLE &&
+                           foc_runtime_lifecycle_applied(runtime, &lifecycle_request)
+                       ? FOC_RUNTIME_REQUEST_APPLIED
+                       : FOC_RUNTIME_REQUEST_REJECTED);
         }
     }
     if (runtime->mode != previous_mode ||
@@ -932,6 +1207,15 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
          previous_state != FOC_SAFE_STATE_FAULT_LATCHED)) {
         runtime->motion_session++;
         runtime->accepted_outer_seen = false;
+    }
+    if (lifecycle_claimed) {
+        foc_runtime_lifecycle_finish(
+            runtime,
+            &lifecycle_request,
+            lifecycle_result,
+            input->now_us,
+            lifecycle_status
+        );
     }
     foc_runtime_publish_snapshot(runtime);
     return status;

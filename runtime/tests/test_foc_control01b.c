@@ -127,6 +127,8 @@ sensor_at(uint32_t source_us, uint32_t seq, float speed_rad_s, bool valid)
         .valid = valid,
         .mechanical_rad = 0.0f,
         .mechanical_rad_s = speed_rad_s,
+        /* Analytic fixed zero position; this fixture's rotor offset is zero. */
+        .electrical_phase_valid = valid,
     };
 }
 

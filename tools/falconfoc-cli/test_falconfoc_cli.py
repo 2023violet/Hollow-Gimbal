@@ -2,6 +2,7 @@
 
 import pathlib
 import os
+import json
 import subprocess
 import sys
 import unittest
@@ -77,6 +78,131 @@ class DeviceTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(tool), "encode", "hello", "--sequence", "0"],
                                 check=True, capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), "06464601010101010101010101010101038ce700")
+
+    def test_virtual_demo(self):
+        executable = os.environ.get("FOC_VIRTUAL_DEVICE")
+        if not executable:
+            self.skipTest("FOC_VIRTUAL_DEVICE is not configured")
+        tool = ROOT / "tools/falconfoc-cli/falconfoc_cli.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "--simulator",
+                executable,
+                "virtual-demo",
+                "--virtual-scenario",
+                "velocity",
+                "--advance-us",
+                "500",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        lifecycle = [record for record in records if record.get("kind") == "lifecycle"]
+        virtual = [record for record in records if record.get("kind") == "virtual"]
+        self.assertTrue(any(item["result"] == "APPLIED" and item["action"] == 1 for item in lifecycle))
+        self.assertTrue(any(item["result"] == "APPLIED" and item["action"] == 2 for item in lifecycle))
+        self.assertGreater(max(item["virtual_update_accepted"] for item in virtual), 0)
+        self.assertTrue(all(item["physical_applied"] is False for item in virtual))
+        status = [record for record in records if record.get("message") == "status"][-1]
+        self.assertEqual(status["state"], 1)
+
+    def test_virtual_fault_and_exports(self):
+        executable = os.environ.get("FOC_VIRTUAL_DEVICE")
+        if not executable:
+            self.skipTest("FOC_VIRTUAL_DEVICE is not configured")
+        tool = ROOT / "tools/falconfoc-cli/falconfoc_cli.py"
+        csv_path = ROOT / "build/vm01a-simulation/test-vm01d-fault.csv"
+        json_path = ROOT / "build/vm01a-simulation/test-vm01d-fault.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "--simulator",
+                executable,
+                "virtual-demo",
+                "--virtual-scenario",
+                "fault",
+                "--advance-us",
+                "500",
+                "--duration-us",
+                "10000",
+                "--csv",
+                str(csv_path),
+                "--json",
+                str(json_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        summaries = [
+            json.loads(line)
+            for line in result.stdout.splitlines()
+            if line.strip() and json.loads(line).get("kind") == "summary"
+        ]
+        self.assertEqual(len(summaries), 1)
+        metrics = summaries[0]["metrics"]
+        self.assertEqual(metrics["final_state"], 4)
+        self.assertTrue(metrics["no_update_after_inhibit"])
+        self.assertTrue(csv_path.exists() and json_path.exists())
+        self.assertIn("virtual_time_us", csv_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(metrics["software_inhibit_latency_us"], 0)
+        self.assertGreaterEqual(metrics["fault_latch_latency_us"], 0)
+        self.assertEqual(metrics["updates_after_inhibit"], 0)
+
+    def test_control_quality_windows_exclude_non_running_samples(self):
+        records = [
+            {"kind": "virtual", "virtual_time_us": 0, "state": 1, "output_action": 0,
+             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.0,
+             "virtual_update_accepted": 0, "virtual_update_rejected": 0,
+             "saturation_count": 0, "faults": 0, "replay_hash": 1},
+            {"kind": "virtual", "virtual_time_us": 100, "state": 3, "output_action": 1,
+             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.3,
+             "virtual_update_accepted": 1, "virtual_update_rejected": 0,
+             "saturation_count": 0, "faults": 0, "replay_hash": 2},
+            {"kind": "virtual", "virtual_time_us": 200, "state": 3, "output_action": 1,
+             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.4,
+             "virtual_update_accepted": 2, "virtual_update_rejected": 0,
+             "saturation_count": 0, "faults": 0, "replay_hash": 3},
+            {"kind": "virtual", "virtual_time_us": 300, "state": 1, "output_action": 0,
+             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.1,
+             "virtual_update_accepted": 2, "virtual_update_rejected": 0,
+             "saturation_count": 0, "faults": 0, "replay_hash": 4},
+        ]
+        metrics = foc._virtual_metrics(records, "current", 300)
+        self.assertGreater(metrics["full_window_rmse"], metrics["running_window_rmse"])
+        self.assertEqual(metrics["measurement_window"]["running"]["sample_count"], 2)
+        self.assertEqual(metrics["measurement_window"]["full"]["sample_count"], 4)
+
+    def test_load_counterfactual_oracle(self):
+        executable = os.environ.get("FOC_VIRTUAL_DEVICE")
+        if not executable:
+            self.skipTest("FOC_VIRTUAL_DEVICE is not configured")
+        tool = ROOT / "tools/falconfoc-cli/falconfoc_cli.py"
+
+        def run(torque):
+            result = subprocess.run(
+                [
+                    sys.executable, str(tool), "--simulator", executable, "virtual-demo",
+                    "--virtual-scenario", "load", "--advance-us", "500",
+                    "--duration-us", "30000", "--load-torque-nm", str(torque),
+                ], check=True, capture_output=True, text=True,
+            )
+            return [
+                json.loads(line) for line in result.stdout.splitlines()
+                if line.strip() and json.loads(line).get("kind") == "virtual"
+            ]
+
+        loaded = run(0.03)
+        unloaded = run(0.0)
+        comparison = foc._load_counterfactual_metrics(loaded, unloaded)
+        self.assertEqual(comparison["status"], "LOAD_EFFECT_CONFIRMED")
+        self.assertGreater(comparison["max_abs_delta_velocity_rad_s"], 0.01)
+        self.assertGreater(comparison["max_abs_delta_iq_a"], 0.001)
 
 
 if __name__ == "__main__":

@@ -103,16 +103,25 @@ static void pressure_poll(struct fixture *test)
     foc_serial_poll(&test->serial, &test->uart, &test->runtime, clock_us, &test->time);
 }
 
+/* Analytic stationary zero-code source, not a measured Encoder first frame. */
+static struct foc_runtime_sensor mock_sensor(struct foc_runtime *runtime, uint32_t at, uint32_t seq)
+{
+    struct foc_runtime_sensor sensor = {.captured_us = at, .seq = seq, .valid = true};
+    if (runtime->config.motion.enabled) {
+        sensor.electrical_phase_valid = foc_rotor_phase_from_counts(
+                                            &runtime->config.motion.rotor,
+                                            0U,
+                                            2U,
+                                            &sensor.theta_elec_rad
+                                        ) == FOC_STATUS_OK;
+    }
+    return sensor;
+}
+
 static void runtime_tick(struct fixture *test)
 {
     struct foc_runtime_foreground_result result;
-    const struct foc_runtime_sensor sensor = {
-        .captured_us = test->time,
-        .seq = test->time,
-        .valid = true,
-        .mechanical_rad = 0.0f,
-        .mechanical_rad_s = 0.0f,
-    };
+    const struct foc_runtime_sensor sensor = mock_sensor(&test->runtime, test->time, test->time);
     (void)foc_runtime_h1_step(&test->runtime, &sensor, test->time, 0U);
     h0(test);
     (void)foc_runtime_foreground_poll(&test->runtime, test->time + 2U, 0U, 0U, &result);
@@ -198,6 +207,64 @@ static int test_commands(void)
     request.sequence++;
     CHECK(transact(&test, request, &response, FOC_PROTO_BAD_SESSION) == 0);
     CHECK(test.output.declined_updates == 0);
+    return 0;
+}
+
+static void runtime_tick(struct fixture *test);
+
+static int test_host_policy_keeps_output_locked(void)
+{
+    struct fixture test = {0};
+    struct foc_protocol_frame response;
+    struct foc_protocol_frame request = {
+        .flags = FOC_PROTOCOL_REQUEST,
+        .type = FOC_MSG_HELLO,
+        .sequence = 0U,
+    };
+    CHECK(foc_board_init(&test.runtime, &test.output, 0U) == FOC_RUNTIME_OK);
+    foc_serial_init_with_policy(&test.serial, &test.runtime, FOC_SERIAL_TARGET_VIRTUAL_ONLY);
+    CHECK(transact(&test, request, &response, FOC_PROTO_OK) == 0);
+    request.session = response.session;
+    h0(&test);
+    request.sequence = 1U;
+    request.type = FOC_MSG_SETPOINT;
+    request.length = 9U;
+    request.payload[0] = FOC_RUNTIME_MODE_CURRENT;
+    foc_protocol_write_u32(request.payload + 1U, 0U);
+    foc_protocol_write_u32(request.payload + 5U, 0x3f000000U);
+    test.time = 1U;
+    CHECK(transact(&test, request, &response, FOC_PROTO_ACCEPTED) == 0);
+
+    request.sequence++;
+    request.type = FOC_MSG_ARM;
+    request.length = 0U;
+    CHECK(transact(&test, request, &response, FOC_PROTO_ACCEPTED) == 0);
+    foc_runtime_request_inhibit(&test.runtime, FOC_SAFE_FAULT_INVALID_STATE);
+    test.time = 200U;
+    runtime_tick(&test);
+    struct foc_runtime_lifecycle_result lifecycle;
+    CHECK(
+        foc_serial_read_lifecycle_result(&test.serial, &test.runtime, &lifecycle) == FOC_RUNTIME_OK
+    );
+    CHECK(
+        lifecycle.result == FOC_RUNTIME_REQUEST_CANCELLED &&
+        lifecycle.action == FOC_RUNTIME_ACTION_ARM
+    );
+
+    request.sequence++;
+    request.type = FOC_MSG_START;
+    CHECK(transact(&test, request, &response, FOC_PROTO_ACCEPTED) == 0);
+    foc_runtime_request_inhibit(&test.runtime, FOC_SAFE_FAULT_INVALID_STATE);
+    test.time = 400U;
+    runtime_tick(&test);
+    CHECK(
+        foc_serial_read_lifecycle_result(&test.serial, &test.runtime, &lifecycle) == FOC_RUNTIME_OK
+    );
+    CHECK(
+        lifecycle.result == FOC_RUNTIME_REQUEST_CANCELLED &&
+        lifecycle.action == FOC_RUNTIME_ACTION_START
+    );
+    CHECK(test.output.declined_updates == 0U);
     return 0;
 }
 
@@ -323,7 +390,7 @@ static void mock_tick(struct fixture *test, uint32_t at, enum foc_runtime_action
     test->time = at;
     struct foc_runtime_foreground_result result;
     (void)foc_runtime_foreground_poll(&test->runtime, at, 0, 0, &result);
-    const struct foc_runtime_sensor sensor = {.seq = at, .captured_us = at, .valid = true};
+    const struct foc_runtime_sensor sensor = mock_sensor(&test->runtime, at, at);
     (void)foc_runtime_h1_step(&test->runtime, &sensor, at, 0);
     const struct foc_runtime_fast_input input = {
         .adc = {1200, 2048, 2048, 2048, FOC_DEVICE_SAMPLE_ALL_VALID, at, at},
@@ -488,11 +555,7 @@ static int test_foreground_load(void)
         const unsigned int before = atomic_load(&test.uart.rx_tail);
         poll(&test);
         CHECK(atomic_load(&test.uart.rx_tail) - before <= test.serial.rx_budget);
-        const struct foc_runtime_sensor sensor = {
-            .seq = cycle,
-            .captured_us = test.time,
-            .valid = true,
-        };
+        const struct foc_runtime_sensor sensor = mock_sensor(&test.runtime, test.time, cycle);
         (void)foc_runtime_h1_step(&test.runtime, &sensor, test.time, 0);
         h0(&test);
         if (cycle % 7U == 0) {
@@ -510,8 +573,9 @@ static int test_foreground_load(void)
 
 int main(void)
 {
-    return test_uart() || test_commands() || test_backpressure() || test_parameters() ||
-        test_lease_and_clear() || test_foreground_load() || test_line_rate_pressure();
+    return test_uart() || test_commands() || test_host_policy_keeps_output_locked() ||
+        test_backpressure() || test_parameters() || test_lease_and_clear() ||
+        test_foreground_load() || test_line_rate_pressure();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

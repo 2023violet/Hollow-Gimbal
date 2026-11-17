@@ -17,6 +17,67 @@ python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/foc-seri
 python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/foc-serial-sim.exe request param-read --id 1
 ```
 
+For the Host Virtual product workflow, build the simulation target and run the
+same process through Current, Velocity, Position, load and sensor-fault demos:
+
+```powershell
+cmake -S simulation -B build/vm01a-simulation -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/vm01a-simulation --parallel 4
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario current --csv build/vm01a-simulation/current.csv --json build/vm01a-simulation/current.json
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario velocity
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario position --advance-us 500 --duration-us 1200000
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario load
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/vm01a-simulation/falconfoc-virtual-device.exe virtual-demo --virtual-scenario fault
+```
+
+The virtual device is a Host-only process. It uses the existing V1 COBS/CRC
+adapter over binary stdin/stdout and reports lifecycle, virtual-time, metrics
+and physical-semantics metadata on stderr. `physical_applied` remains false;
+virtual UPDATE acceptance is software-model evidence only. The demos need no
+board, debugger, motor, or Python packages beyond the standard library.
+
+The current profile is `GENERIC_RESEARCH_MOTOR`: 12 V, four pole pairs, H0
+200 us, H1 500 us, a double-precision average-value PMSM RK4 plant, quantized
+ADC ranks, and a virtual magnetic encoder. It omits MOSFET switching transients,
+dead time, thermal drift, real power-stage protection and MCU WCET. CSV and JSON
+quality fields are fixed-window research measurements; a missing settling time
+is emitted as `null`, and `EXPECTED_DEGRADED` remains distinct from
+`CONTROL_QUALITY_PASS`.
+
+## Control-tuning research
+
+The Host-only tuning study is reproducible from the repository root:
+
+```powershell
+python tools/falconfoc-cli/control_tuning.py `
+  --simulator build/vm01a-simulation/falconfoc-virtual-device.exe `
+  --output-dir build/control-tuning-01
+```
+
+The runner performs a small, fixed and explainable grid search in the order
+Current → Velocity → Position, then freezes the chosen copied profile for
+independent holdout and long-horizon confirmation runs. Candidate JSON/CSV
+files, dominated trials, and the aggregate `study.json` are retained. The
+profile override options are consumed only by the Host virtual-device
+initialization path; they do not change production PI defaults, Board1
+calibration, UART V1, Runtime Safety, Feedforward admission, or output policy.
+
+The final study reports `FEASIBLE`/`INFEASIBLE` constraints separately from
+`CONTROL_QUALITY_PASS`, `CONTROL_QUALITY_FAIL`, and `EXPECTED_DEGRADED` metrics.
+An improved Host candidate therefore cannot be read as a physical-motor or
+AT32F415 acceptance result.
+
+The JSON now carries `metrics_schema_version=2`, historical full-window values,
+state-qualified RUNNING and tail windows, transient/steady-state metrics and an
+explicit measurement-window description. `--horizon long` runs the independent
+100 ms velocity and 2 s position observations. Fault results separate software
+INHIBIT latency from FAULT_LATCHED latency and export event-level UPDATE
+counters; `-1` timestamps in CSV mean that an event was not observed.
+
+The Host test suite runs a paired Load A/B counterfactual with identical
+commands and virtual time. This is separate from the historical `speed_drop`
+field, which remains available for audit comparison.
+
 Every response prints a JSON object. The simulator exchanges binary pipe bytes
 with the actual C protocol, UART buffers and Runtime adapter. Its clock is fixed
 at zero and it has no valid sensor measurements. Real-time timeout scenarios

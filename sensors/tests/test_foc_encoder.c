@@ -458,6 +458,109 @@ static int test_instances_and_reset(void)
     return 0;
 }
 
+static int test_integer_phase_source(void)
+{
+    const uint32_t cprs[] = {3U, 7U, 1000U, 16384U, 65535U, 65536U};
+    for (unsigned c = 0; c < sizeof cprs / sizeof *cprs; ++c) {
+        for (int direction = -1; direction <= 1; direction += 2) {
+            struct foc_encoder_config policy = test_config();
+            policy.counts_per_revolution = cprs[c];
+            policy.direction = (enum foc_encoder_direction)direction;
+            policy.max_speed_rad_s = 6000.0f;
+            struct foc_encoder_context encoder = {0};
+            struct foc_encoder_feedback frame;
+            TEST_ASSERT(foc_encoder_init(&encoder, &policy) == 0);
+            uint32_t time = UINT32_MAX - 1000U;
+            uint32_t raw = 1U;
+            int64_t expected = direction > 0 ? 1 : (int64_t)cprs[c] - 1;
+            TEST_ASSERT(
+                foc_encoder_update(&encoder, time, raw, FOC_ENCODER_TRANSPORT_OK, &frame) == 0
+            );
+            TEST_ASSERT(
+                frame.mechanical_phase_count == (uint32_t)expected && !frame.valid &&
+                !frame.speed_valid
+            );
+            const int step = cprs[c] < 64U ? 1 : (int)(cprs[c] / 64U);
+            for (unsigned i = 0; i < 2000U; ++i) {
+                const int travel = i < 1000U ? step : -step;
+                const int64_t next_raw = (int64_t)raw + travel + cprs[c];
+                raw = (uint32_t)(next_raw % cprs[c]);
+                expected += (int64_t)direction * travel;
+                time += 500U;
+                TEST_ASSERT(
+                    foc_encoder_update(&encoder, time, raw, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+                        0 &&
+                    frame.valid && frame.speed_valid
+                );
+                int64_t remainder = expected % (int64_t)cprs[c];
+                if (remainder < 0) {
+                    remainder += cprs[c];
+                }
+                TEST_ASSERT(
+                    encoder.position_counts == expected && frame.captured_us == time &&
+                    frame.raw_code == raw && frame.mechanical_phase_count == (uint32_t)remainder
+                );
+            }
+            const int64_t accepted = encoder.position_counts;
+            TEST_ASSERT(
+                foc_encoder_update(&encoder, time, raw, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+                FOC_ENCODER_STATUS_ERR_ORDER
+            );
+            TEST_ASSERT(
+                !frame.valid && frame.mechanical_phase_count == 0U &&
+                encoder.position_counts == accepted
+            );
+            TEST_ASSERT(
+                foc_encoder_update(
+                    &encoder,
+                    time + 500U,
+                    raw,
+                    FOC_ENCODER_TRANSPORT_TIMEOUT,
+                    &frame
+                ) < 0
+            );
+            TEST_ASSERT(!frame.valid && frame.mechanical_phase_count == 0U);
+            TEST_ASSERT(foc_encoder_reset(&encoder) == 0);
+            TEST_ASSERT(
+                foc_encoder_update(&encoder, time + 1000U, 1U, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+                0
+            );
+            TEST_ASSERT(
+                !frame.valid && !frame.speed_valid &&
+                frame.mechanical_phase_count == (direction > 0 ? 1U : cprs[c] - 1U)
+            );
+        }
+    }
+    return 0;
+}
+
+static int test_phase_at_count_overflow(void)
+{
+    for (unsigned negative = 0U; negative < 2U; ++negative) {
+        struct foc_encoder_context encoder;
+        struct foc_encoder_feedback frame;
+        const struct foc_encoder_config policy = test_config();
+        const uint32_t first = negative ? 0U : 65535U;
+        const uint32_t next = negative ? 65535U : 0U;
+        const int64_t limit = negative ? INT64_MIN : INT64_MAX;
+        TEST_ASSERT(foc_encoder_init(&encoder, &policy) == 0);
+        TEST_ASSERT(foc_encoder_update(&encoder, 0U, first, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+        /* Isolated internal-state boundary test; raw code agrees with limit modulo CPR.
+         * Long-chain tests separately reach their counts using only legal updates. */
+        encoder.position_counts = limit;
+        TEST_ASSERT(
+            foc_encoder_update(&encoder, 500U, next, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+            FOC_ENCODER_STATUS_ERR_SAMPLE
+        );
+        TEST_ASSERT(
+            encoder.position_counts == limit && encoder.previous_us == 0U &&
+            encoder.previous_code == first && !frame.valid && !frame.speed_valid &&
+            frame.mechanical_phase_count == 0U && frame.quality == FOC_ENCODER_QUALITY_NUMERIC_ERROR
+        );
+    }
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
@@ -465,7 +568,7 @@ int main(void)
     return test_lifecycle_and_single_turn() || test_wrap_direction_and_multiturn() ||
         test_timestamps_and_continuity() || test_transport_and_invalid_samples() ||
         test_speed_filters_and_deterministic_dataset() || test_algorithm_comparison_metrics() ||
-        test_instances_and_reset();
+        test_instances_and_reset() || test_integer_phase_source() || test_phase_at_count_overflow();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -16,6 +16,9 @@
 #include "foc_device_sim.h"
 #include "foc_motion.h"
 #include "foc_runtime.h"
+#ifdef FOC_VIRTUAL_SHARED_PLANT
+#include "foc_virtual_motor.h"
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -218,6 +221,24 @@ static int test_plant(void)
     struct plant_state rest = {0};
     TEST_ASSERT(plant_apply(&motor, &rest, centered, 0.0) == 0.0);
     TEST_ASSERT(rest.id == 0.0 && rest.iq == 0.0 && rest.speed == 0.0 && rest.position == 0.0);
+#ifdef FOC_VIRTUAL_SHARED_PLANT
+    {
+        const struct foc_virtual_motor_params shared_params = {
+            .rs_ohm = motor.rs,
+            .ld_h = motor.ld,
+            .lq_h = motor.lq,
+            .psi_f_wb = motor.flux,
+            .pole_pairs = motor.poles,
+            .electrical_offset_rad = motor.offset,
+            .inertia_kg_m2 = motor.inertia,
+            .damping_nm_s = motor.damping,
+        };
+        struct foc_virtual_motor shared;
+        TEST_ASSERT(foc_virtual_motor_init(&shared, &shared_params, NULL) == 0);
+        TEST_ASSERT(foc_virtual_motor_step(&shared, alpha, beta, step_s) == 0);
+        TEST_ASSERT(isfinite(shared.state.id_a) && isfinite(shared.state.iq_a));
+    }
+#endif
     return 0;
 }
 
@@ -299,14 +320,28 @@ static int model_command(
     return foc_runtime_publish_motion_command(runtime, &command, now_us);
 }
 
+static float model_phase(const struct foc_rotor_config *rotor, double position)
+{
+    const double tau = 6.283185307179586476925286766559005768;
+    double phase =
+        fmod(fmod(position, tau) * rotor->pole_pairs + rotor->electrical_offset_rad, tau);
+    if (phase < 0.0) {
+        phase += tau;
+    }
+    const float bounded = (float)phase;
+    return bounded < 6.28318530717958647692f ? bounded : 0.0f;
+}
+
 static int model_sensor(struct foc_runtime *runtime, struct plant_state state, uint32_t tick)
 {
     const struct foc_runtime_sensor sample = {
+        .theta_elec_rad = model_phase(&runtime->config.motion.rotor, state.position),
         .captured_us = tick * 100U,
         .seq = tick,
         .valid = true,
         .mechanical_rad = (float)state.position,
         .mechanical_rad_s = (float)state.speed,
+        .electrical_phase_valid = true,
     };
     return foc_runtime_h1_step(runtime, &sample, tick * 100U, 0U);
 }
@@ -503,16 +538,11 @@ static int run_model(bool position, bool integrated, bool trace, struct model_re
                 }
                 TEST_ASSERT(runtime_output(&runtime, &motor, state, tick, compare, &iq_ref) == 0);
             } else {
-                struct foc_electrical_state electrical;
+                const struct foc_electrical_state electrical = {
+                    model_phase(&rotor, state.position),
+                    (float)(rotor.pole_pairs * state.speed)
+                };
                 const struct foc_device_adc_raw raw = plant_adc(&motor, state, tick, 100U * tick);
-                TEST_ASSERT(
-                    foc_rotor_electrical(
-                        &rotor,
-                        (float)state.position,
-                        (float)state.speed,
-                        &electrical
-                    ) == FOC_STATUS_OK
-                );
                 TEST_ASSERT(
                     direct_output(&current, &raw, &electrical, iq_ref, compare, &limited) == 0
                 );

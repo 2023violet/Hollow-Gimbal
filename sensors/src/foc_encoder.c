@@ -270,6 +270,7 @@ int foc_encoder_update(
         context->previous_us = captured_us;
         context->previous_code = raw_code;
         context->position_counts = (int64_t)directed;
+        feedback->mechanical_phase_count = directed;
         feedback->single_turn_rad = foc_encoder_code_to_rad(context, directed);
         feedback->mechanical_rad = foc_encoder_code_to_rad(context, context->position_counts);
         feedback->quality = FOC_ENCODER_QUALITY_UNINITIALIZED;
@@ -416,6 +417,7 @@ int foc_encoder_update(
 
     feedback->single_turn_rad = foc_encoder_code_to_rad(context, directed);
     feedback->mechanical_rad = position_rad;
+    feedback->mechanical_phase_count = directed;
     feedback->delta_rad = delta_rad;
     feedback->dt_s = dt_s;
     feedback->raw_velocity_rad_s = raw_velocity;

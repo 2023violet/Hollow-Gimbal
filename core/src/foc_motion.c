@@ -26,6 +26,37 @@ static float foc_motion_clamp(float value, float limit)
 
 /* Public Functions ------------------------------------------------------------- */
 
+int foc_rotor_phase_from_counts(
+    const struct foc_rotor_config *config,
+    uint32_t mechanical_phase_count,
+    uint32_t counts_per_revolution,
+    float *electrical_phase_rad
+)
+{
+    if (electrical_phase_rad == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    *electrical_phase_rad = 0.0f;
+    if (config == NULL) {
+        return FOC_STATUS_ERR_NULL;
+    }
+    if (counts_per_revolution < 2U || counts_per_revolution > UINT32_C(65536) ||
+        mechanical_phase_count >= counts_per_revolution || config->pole_pairs == 0U) {
+        return FOC_STATUS_ERR_INVALID_CONFIG;
+    }
+    float offset;
+    const int status = foc_angle_normalize(config->electrical_offset_rad, &offset);
+    if (status != FOC_STATUS_OK) {
+        return status;
+    }
+    /* Both factors <= 65535: their product fits uint32_t without wrapping. */
+    const uint32_t electrical_count =
+        (mechanical_phase_count * (uint32_t)config->pole_pairs) % counts_per_revolution;
+    const float phase =
+        (float)electrical_count * (6.28318530717958647692f / (float)counts_per_revolution);
+    return foc_angle_normalize(phase + offset, electrical_phase_rad);
+}
+
 int foc_rotor_electrical(
     const struct foc_rotor_config *config,
     float mechanical_rad,

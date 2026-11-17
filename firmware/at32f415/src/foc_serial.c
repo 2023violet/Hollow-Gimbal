@@ -346,8 +346,30 @@ static int foc_serial_dispatch(
         foc_runtime_revoke_command(runtime);
         return FOC_PROTO_ACCEPTED;
     case FOC_MSG_ARM:
-    case FOC_MSG_START:
-        return FOC_PROTO_OUTPUT_LOCKED;
+    case FOC_MSG_START: {
+        if (serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY) {
+            return FOC_PROTO_OUTPUT_LOCKED;
+        }
+        struct foc_runtime_snapshot view;
+        if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+            return FOC_PROTO_BUSY;
+        }
+        const struct foc_runtime_lifecycle_request lifecycle_request = {
+            .action =
+                request->type == FOC_MSG_ARM ? FOC_RUNTIME_ACTION_ARM : FOC_RUNTIME_ACTION_START,
+            .requested_mode = view.mode,
+            .request_sequence = serial->lifecycle_sequence + 1U,
+            .source_session = view.motion_session,
+            .produced_us = now_us,
+        };
+        const int publish =
+            foc_runtime_publish_lifecycle_request(runtime, &lifecycle_request, now_us);
+        if (publish == FOC_RUNTIME_OK) {
+            serial->lifecycle_sequence = lifecycle_request.request_sequence;
+            return FOC_PROTO_ACCEPTED;
+        }
+        return publish == FOC_RUNTIME_ERR_BUSY ? FOC_PROTO_BUSY : FOC_PROTO_BAD_STATE;
+    }
     case FOC_MSG_FAULT_CLEAR: {
         const int result = foc_runtime_request_timeout_clear(runtime, now_us);
         return result == FOC_RUNTIME_OK      ? FOC_PROTO_ACCEPTED
@@ -411,13 +433,39 @@ static bool foc_serial_send(struct foc_uart_buffer *uart, const struct foc_proto
 
 /* Public Functions ------------------------------------------------------------- */
 
-void foc_serial_init(struct foc_serial *serial, const struct foc_runtime *runtime)
+void foc_serial_init_with_policy(
+    struct foc_serial *serial,
+    const struct foc_runtime *runtime,
+    enum foc_serial_target_policy policy
+)
 {
     *serial = (struct foc_serial){
         .current_limit_a = runtime->config.motion.iq_limit_a,
         .position_limit_rad = 100.0f,
         .rx_budget = FOC_SERIAL_RX_DEFAULT,
+        .target_policy = policy == FOC_SERIAL_TARGET_VIRTUAL_ONLY ? FOC_SERIAL_TARGET_VIRTUAL_ONLY
+                                                                  : FOC_SERIAL_TARGET_LOCKED,
     };
+    struct foc_runtime_lifecycle_result lifecycle;
+    if (foc_runtime_read_lifecycle_result((struct foc_runtime *)runtime, &lifecycle) ==
+        FOC_RUNTIME_OK) {
+        serial->lifecycle_sequence = lifecycle.request_sequence;
+    }
+}
+
+void foc_serial_init(struct foc_serial *serial, const struct foc_runtime *runtime)
+{
+    foc_serial_init_with_policy(serial, runtime, FOC_SERIAL_TARGET_LOCKED);
+}
+
+int foc_serial_read_lifecycle_result(
+    const struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    struct foc_runtime_lifecycle_result *result
+)
+{
+    (void)serial;
+    return foc_runtime_read_lifecycle_result(runtime, result);
 }
 
 void foc_serial_poll(

@@ -76,6 +76,7 @@ function Get-ThemisCMakeFiles
         "g3/np/CMakeLists.txt",
         "g3/safe/CMakeLists.txt",
         "runtime/CMakeLists.txt",
+        "simulation/CMakeLists.txt",
         "firmware/at32f415/CMakeLists.txt",
         "protocol/CMakeLists.txt",
         "kernel/freertos/CMakeLists.txt",
@@ -141,6 +142,7 @@ function Assert-ChildEntryRules
         (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "g3\np\CMakeLists.txt")),
         (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "g3\safe\CMakeLists.txt")),
         (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "runtime\CMakeLists.txt")),
+        (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "simulation\CMakeLists.txt")),
         (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "firmware\at32f415\CMakeLists.txt")),
         (Resolve-AbsolutePath -Path (Join-Path $RepoRoot "protocol\CMakeLists.txt"))
     )

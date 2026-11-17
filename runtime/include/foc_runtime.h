@@ -98,6 +98,20 @@ enum foc_runtime_clear_result {
     FOC_RUNTIME_CLEAR_REJECTED,
 };
 
+/** Result of a Foreground-published lifecycle request after H0 observation. */
+enum foc_runtime_request_result {
+    /** No request has reached the result publication. */
+    FOC_RUNTIME_REQUEST_NONE,
+    /** The request is stored and waiting for a due H0 boundary. */
+    FOC_RUNTIME_REQUEST_PENDING,
+    /** H0 completed the requested software lifecycle transition. */
+    FOC_RUNTIME_REQUEST_APPLIED,
+    /** H0 rejected the request without applying the transition. */
+    FOC_RUNTIME_REQUEST_REJECTED,
+    /** STOP, a fatal fault, or session invalidation cancelled the request. */
+    FOC_RUNTIME_REQUEST_CANCELLED,
+};
+
 /** Foreground command with a source identity shared by all closed-loop modes. */
 struct foc_runtime_command {
     /** Mode to which this command applies. */
@@ -113,6 +127,42 @@ struct foc_runtime_command {
         /** Mechanical rad/s for VELOCITY or continuous rad for POSITION. */
         float motion_ref;
     } target;
+};
+
+/** Foreground-to-H0 lifecycle request with explicit producer identity. */
+struct foc_runtime_lifecycle_request {
+    /** Existing H0-owned lifecycle action. CLEAR_FAULT is not mailbox-published. */
+    enum foc_runtime_action action;
+    /** Requested mode for SET_MODE; ignored for ARM and START. */
+    enum foc_runtime_mode requested_mode;
+    /** Strictly newer producer sequence, including zero. */
+    uint32_t request_sequence;
+    /** Motion session observed by the producer before publication. */
+    uint32_t source_session;
+    /** Producer timestamp in the same monotonic clock as H0. */
+    uint32_t produced_us;
+};
+
+/** H0-published lifecycle request result. */
+struct foc_runtime_lifecycle_result {
+    /** Terminal or pending request state. */
+    enum foc_runtime_request_result result;
+    /** Action copied from the request for result identity. */
+    enum foc_runtime_action action;
+    /** Mode copied from the request for result identity. */
+    enum foc_runtime_mode requested_mode;
+    /** Request sequence associated with this result. */
+    uint32_t request_sequence;
+    /** Motion session after H0 handled the request. */
+    uint32_t applied_session;
+    /** H0 timestamp that produced the result. */
+    uint32_t h0_us;
+    /** Published Safety state after H0 handling. */
+    enum foc_safe_state state;
+    /** Latched Safety causes after H0 handling. */
+    uint32_t faults;
+    /** Runtime/Pipeline status explaining a rejection or cancellation. */
+    int pipeline_status;
 };
 
 /** Deterministic Host preemption positions. */
@@ -190,7 +240,12 @@ struct foc_runtime_config {
 
 /** Coherent H1 snapshot. */
 struct foc_runtime_sensor {
-    /** Electrical angle in rad for the original exact-alignment configuration. */
+    /**
+     * Electrical phase in rad, from the same capture as position and speed.
+     * Motion-enabled producers supply [0, Float32 2*pi) with poles/offset applied
+     * from this Runtime's immutable rotor config, independently of continuous
+     * Float32 position. Direct-angle mode retains its finite-angle contract.
+     */
     float theta_elec_rad;
     /** Angle capture time in monotonic microseconds. */
     uint32_t captured_us;
@@ -202,6 +257,12 @@ struct foc_runtime_sensor {
     float mechanical_rad;
     /** Coherent mechanical velocity in rad/s when motion feedback is enabled. */
     float mechanical_rad_s;
+    /**
+     * Explicit periodic-phase provenance/admission from the producer; required
+     * only in motion-enabled mode, together with valid. Zero initialization is
+     * not a valid zero angle. No fallback to accumulated mechanical position.
+     */
+    bool electrical_phase_valid;
 };
 
 /** One complete H1 publication. Its sensor timestamp dates angle, speed, and any derived target. */
@@ -411,6 +472,19 @@ struct foc_runtime {
     uint32_t clear_requested_us;
     /** Foreground publishes PENDING; H0 completes or rejects this request. */
     atomic_uint clear_result;
+    /** Foreground-written bounded lifecycle request slots. */
+    struct foc_runtime_lifecycle_request lifecycle_requests[2];
+    /** H0-written bounded lifecycle result slots. */
+    struct foc_runtime_lifecycle_result lifecycle_results[2];
+    /** Published request slot index; release after the complete record write. */
+    atomic_uint lifecycle_request_slot;
+    /** 0 idle, 1 published, 2 claimed by H0. */
+    atomic_uint lifecycle_request_pending;
+    /** Published result slot index; release after the complete result write. */
+    atomic_uint lifecycle_result_slot;
+    /** Last accepted request sequence and whether it has been initialized. */
+    atomic_uint lifecycle_last_sequence;
+    atomic_uint lifecycle_sequence_seen;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -434,6 +508,15 @@ int foc_runtime_publish_command(struct foc_runtime *runtime,
 int foc_runtime_publish_motion_command(struct foc_runtime *runtime,
                                        const struct foc_runtime_command *command,
                                        uint32_t now_us);
+
+/** Publish one bounded ARM, START, or SET_MODE request for the next due H0. */
+int foc_runtime_publish_lifecycle_request(struct foc_runtime *runtime,
+                                          const struct foc_runtime_lifecycle_request *request,
+                                          uint32_t now_us);
+
+/** Read the latest coherent lifecycle result or PENDING request identity. */
+int foc_runtime_read_lifecycle_result(struct foc_runtime *runtime,
+                                      struct foc_runtime_lifecycle_result *result);
 
 /** Validate and publish one due H1 sample. Current time and simulated cost are in µs. */
 int foc_runtime_h1_step(struct foc_runtime *runtime,

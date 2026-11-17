@@ -1,0 +1,25 @@
+{
+  "source_files_before": 2526,
+  "source_files_after": 2533,
+  "changed_existing": [
+    "docs/governance/Themis_工程维护日志.md",
+    "scripts/README.md",
+    "scripts/gates/check_themis_quality_gate.ps1"
+  ],
+  "added": [
+    "docs/evidence/2026-11-17-next-quality-gate-01.md",
+    "docs/evidence/2026-11-17-next-quality-gate-01/README.md",
+    "docs/evidence/2026-11-17-next-quality-gate-01/change-verification.json",
+    "docs/evidence/2026-11-17-next-quality-gate-01/execution-logs.zip",
+    "docs/evidence/2026-11-17-next-quality-gate-01/log-manifest.json",
+    "docs/evidence/2026-11-17-next-quality-gate-01/results.json",
+    "tests/script/test_quality_gate_arguments.ps1"
+  ],
+  "protected_control_and_entry_files_unchanged": 101,
+  "existing_ignored_artifacts_unchanged": 2427,
+  "original_snapshot_unchanged": true,
+  "maintenance_prefix_preserved": true,
+  "main_worktree_unchanged": true,
+  "head": "f115cdf585e74aed512263ca66110a197cad9628",
+  "branch": "codex/falconfoc-v2-vm01a"
+}

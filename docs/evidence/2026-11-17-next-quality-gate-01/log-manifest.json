@@ -1,0 +1,51 @@
+{
+  "archive": "execution-logs.zip",
+  "archive_sha256": "5fbf7613b0bd174c33012bc524a26cd59088be8bf0b5ea391b9eaa2738c924f9",
+  "members": {
+    "actions.txt": {
+      "bytes": 23302,
+      "sha256": "cf709ae437765b1bd84b0581cf8a39e520e9d0f0c89df46442540a3e663b4365"
+    },
+    "before-strict.txt": {
+      "bytes": 9512,
+      "sha256": "056a142fea66d74daf0fd315cec6adb5eb64bc1a06136f2ea25c7408e97e8c42"
+    },
+    "ci-missing-formatter.txt": {
+      "bytes": 9853,
+      "sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003"
+    },
+    "ci.txt": {
+      "bytes": 23302,
+      "sha256": "b6fde6108eb10c00ec165360289e6f3f4eff7f1662fe7425565abdb83dd63961"
+    },
+    "formatter-check-failed.txt": {
+      "bytes": 9846,
+      "sha256": "3f94cb883ee16aabcaf441acb6a57f598e460fdea324b69f7bf366f3c9442528"
+    },
+    "missing-formatter.txt": {
+      "bytes": 9853,
+      "sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003"
+    },
+    "ordinary.txt": {
+      "bytes": 23302,
+      "sha256": "3aa6c92202cbdddf4fd7fcabba025855e74c4c4dbc81ce6e2cf8171aee56b3af"
+    },
+    "other-gate-failed.txt": {
+      "bytes": 14571,
+      "sha256": "940970e6e5c934a01b332a7bc36aa3c033ebd306b6eca9a721e7f69b0499fc71"
+    },
+    "parameter-green.txt": {
+      "bytes": 904,
+      "sha256": "f439cf85244b0adf548465b4d2ec2cd1f34ed9574327e541e810f3fc63954403"
+    },
+    "parameter-red.txt": {
+      "bytes": 1419,
+      "sha256": "f706be377b3a124ffb8c5ce5cc1d006c273ac613adc37ff02bb699c39e417806"
+    },
+    "strict.txt": {
+      "bytes": 23302,
+      "sha256": "92f6349dcb33aa67053a20976626173f7bf340604d4a01585d0e84848f81b962"
+    }
+  },
+  "note": "Byte-exact captured logs are archived; tool-generated trailing whitespace was preserved, not edited to satisfy source whitespace checks."
+}

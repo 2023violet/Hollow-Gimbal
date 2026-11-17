@@ -60,10 +60,24 @@ function Invoke-ChildScript
     # command exit code (e.g. an optional-tool probe) instead of the child's
     # own result. A child process makes $LASTEXITCODE the real child verdict.
     # Diagnostics on the child's stderr must not become terminating errors.
+    # Across powershell -File, true switches need a bare name, not a bool value.
+    # String-valued options (including SkipFormatter) must remain strings.
+    $childArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ScriptPath)
+    foreach ($name in $ParameterMap.Keys) {
+        $value = $ParameterMap[$name]
+        if ($value -is [bool]) {
+            if ($value) {
+                $childArgs += "-$name"
+            }
+        } else {
+            $childArgs += "-$name"
+            $childArgs += [string]$value
+        }
+    }
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @ParameterMap
+        & powershell @childArgs
     } finally {
         $ErrorActionPreference = $prevEap
     }
@@ -148,7 +162,7 @@ function Invoke-CMakeQuality
         $params.RequireFormatter = $true
     }
     if ($SkipFormatter) {
-        $params.SkipFormatter = $true
+        $params.SkipFormatter = "true"
     }
     Invoke-ChildScript -ScriptPath $scriptPath -ParameterMap $params
 }

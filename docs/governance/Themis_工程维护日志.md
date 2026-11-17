@@ -2843,3 +2843,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[证据]` Core 15/15、Runtime 11/11、Core/Simulation ASan/UBSan 15/15；错误分支提交积分的私有变异虽 Core 15/15 仍被独立探针检出。P2-B 保持 OPEN — NEXT-QUALITY-GATE-01。本轮未改生产、正式测试、Golden、PI/Safety/相位链/功率输出。
 - `[交付]` 用户最新明确要求每轮完成后提交推送，覆盖附件旧 Commit/Push 禁令；此前已完成 VM/相位成果与本轮审查文档分开提交，推送 codex/falconfoc-v2-vm01a，不合并主分支。审查期只读验证与提交期身份变化分开记录。报告 docs/evidence/2026-11-17-next-code-review-03.md；完整探针/构建保留外部新目录，既有产物不清理。
 - `[边界]` G3-PWR LOCKED；硬件安全、MCU WCET/栈高水位、真实电机运行仍未验证。本轮不自动修复或进入下一文件。
+
+## 2026-11-17 FalconFOC V2 NEXT-QUALITY-GATE-01 严格门禁修复
+
+- [实现] 仅 canonical Gate 以 argv 数组转发：bool true 为裸 Switch、false 省略；SkipFormatter 明确为 String=true。保留独立 PowerShell 子进程、原非零失败传播、两个包装入口及所有 Scope 语义。
+- [RED/GREEN] 新 tests/script/test_quality_gate_arguments.ps1 在旧 helper 上真实 SwitchParameter 绑定失败，修复后 31 断言通过；覆盖实际类型、空格路径、native exit 隔离、CI/Actions、Formatter 与其他子 Gate 失败。
+- [实跑] 普通/显式 strict/CI=true/GITHUB_ACTIONS=true 的 Scope all 均退出 0，分别真实检查 30 个 CMake 文件并通过 Host 45/45；Scope falconfoc、Source 81/9/9、直接 CMake 普通/strict 通过。真实入口缺 Formatter、Formatter exit9、后续 cmake exit7 均正确失败。
+- [保护/遗留] 所有控制器/正式 CMake/Board/Safety/输出权限不变，既有构建产物保留；额外旧 lite contract 引用移除的 AT32F403A，在前后快照同样失败且不在 live Gate 链，单独保留待清理。本轮不顺手修复或覆盖旧审计结论。
+- [交付] 报告 docs/evidence/2026-11-17-next-quality-gate-01.md；P2-B 由本记录关闭。仅暂存本任务文件，普通提交推送同名开发分支并核对远端，不合并/force/改历史，不进入 Motion 或硬件任务。

@@ -1,0 +1,819 @@
+{
+  "baseline_head": "f115cdf585e74aed512263ca66110a197cad9628",
+  "branch": "codex/falconfoc-v2-vm01a",
+  "powershell_version": {
+    "PSVersion": {
+      "Major": 5,
+      "Minor": 1,
+      "Build": 19041,
+      "Revision": 6456,
+      "MajorRevision": 0,
+      "MinorRevision": 6456
+    },
+    "PSEdition": "Desktop",
+    "PSCompatibleVersions": [
+      {
+        "Major": 1,
+        "Minor": 0,
+        "Build": -1,
+        "Revision": -1,
+        "MajorRevision": -1,
+        "MinorRevision": -1
+      },
+      {
+        "Major": 2,
+        "Minor": 0,
+        "Build": -1,
+        "Revision": -1,
+        "MajorRevision": -1,
+        "MinorRevision": -1
+      },
+      {
+        "Major": 3,
+        "Minor": 0,
+        "Build": -1,
+        "Revision": -1,
+        "MajorRevision": -1,
+        "MinorRevision": -1
+      },
+      {
+        "Major": 4,
+        "Minor": 0,
+        "Build": -1,
+        "Revision": -1,
+        "MajorRevision": -1,
+        "MinorRevision": -1
+      },
+      {
+        "Major": 5,
+        "Minor": 0,
+        "Build": -1,
+        "Revision": -1,
+        "MajorRevision": -1,
+        "MinorRevision": -1
+      },
+      {
+        "Major": 5,
+        "Minor": 1,
+        "Build": 19041,
+        "Revision": 6456,
+        "MajorRevision": 0,
+        "MinorRevision": 6456
+      }
+    ],
+    "BuildVersion": {
+      "Major": 10,
+      "Minor": 0,
+      "Build": 19041,
+      "Revision": 6456,
+      "MajorRevision": 0,
+      "MinorRevision": 6456
+    },
+    "CLRVersion": {
+      "Major": 4,
+      "Minor": 0,
+      "Build": 30319,
+      "Revision": 42000,
+      "MajorRevision": 0,
+      "MinorRevision": -23536
+    },
+    "WSManStackVersion": {
+      "Major": 3,
+      "Minor": 0,
+      "Build": -1,
+      "Revision": -1,
+      "MajorRevision": -1,
+      "MinorRevision": -1
+    },
+    "PSRemotingProtocolVersion": {
+      "Major": 2,
+      "Minor": 3,
+      "Build": -1,
+      "Revision": -1,
+      "MajorRevision": -1,
+      "MinorRevision": -1
+    },
+    "SerializationVersion": {
+      "Major": 1,
+      "Minor": 1,
+      "Build": 0,
+      "Revision": 1,
+      "MajorRevision": 0,
+      "MinorRevision": 1
+    }
+  },
+  "formal_assertions": 31,
+  "results": {
+    "ordinary": {
+      "exit": 0,
+      "formatter_files_checked": 30,
+      "legacy_host_passed": 45,
+      "process_environment": {
+        "CI": null,
+        "GITHUB_ACTIONS": null
+      },
+      "log_sha256": "3aa6c92202cbdddf4fd7fcabba025855e74c4c4dbc81ce6e2cf8171aee56b3af"
+    },
+    "strict": {
+      "exit": 0,
+      "formatter_files_checked": 30,
+      "legacy_host_passed": 45,
+      "process_environment": {
+        "CI": null,
+        "GITHUB_ACTIONS": null
+      },
+      "log_sha256": "92f6349dcb33aa67053a20976626173f7bf340604d4a01585d0e84848f81b962"
+    },
+    "ci": {
+      "exit": 0,
+      "formatter_files_checked": 30,
+      "legacy_host_passed": 45,
+      "process_environment": {
+        "CI": "true",
+        "GITHUB_ACTIONS": null
+      },
+      "log_sha256": "b6fde6108eb10c00ec165360289e6f3f4eff7f1662fe7425565abdb83dd63961"
+    },
+    "actions": {
+      "exit": 0,
+      "formatter_files_checked": 30,
+      "legacy_host_passed": 45,
+      "process_environment": {
+        "CI": null,
+        "GITHUB_ACTIONS": "true"
+      },
+      "log_sha256": "cf709ae437765b1bd84b0581cf8a39e520e9d0f0c89df46442540a3e663b4365"
+    },
+    "before-strict": {
+      "exit": 1,
+      "classification": "ARGUMENT_BINDING_FAILURE"
+    },
+    "before-ci": {
+      "exit": 1,
+      "classification": "ARGUMENT_BINDING_FAILURE"
+    },
+    "before-actions": {
+      "exit": 1,
+      "classification": "ARGUMENT_BINDING_FAILURE"
+    },
+    "missing-formatter": {
+      "exit": 1,
+      "classification": "FORMATTER_NOT_INSTALLED",
+      "expected_rejection": true,
+      "log_sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003"
+    },
+    "ci-missing-formatter": {
+      "exit": 1,
+      "classification": "FORMATTER_NOT_INSTALLED",
+      "expected_rejection": true,
+      "log_sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003"
+    },
+    "formatter-check-failed": {
+      "exit": 1,
+      "classification": "FORMATTER_CHECK_FAILED",
+      "expected_rejection": true,
+      "log_sha256": "3f94cb883ee16aabcaf441acb6a57f598e460fdea324b69f7bf366f3c9442528"
+    },
+    "other-gate-failed": {
+      "exit": 1,
+      "classification": "OTHER_GATE_FAILURE",
+      "expected_rejection": true,
+      "log_sha256": "940970e6e5c934a01b332a7bc36aa3c033ebd306b6eca9a721e7f69b0499fc71"
+    }
+  },
+  "source_contract": "81 C/H, 9 CMake, 9 README; exit 0",
+  "cmake_quality": "ordinary and RequireFormatter both exit 0; actual declared set is 30 files",
+  "falconfoc_scope": "exit 0; original explicit formatter/firmware-CLI/Host skips preserved",
+  "unchanged_entry_wrappers_and_cmake_quality": [
+    "scripts/check_themis_quality_gate.ps1",
+    "scripts/check_cmake_quality.ps1",
+    "scripts/gates/check_cmake_quality.ps1"
+  ],
+  "control_suite_reexecution": "Not rerun in this script-only task. Core/Runtime/Simulation/Board/CLI entry files and all controller sources remain identical to baseline.",
+  "isolation": {
+    "repo": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+    "temp": "D:\\qg01-afa017f6",
+    "legacy_artifacts": [
+      {
+        "path": "build\\fw-tiny-carrier-minsizerel\\output\\falcon-foc-at32.elf",
+        "sha256": "d14d0b954733dcb0b499254927301eab14b9e474518ae2cd78e6b0579b53745e",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      },
+      {
+        "path": "build\\fw-tiny-carrier-minsizerel\\output\\falcon-foc-at32.map",
+        "sha256": "3446c223449fa664d52c522a9bba58d0b011ffc0b1b657688bf3806afb6690e4",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      },
+      {
+        "path": "build\\fw-standard-carrier-minsizerel\\output\\falcon-foc-at32.elf",
+        "sha256": "258baa189100b0379297f5ca9f47b0dd840ac41022b178c8bbc2c5bcae7c3f20",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      },
+      {
+        "path": "build\\fw-standard-carrier-minsizerel\\output\\falcon-foc-at32.map",
+        "sha256": "cdad600ad0d2c2fcceb9bd48015893721bc6442c764fbe8557479fbcdaeda144",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      },
+      {
+        "path": "build\\fw-full-diag-carrier-debug\\output\\falcon-foc-at32.elf",
+        "sha256": "80e7563d2e9a7558502067da046a06892f43d98174d56b76ae3d6c7afd2b12ae",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      },
+      {
+        "path": "build\\fw-full-diag-carrier-debug\\output\\falcon-foc-at32.map",
+        "sha256": "735c22078bb7c94e240d02304db61754d978cdfd7c7be6660ae303eabad3c176",
+        "origin": "copied historical artifact, not a fresh ARM build"
+      }
+    ]
+  },
+  "known_unrelated_failure": {
+    "script": "tests/script/test_falconfoc_themis_lite_contract.ps1",
+    "exit_before": 1,
+    "exit_after": 1,
+    "classification": "OTHER_GATE_FAILURE (pre-existing non-live contract)",
+    "reason": "References removed platform/at/at32f403a/ThemisPlatformDefaults.cmake; not called by live Scope all.",
+    "action": "Preserved; report as a separate legacy-contract cleanup follow-up. No scope expansion."
+  },
+  "harness_corrections": [
+    "Initial extra lite-contract invocation used the log directory as cwd; rerun from repo reached the independent pre-existing removed-platform failure, reproduced on baseline.",
+    "An old assumed formatter count of 29 was corrected to the actual declared 30; the gate had exited 0 and original log was preserved.",
+    "Native cmake failure is observed in CMake smoke, since preset contract is static; evidence validates the actual failed stage."
+  ],
+  "commands": [
+    {
+      "name": "argument-contract",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\Hollow-Gimbal-vm01a\\tests\\script\\test_quality_gate_arguments.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\Hollow-Gimbal-vm01a"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:27:07.585534+00:00",
+      "finished_utc": "2026-11-17T13:27:11.213496+00:00",
+      "log_sha256": "f706be377b3a124ffb8c5ce5cc1d006c273ac613adc37ff02bb699c39e417806",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red\\argument-contract.log"
+    },
+    {
+      "name": "argument-contract",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\Hollow-Gimbal-vm01a\\tests\\script\\test_quality_gate_arguments.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\Hollow-Gimbal-vm01a"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:28:47.309091+00:00",
+      "finished_utc": "2026-11-17T13:29:40.425248+00:00",
+      "log_sha256": "03534ae3e2dbab9b9e5866f4d252da71d2d9f5796d37ad3385455a1d87702e93",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green\\argument-contract.log"
+    },
+    {
+      "name": "clone",
+      "command": [
+        "git",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--single-branch",
+        "--branch",
+        "codex/falconfoc-v2-vm01a",
+        "D:\\study\\Software\\Hollow-Gimbal-vm01a",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:28:36.722629+00:00",
+      "finished_utc": "2026-11-17T13:28:39.647990+00:00",
+      "log_sha256": "00a8e761554eda3b5e12daa512989a039f9678a4a23b489c6e2ce9a7e51b7225",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\clone.log"
+    },
+    {
+      "name": "powershell-version",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "$PSVersionTable | ConvertTo-Json -Compress"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:28:42.438714+00:00",
+      "finished_utc": "2026-11-17T13:28:42.765807+00:00",
+      "log_sha256": "9cb2008bc1b34bb5d260676966797eeaa49c838e62571ead012e004e4a1c88ea",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\powershell-version.log"
+    },
+    {
+      "name": "seed-gcc",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\flows\\host\\run_host_tests.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-CompilerPath",
+        "C:/mingw64/bin/gcc.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:28:42.774389+00:00",
+      "finished_utc": "2026-11-17T13:29:21.352878+00:00",
+      "log_sha256": "3e2322094b9edbfaebdf9efcec58bc318150e8fac5adf1925e62671e042af2d1",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\seed-gcc.log"
+    },
+    {
+      "name": "formatter-installed",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_cmake_quality.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-RequireFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:29:21.366558+00:00",
+      "finished_utc": "2026-11-17T13:29:46.119842+00:00",
+      "log_sha256": "4d36207edcb487ce4bf208af6eedf727c7706dd06901de45171ff675085a07f1",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\formatter-installed.log"
+    },
+    {
+      "name": "ordinary",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:29:46.134032+00:00",
+      "finished_utc": "2026-11-17T13:31:04.619590+00:00",
+      "log_sha256": "2d8fa972ad2a1c68b4d67585c3410bf463533d8125d16b9c442b5df47b41eb18",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\ordinary.log"
+    },
+    {
+      "name": "strict",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all",
+        "-RequireCMakeFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:31:04.627912+00:00",
+      "finished_utc": "2026-11-17T13:31:06.765236+00:00",
+      "log_sha256": "056a142fea66d74daf0fd315cec6adb5eb64bc1a06136f2ea25c7408e97e8c42",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\strict.log"
+    },
+    {
+      "name": "ci",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:31:06.775659+00:00",
+      "finished_utc": "2026-11-17T13:31:08.721382+00:00",
+      "log_sha256": "056a142fea66d74daf0fd315cec6adb5eb64bc1a06136f2ea25c7408e97e8c42",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\ci.log"
+    },
+    {
+      "name": "actions",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:31:08.731240+00:00",
+      "finished_utc": "2026-11-17T13:31:10.444412+00:00",
+      "log_sha256": "056a142fea66d74daf0fd315cec6adb5eb64bc1a06136f2ea25c7408e97e8c42",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\red-live\\actions.log"
+    },
+    {
+      "name": "arguments",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\tests\\script\\test_quality_gate_arguments.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:35:26.564120+00:00",
+      "finished_utc": "2026-11-17T13:36:53.662860+00:00",
+      "log_sha256": "f439cf85244b0adf548465b4d2ec2cd1f34ed9574327e541e810f3fc63954403",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\arguments.log"
+    },
+    {
+      "name": "cmake-ordinary",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_cmake_quality.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:36:53.675438+00:00",
+      "finished_utc": "2026-11-17T13:37:44.856936+00:00",
+      "log_sha256": "4d36207edcb487ce4bf208af6eedf727c7706dd06901de45171ff675085a07f1",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\cmake-ordinary.log"
+    },
+    {
+      "name": "cmake-strict",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_cmake_quality.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-RequireFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:37:44.860388+00:00",
+      "finished_utc": "2026-11-17T13:38:31.702770+00:00",
+      "log_sha256": "4d36207edcb487ce4bf208af6eedf727c7706dd06901de45171ff675085a07f1",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\cmake-strict.log"
+    },
+    {
+      "name": "source-contract",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\gates\\check_falconfoc_source_contract.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:38:31.704798+00:00",
+      "finished_utc": "2026-11-17T13:38:34.526334+00:00",
+      "log_sha256": "8a792cb045e923a8ea9e45bea5362cb46dfca8a595ca187020e7b4900301b0a0",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\source-contract.log"
+    },
+    {
+      "name": "falconfoc",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "falconfoc"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:38:34.542860+00:00",
+      "finished_utc": "2026-11-17T13:39:44.598878+00:00",
+      "log_sha256": "b1bdb223af99d5928edbfd830e20e70e5672e6d3e0f192637eb0bfc13adeb8af",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\falconfoc.log"
+    },
+    {
+      "name": "ordinary",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:39:44.616096+00:00",
+      "finished_utc": "2026-11-17T13:42:18.174585+00:00",
+      "log_sha256": "3aa6c92202cbdddf4fd7fcabba025855e74c4c4dbc81ce6e2cf8171aee56b3af",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\ordinary.log"
+    },
+    {
+      "name": "strict",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all",
+        "-RequireCMakeFormatter",
+        "-Summary"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:44:02.287304+00:00",
+      "finished_utc": "2026-11-17T13:48:10.189970+00:00",
+      "log_sha256": "92f6349dcb33aa67053a20976626173f7bf340604d4a01585d0e84848f81b962",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\strict.log"
+    },
+    {
+      "name": "ci",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:48:10.208315+00:00",
+      "finished_utc": "2026-11-17T13:50:39.542296+00:00",
+      "log_sha256": "b6fde6108eb10c00ec165360289e6f3f4eff7f1662fe7425565abdb83dd63961",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\ci.log"
+    },
+    {
+      "name": "actions",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:50:39.559344+00:00",
+      "finished_utc": "2026-11-17T13:51:40.175595+00:00",
+      "log_sha256": "cf709ae437765b1bd84b0581cf8a39e520e9d0f0c89df46442540a3e663b4365",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\green-live\\actions.log"
+    },
+    {
+      "name": "no-formatter-preflight",
+      "command": [
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-Command",
+        "if ((Get-Command cmake-format,python -ErrorAction SilentlyContinue)) { throw \"Formatter unexpectedly visible\" }; Write-Output \"FORMATTER_NOT_INSTALLED\""
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:38:10.322550+00:00",
+      "finished_utc": "2026-11-17T13:38:11.245267+00:00",
+      "log_sha256": "ea711bb911e9f92082f6f91ac28d3714e58445af93f55ae484ef1b44dd553bb6",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives\\no-formatter-preflight.log"
+    },
+    {
+      "name": "missing-formatter",
+      "command": [
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all",
+        "-RequireCMakeFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:38:11.269115+00:00",
+      "finished_utc": "2026-11-17T13:38:18.670631+00:00",
+      "log_sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives\\missing-formatter.log"
+    },
+    {
+      "name": "ci-missing-formatter",
+      "command": [
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:38:18.681965+00:00",
+      "finished_utc": "2026-11-17T13:38:31.127263+00:00",
+      "log_sha256": "84cc43fc2ec9942240deb96fcd98ba2003f0d14bac2a6a20402b1bb06cb0b003",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives\\ci-missing-formatter.log"
+    },
+    {
+      "name": "formatter-check-failed",
+      "command": [
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all",
+        "-RequireCMakeFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:38:31.144844+00:00",
+      "finished_utc": "2026-11-17T13:38:39.543346+00:00",
+      "log_sha256": "3f94cb883ee16aabcaf441acb6a57f598e460fdea324b69f7bf366f3c9442528",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives\\formatter-check-failed.log"
+    },
+    {
+      "name": "other-gate-failed",
+      "command": [
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\scripts\\check_themis_quality_gate.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+        "-Scope",
+        "all",
+        "-RequireCMakeFormatter"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T13:38:39.555517+00:00",
+      "finished_utc": "2026-11-17T13:40:13.344031+00:00",
+      "log_sha256": "940970e6e5c934a01b332a7bc36aa3c033ebd306b6eca9a721e7f69b0499fc71",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\real-negatives\\other-gate-failed.log"
+    },
+    {
+      "name": "lite-contract",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\tests\\script\\test_falconfoc_themis_lite_contract.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\contracts",
+      "exit": 1,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T13:38:21.261459+00:00",
+      "finished_utc": "2026-11-17T13:38:22.753898+00:00",
+      "log_sha256": "971d07f21fe3ec85df3b7641012e9d915994ba20ff5a1db5697d4986c2d46afb",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\contracts\\lite-contract.log"
+    },
+    {
+      "name": "lite-contract-repo-cwd",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo\\tests\\script\\test_falconfoc_themis_lite_contract.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\gate-repo",
+      "exit": 1,
+      "expected_exit": [
+        0,
+        1
+      ],
+      "started_utc": "2026-11-17T13:39:39.283680+00:00",
+      "finished_utc": "2026-11-17T13:39:41.510513+00:00",
+      "log_sha256": "6b2a76824eebb3dcbba945aed45477957d4e57c7d1a9df350d07ddd0d269cacf",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\contracts\\lite-contract-repo-cwd.log"
+    },
+    {
+      "name": "lite-contract-baseline",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\snapshot\\tests\\script\\test_falconfoc_themis_lite_contract.ps1",
+        "-RepoRoot",
+        "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\snapshot"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\snapshot",
+      "exit": 1,
+      "expected_exit": [
+        0,
+        1
+      ],
+      "started_utc": "2026-11-17T13:39:45.653530+00:00",
+      "finished_utc": "2026-11-17T13:39:48.086974+00:00",
+      "log_sha256": "a04da4922625f0dde321eb47f81bc848b3b35b0370b59eea96b53a9c3984de5a",
+      "log": "D:\\study\\Software\\FalconFOC-quality-gate-01-20261117\\contracts\\lite-contract-baseline.log"
+    }
+  ]
+}

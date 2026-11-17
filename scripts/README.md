@@ -39,6 +39,31 @@ Layout:
 The current live board lane is a minimal FalconFoc smoke/regression surface.
 Archived product-specific probe flows are not part of the live script contract.
 
+## Windows PowerShell quality-gate regression
+
+For changes to the quality gate, run its isolated parameter/behavior contract:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/script/test_quality_gate_arguments.ps1 -RepoRoot <repo-root>
+```
+
+The test needs Windows PowerShell and Git, adds no dependencies, and uses only
+its own temporary fixtures. It checks actual child Switch/String values, paths
+with spaces, native exit-code isolation, strict/CI policy, formatter failures,
+scope selection, and downstream failure propagation. Formatter fault injection
+uses a temporary command; it never reformats or corrupts product CMake files.
+
+For complete real-tool verification use `scripts/check_themis_quality_gate.ps1
+-Scope all -RequireCMakeFormatter`. `CI=true` or `GITHUB_ACTIONS=true` enables
+the same formatter requirement. Missing formatters fail these full strict
+lanes. The existing `-Scope falconfoc` source lane retains its explicit
+formatter/firmware-CLI/Host-test skips; use `all` for complete acceptance.
+
+The gate keeps an independent `powershell -File` child for each check. In its
+internal parameter map, Boolean values denote switches: true emits a bare
+parameter name and false omits it. String options, including `SkipFormatter`,
+must be supplied as strings. Nonzero child exits still fail the aggregate gate.
+
 Bench firmware boundary:
 
 - `fw-full-diag-carrier-bench-debug` is a dedicated AT32F415 diagnostic image;

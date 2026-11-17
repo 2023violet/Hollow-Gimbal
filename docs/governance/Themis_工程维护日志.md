@@ -2851,3 +2851,13 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - [实跑] 普通/显式 strict/CI=true/GITHUB_ACTIONS=true 的 Scope all 均退出 0，分别真实检查 30 个 CMake 文件并通过 Host 45/45；Scope falconfoc、Source 81/9/9、直接 CMake 普通/strict 通过。真实入口缺 Formatter、Formatter exit9、后续 cmake exit7 均正确失败。
 - [保护/遗留] 所有控制器/正式 CMake/Board/Safety/输出权限不变，既有构建产物保留；额外旧 lite contract 引用移除的 AT32F403A，在前后快照同样失败且不在 live Gate 链，单独保留待清理。本轮不顺手修复或覆盖旧审计结论。
 - [交付] 报告 docs/evidence/2026-11-17-next-quality-gate-01.md；P2-B 由本记录关闭。仅暂存本任务文件，普通提交推送同名开发分支并核对远端，不合并/force/改历史，不进入 Motion 或硬件任务。
+
+
+## 2026-11-17 FalconFOC V2 NEXT-MOTION-CONTRACT-01 数值合同与错误原子性
+
+- [测试] 既有 Motion CTest 新增正负 Ki trial/P requested 溢出反例：0.25 积分及全部逻辑状态保留、预填输出清零、disabled/非法输入与同实例恢复；旧正常/饱和测试保留。
+- [数值] 独立 Double 时间/相位/数学周期 Oracle，名义域有界相位、|omega_e|≤7000 rad/s、0..650 us、Board默认模型设置，74684 样本最大误差1.0674847210623284e-6 rad，小于2e-6预算。高速度域外样本OK但误差0.0015148064769334724 rad，仅作为限制观测。
+- [负向] 三类提前提交积分及一类预测时间换算变异均独立成功编译：旧Core15/15通过，新正式测试行为断言失败。首轮复制mtime导致未重编译的无效尝试单独保留排除，有效变异均使用全新构建。
+- [回归] Core Clang/GCC各15/15、Runtime11/11、Simulation15/15；Core/Simulation ASan+UBSan各15/15；Source81/9/9、修改C/H格式、严格Scope all含30项CMake格式和Legacy Host45/45通过。原15个Core CTest入口保持。
+- [范围] 仅测试、Motion头注释/Core说明、新证据及本日志；生产Motion/参数/Board1/Safety/PWM/UART/整数相位/Golden均未改。区分准入、计算回归与系统总误差；max_error仅约束加速度模型贡献，不称控制品质提升或任意输入精度保证。2427个旧ignored产物保留；Gate使用的6个Legacy ELF/MAP为核对SHA的历史副本，非新ARM重建。
+- [交付/边界] 报告docs/evidence/2026-11-17-next-motion-contract-01.md，软件验收PASS，按本轮第7节先请求确认，用户明确批准后才普通commit/push并读回远端核对；最终SHA单独记录，保护收据保留确认前时点。不自动进入下一轮。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。

@@ -6,7 +6,7 @@
  *
  * Design overview
  * ---------------
- * Recompute rotor mapping, velocity PI, position P, and trajectory bounds
+ * Recompute rotor mapping, prediction, velocity PI, position P, and trajectory bounds
  * from their equations. Production functions are only used to obtain the
  * result under test.
  *
@@ -25,14 +25,30 @@
 #include "foc_motion.h"
 #include "foc_trajectory.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 
 /* Private Constants ------------------------------------------------------------ */
 
+_Static_assert(
+    FLT_RADIX == 2 && FLT_MANT_DIG == 24 && DBL_MANT_DIG >= 53,
+    "Motion numeric regression requires binary32 float and binary64-or-wider double"
+);
+
 static const double REF_PI = 3.14159265358979323846;
 static const double REF_TWO_PI = 6.28318530717958647692;
+static const double PREDICTION_ERROR_BUDGET_RAD = 2.0e-6;
+
+/* Private Types ---------------------------------------------------------------- */
+
+struct prediction_reference_stats {
+    unsigned int cases;
+    double maximum_error_rad;
+    struct foc_electrical_state worst;
+    uint32_t worst_age_us;
+};
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -81,10 +97,153 @@ static int fail_value(const char *name, unsigned int index, double actual, doubl
     return 1;
 }
 
+static int check_prediction(
+    float theta,
+    float omega,
+    uint32_t age_us,
+    struct prediction_reference_stats *stats
+)
+{
+    /* Board default model policy; reference time and phase never use Float32 math. */
+    const struct foc_prediction_config config = {650U, 2000.0f, 0.00065f};
+    const float tau = 6.28318530717958647692f;
+    const struct foc_electrical_state sample = {theta, omega};
+    const double dt_s = (double)age_us / 1000000.0;
+    const double expected = wrap_angle((double)theta + (double)omega * dt_s);
+    float actual = 1.0f;
+    const int status = foc_rotor_predict(&config, &sample, age_us, &actual);
+    const double error = fabs(remainder((double)actual - expected, REF_TWO_PI));
+    if (!(theta >= 0.0f && theta < tau && fabsf(omega) <= 7000.0f && age_us <= 650U) ||
+        status != FOC_STATUS_OK || !isfinite(actual) || actual < 0.0f || actual >= tau ||
+        !isfinite(error) || error > PREDICTION_ERROR_BUDGET_RAD) {
+        fprintf(
+            stderr,
+            "prediction mismatch case=%u theta=%.17g omega=%.17g age_us=%u actual=%.17g "
+            "reference=%.17g circular_error=%.17g budget=%.17g model=%.17g status=%d\n",
+            stats->cases,
+            (double)theta,
+            (double)omega,
+            age_us,
+            (double)actual,
+            expected,
+            error,
+            PREDICTION_ERROR_BUDGET_RAD,
+            0.5 * (double)config.max_accel_rad_s2 * dt_s * dt_s,
+            status
+        );
+        return 1;
+    }
+    ++stats->cases;
+    if (error > stats->maximum_error_rad) {
+        stats->maximum_error_rad = error;
+        stats->worst = sample;
+        stats->worst_age_us = age_us;
+    }
+    return 0;
+}
+
+static int test_prediction_reference(void)
+{
+    const float tau = 6.28318530717958647692f;
+    const float angles[] = {
+        0.0f,
+        nextafterf(0.0f, 1.0f),
+        0.02f,
+        0.35820722579956055f,
+        (float)REF_PI,
+        nextafterf(tau, 0.0f)
+    };
+    const float speeds[] = {
+        -7000.0f,
+        -4000.0f,
+        -1000.0f,
+        -10.0f,
+        -1.0f,
+        -1.0e-6f,
+        0.0f,
+        1.0e-6f,
+        1.0f,
+        10.0f,
+        1000.0f,
+        4000.0f,
+        7000.0f
+    };
+    struct prediction_reference_stats stats = {0};
+    for (unsigned angle = 0U; angle < sizeof(angles) / sizeof(angles[0]); ++angle) {
+        for (unsigned speed = 0U; speed < sizeof(speeds) / sizeof(speeds[0]); ++speed) {
+            for (uint32_t age = 0U; age <= 650U; ++age) {
+                if (check_prediction(angles[angle], speeds[speed], age, &stats) != 0) {
+                    return 1;
+                }
+            }
+        }
+    }
+    /* Place samples on both sides of a predicted cycle boundary at every age. */
+    for (int direction = -1; direction <= 1; direction += 2) {
+        const float speed = (float)direction * 7000.0f;
+        for (uint32_t age = 0U; age <= 650U; ++age) {
+            const float boundary = (float)wrap_angle(-(double)speed * (double)age / 1000000.0);
+            const float adjacent[] =
+                {boundary, nextafterf(boundary, 0.0f), nextafterf(boundary, tau)};
+            for (unsigned i = 0U; i < 3U; ++i) {
+                if (check_prediction(adjacent[i], speed, age, &stats) != 0) {
+                    return 1;
+                }
+            }
+        }
+    }
+    uint32_t seed = UINT32_C(0x0c012026);
+    for (unsigned int i = 0U; i < 20000U; ++i) {
+        const float theta = random_float(&seed, 0.0f, nextafterf(tau, 0.0f));
+        const float omega = random_float(&seed, -7000.0f, 7000.0f);
+        const uint32_t age = next_random(&seed) % 651U;
+        if (check_prediction(theta, omega, age, &stats) != 0) {
+            return 1;
+        }
+    }
+    printf(
+        "prediction_nominal cases=%u ages=0..650 max_error=%.17g budget=%.17g "
+        "theta=%.17g omega=%.17g age_us=%u seed=0x0c012026\n",
+        stats.cases,
+        stats.maximum_error_rad,
+        PREDICTION_ERROR_BUDGET_RAD,
+        (double)stats.worst.angle_rad,
+        (double)stats.worst.velocity_rad_s,
+        stats.worst_age_us
+    );
+
+    /* Observe a documented domain limit; do not require inaccurate behavior to persist. */
+    const struct foc_prediction_config policy = {400U, 2000.0f, 0.0003f};
+    const struct foc_electrical_state high_speed = {0.35820722579956055f, 65535000.0f};
+    float actual = 0.0f;
+    const int status = foc_rotor_predict(&policy, &high_speed, 400U, &actual);
+    const double expected = wrap_angle(
+        (double)high_speed.angle_rad + (double)high_speed.velocity_rad_s * (400.0 / 1000000.0)
+    );
+    const double error = fabs(remainder((double)actual - expected, REF_TWO_PI));
+    printf(
+        "prediction_outside_nominal theta=%.17g omega=%.17g age_us=400 actual=%.17g "
+        "reference=%.17g circular_error=%.17g model=0.00016 nominal_budget_applies=0 status=%d\n",
+        (double)high_speed.angle_rad,
+        (double)high_speed.velocity_rad_s,
+        (double)actual,
+        expected,
+        error,
+        status
+    );
+    return status == FOC_STATUS_OK && isfinite(actual) && actual >= 0.0f && actual < tau &&
+            isfinite(error)
+        ? 0
+        : 1;
+}
+
 /* Public Functions ------------------------------------------------------------- */
 
 int main(void)
 {
+    if (test_prediction_reference() != 0) {
+        return 1;
+    }
     uint32_t seed = 0x5a17c0deU;
     struct foc_rotor_config rotor = {.pole_pairs = 7U, .electrical_offset_rad = 0.37f};
     struct foc_velocity_config velocity_config = {

@@ -62,7 +62,7 @@ struct foc_prediction_config {
     uint32_t max_prediction_us;
     /** Assumed upper bound on absolute electrical acceleration in rad/s². */
     float max_accel_rad_s2;
-    /** Maximum permitted extrapolation error contribution in rad. */
+    /** Limit on 0.5 * max_accel * dt^2 in rad; excludes numeric and sensor errors. */
     float max_error_rad;
 };
 
@@ -160,6 +160,21 @@ int foc_rotor_electrical(const struct foc_rotor_config *config,
 /**
  * Extrapolate a trusted electrical sample with constant velocity.
  *
+ * Admission checks finite settings/sample, nonnegative model bounds, horizon
+ * below the clock half range, elapsed age, and the acceleration contribution
+ * 0.5 * max_accel * dt^2. Normalization rejects a non-finite computed phase.
+ * OK means these checks passed; it does not certify arbitrary-input accuracy.
+ *
+ * Host numeric regression uses bounded phase [0, Float32 2*pi), |speed| <= 7000
+ * rad/s and integer ages 0..650 us with the default Board model policy
+ * (650 us, 2000 rad/s^2, 0.00065 rad). Its sampled binary32 arithmetic budget
+ * is 2e-6 rad against an independent double reference, not an all-input proof.
+ * See the Core README for test assumptions and inputs outside this envelope.
+ *
+ * max_error_rad limits only the assumed acceleration-model contribution.
+ * Source phase/velocity uncertainty, sensor quantization and timestamp errors,
+ * and Float32 calculation error require separate budgets from the caller.
+ *
  * @param config Horizon, acceleration assumption and error limit.
  * @param sample Finite electrical angle and speed at the same instant.
  * @param elapsed_us Forward age in µs, established by caller's modular clock check.
@@ -182,6 +197,11 @@ int foc_velocity_reset(struct foc_velocity_context *context);
 
 /**
  * Compute one limited q current request and conditionally integrate.
+ *
+ * Validation/calculation failure leaves all context fields unchanged and clears
+ * every output field. A valid disabled step also clears output and freezes
+ * state; disabling does not bypass input validation. Integral state is committed
+ * only after the complete enabled calculation succeeds.
  *
  * @param context Initialized instance or its caller-owned trial copy.
  * @param input Read-only snapshot with an actual interval and a live current limit.

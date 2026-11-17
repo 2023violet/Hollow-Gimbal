@@ -1,0 +1,1214 @@
+{
+  "baseline": "6b151a1ca745a37b0cd044528058f34b09834919",
+  "branch": "codex/falconfoc-v2-vm01a",
+  "software_verdict": "PASS",
+  "git_delivery": "USER_APPROVED; FINAL_REMOTE_VERIFICATION_RECORDED_SEPARATELY",
+  "production_motion_sha256": "2c91ab2fcf2b202d3f94e199c1b31642f81cea2e51dbdb320194639680249174",
+  "G1": {
+    "count": 15,
+    "commands": [
+      {
+        "name": "configure",
+        "command": [
+          "cmake",
+          "-S",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core\\source\\core",
+          "-B",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core\\build",
+          "-G",
+          "Ninja",
+          "-DCMAKE_BUILD_TYPE=Debug",
+          "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:28:27.646110+00:00",
+        "finished_utc": "2026-11-17T15:28:31.210820+00:00",
+        "log_sha256": "25ab32251da3a02801764c31936438ae1def06002a61c164c188ce12b8a46dfd"
+      },
+      {
+        "name": "build",
+        "command": [
+          "cmake",
+          "--build",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core\\build",
+          "--parallel",
+          "4"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:28:31.218864+00:00",
+        "finished_utc": "2026-11-17T15:28:34.185945+00:00",
+        "log_sha256": "c3646ccc68afa491368b88196350cfdd8f9c15c863a778c0e3ee3f4457ae2809"
+      },
+      {
+        "name": "ctest",
+        "command": [
+          "ctest",
+          "--test-dir",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core\\build",
+          "--output-on-failure"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\tests\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:28:34.192503+00:00",
+        "finished_utc": "2026-11-17T15:28:36.727617+00:00",
+        "log_sha256": "d863f89c60a289da65ec6b35047ab4e5c901e74a62483cefd24f948cdbc2881e"
+      }
+    ]
+  },
+  "G2": {
+    "count": 15,
+    "commands": [
+      {
+        "name": "configure",
+        "command": [
+          "cmake",
+          "-S",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\core",
+          "-B",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build",
+          "-G",
+          "Ninja",
+          "-DCMAKE_BUILD_TYPE=Debug",
+          "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:52.795803+00:00",
+        "finished_utc": "2026-11-17T15:35:53.913432+00:00",
+        "log_sha256": "82dfdd2b9b6920b7b31f0cc86e543edb26f84fa226b44e7c4105c9e540fb8a8a"
+      },
+      {
+        "name": "build",
+        "command": [
+          "cmake",
+          "--build",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build",
+          "--parallel",
+          "4"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:53.921670+00:00",
+        "finished_utc": "2026-11-17T15:35:55.570550+00:00",
+        "log_sha256": "8742e1f6ddc0f23d2a6dd2deaf888524b0052b498ec50d47bc69f6586fff0a68"
+      },
+      {
+        "name": "ctest",
+        "command": [
+          "ctest",
+          "--test-dir",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build",
+          "--output-on-failure"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:55.578331+00:00",
+        "finished_utc": "2026-11-17T15:35:57.479772+00:00",
+        "log_sha256": "4a9ed27cf8ba8a85c04361e00103e113700c5b4fe2e8a477bb96fcefba9b3c25"
+      },
+      {
+        "name": "entries",
+        "command": [
+          "ctest",
+          "--test-dir",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build",
+          "-N"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:57.487270+00:00",
+        "finished_utc": "2026-11-17T15:35:57.542303+00:00",
+        "log_sha256": "6cd33ab5ddd4507716a3fe9cb5aca01126750a96659d06250f9ca306012cb0df"
+      },
+      {
+        "name": "prediction-values",
+        "command": [
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build\\test-foc-motion-reference.exe"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:57.549601+00:00",
+        "finished_utc": "2026-11-17T15:35:57.566711+00:00",
+        "log_sha256": "fcf9b5ac8dc68752d71c6f8038d27632b956759e065d4de557c2d638c2b2dd07"
+      },
+      {
+        "name": "atomicity-values",
+        "command": [
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core\\build\\test-foc-motion.exe"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green\\core",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:35:57.573926+00:00",
+        "finished_utc": "2026-11-17T15:35:57.589812+00:00",
+        "log_sha256": "fc79036387f0b9091c098e8470afe5dbf3ab31ac2f227e5f9da127e4c42c4893"
+      }
+    ]
+  },
+  "G3": {
+    "commit-trial": {
+      "definition": {
+        "label": "commit-trial",
+        "old": "    if (!isfinite(trial) || !isfinite(requested)) {\n",
+        "new": "    if (!isfinite(trial) || !isfinite(requested)) {\n        context->integral_a = trial;\n",
+        "mutant_sha256": "02c1b81a07f67117e6412e48d358792e007340efacb03bce348e1ba9bcde9951"
+      },
+      "old_tests": {
+        "count": 15,
+        "commands": [
+          {
+            "name": "configure",
+            "command": [
+              "cmake",
+              "-S",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\source\\core",
+              "-B",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests\\build",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Debug",
+              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:34.098193+00:00",
+            "finished_utc": "2026-11-17T15:36:35.176450+00:00",
+            "log_sha256": "134b125f2ed2c1a3877c6580c7b969c9ba9ae14713be57fc0457d6b57123e798"
+          },
+          {
+            "name": "build",
+            "command": [
+              "cmake",
+              "--build",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests\\build",
+              "--parallel",
+              "4"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:35.184513+00:00",
+            "finished_utc": "2026-11-17T15:36:36.810061+00:00",
+            "log_sha256": "659bc5921e061f650a6c93a67306ac9795d6953f223ba24aa979396ecfe1181c"
+          },
+          {
+            "name": "ctest",
+            "command": [
+              "ctest",
+              "--test-dir",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests\\build",
+              "--output-on-failure"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:36.818531+00:00",
+            "finished_utc": "2026-11-17T15:36:38.840431+00:00",
+            "log_sha256": "f3782a65722ffc93cf639590e35163cf48eeea5a8f7fc6a9e8023f4d70933a2a"
+          }
+        ]
+      },
+      "new_tests": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\source\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:38.852126+00:00",
+          "finished_utc": "2026-11-17T15:36:39.792495+00:00",
+          "log_sha256": "6dd7e2ecd76db1b864ed8d6e8d19fdba14abdcd868987db9bc8dabd38f49a232"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:39.798922+00:00",
+          "finished_utc": "2026-11-17T15:36:41.318153+00:00",
+          "log_sha256": "e91cde0c46a2d8424c9400cc92f727d19f7d6a51f65ebb9f228308cb8ffd2125"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests\\build",
+            "--output-on-failure",
+            "-R",
+            "^test-foc-motion$"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests",
+          "exit": 8,
+          "expected_exit": 8,
+          "started_utc": "2026-11-17T15:36:41.327106+00:00",
+          "finished_utc": "2026-11-17T15:36:41.484762+00:00",
+          "log_sha256": "46fde35f6b5ac0f646184d4556e30d4b4cb13307a7daddd75d7c86283942cbe2"
+        },
+        {
+          "name": "executable",
+          "command": [
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests\\build\\test-foc-motion.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-trial\\after-tests",
+          "exit": 1,
+          "expected_exit": 1,
+          "started_utc": "2026-11-17T15:36:41.492070+00:00",
+          "finished_utc": "2026-11-17T15:36:41.519602+00:00",
+          "log_sha256": "a6e3f1e55ee71f66aeb5939599e8d482c47701e00fd702ebac9a7efa8e64bf8a"
+        }
+      ],
+      "failure": "velocity_atomicity policy=0 ref=2 status=-2 integral=inf expected=0.25\nassertion failed: velocity_state_equal(&velocity, &before) at D:/study/Software/FalconFOC-motion-contract-01-20261117/mutations-fresh/commit-trial/source/core/tests/test_foc_motion.c:187\n"
+    },
+    "commit-negative": {
+      "definition": {
+        "label": "commit-negative",
+        "old": "    if (!isfinite(trial) || !isfinite(requested)) {\n",
+        "new": "    if (!isfinite(trial) || !isfinite(requested)) {\n        if (trial < 0.0f) context->integral_a = trial;\n",
+        "mutant_sha256": "9bc77ffb247f6f4285a3a0ef62489cea5b5c2ca5bb495e34163ce650fdbfea02"
+      },
+      "old_tests": {
+        "count": 15,
+        "commands": [
+          {
+            "name": "configure",
+            "command": [
+              "cmake",
+              "-S",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\source\\core",
+              "-B",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests\\build",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Debug",
+              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:43.505661+00:00",
+            "finished_utc": "2026-11-17T15:36:44.595314+00:00",
+            "log_sha256": "5c86e54f31149f020bb2d6eb5067d872067d22e0cf822eaa48e7151cfb6a852c"
+          },
+          {
+            "name": "build",
+            "command": [
+              "cmake",
+              "--build",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests\\build",
+              "--parallel",
+              "4"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:44.604255+00:00",
+            "finished_utc": "2026-11-17T15:36:46.233890+00:00",
+            "log_sha256": "deda999a0d472e9dd1cfcf733dc72703a58a4604e17b0a9817a0206600b22bf1"
+          },
+          {
+            "name": "ctest",
+            "command": [
+              "ctest",
+              "--test-dir",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests\\build",
+              "--output-on-failure"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:46.240680+00:00",
+            "finished_utc": "2026-11-17T15:36:48.974552+00:00",
+            "log_sha256": "b9e6e2748fab215b92a2c3dd695ab75fbf6899cd91a7019fb6b436bd37a7f22a"
+          }
+        ]
+      },
+      "new_tests": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\source\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:48.984176+00:00",
+          "finished_utc": "2026-11-17T15:36:49.934819+00:00",
+          "log_sha256": "56a57ea18bcbd2464013a812f3ba18b749eaa03647142f8fd7e16ab2b8fad5f2"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:49.941158+00:00",
+          "finished_utc": "2026-11-17T15:36:51.454054+00:00",
+          "log_sha256": "343313f323b0c87368e0a22f6835f26e0ae573fece24f2884a27fa012d57d40e"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests\\build",
+            "--output-on-failure",
+            "-R",
+            "^test-foc-motion$"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests",
+          "exit": 8,
+          "expected_exit": 8,
+          "started_utc": "2026-11-17T15:36:51.460774+00:00",
+          "finished_utc": "2026-11-17T15:36:51.601466+00:00",
+          "log_sha256": "1122059921a1ef0ba8009c09d15390deee9552e87f48a7ee050ad5d095357c64"
+        },
+        {
+          "name": "executable",
+          "command": [
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests\\build\\test-foc-motion.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-negative\\after-tests",
+          "exit": 1,
+          "expected_exit": 1,
+          "started_utc": "2026-11-17T15:36:51.609345+00:00",
+          "finished_utc": "2026-11-17T15:36:51.636676+00:00",
+          "log_sha256": "1dee04fc9f36318e53ddcda38db0310983a8e4d0b7ebd934b7451306957cbfec"
+        }
+      ],
+      "failure": "velocity_atomicity policy=0 ref=2 status=-2 integral=0.25 expected=0.25\nvelocity_atomicity policy=0 ref=-2 status=-2 integral=-inf expected=0.25\nassertion failed: velocity_state_equal(&velocity, &before) at D:/study/Software/FalconFOC-motion-contract-01-20261117/mutations-fresh/commit-negative/source/core/tests/test_foc_motion.c:187\n"
+    },
+    "commit-finite": {
+      "definition": {
+        "label": "commit-finite",
+        "old": "    if (!isfinite(trial) || !isfinite(requested)) {\n",
+        "new": "    if (!isfinite(trial) || !isfinite(requested)) {\n        if (isfinite(trial)) context->integral_a = trial;\n",
+        "mutant_sha256": "e55400e9e7d0f5f3890330d291f8ec66107a25827bc78a87627be8d03f03054e"
+      },
+      "old_tests": {
+        "count": 15,
+        "commands": [
+          {
+            "name": "configure",
+            "command": [
+              "cmake",
+              "-S",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\source\\core",
+              "-B",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests\\build",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Debug",
+              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:53.974436+00:00",
+            "finished_utc": "2026-11-17T15:36:55.157590+00:00",
+            "log_sha256": "d4945aed608f0d853b62c5849c7e3351e3e8447fa962b061cb905b2ba12b52eb"
+          },
+          {
+            "name": "build",
+            "command": [
+              "cmake",
+              "--build",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests\\build",
+              "--parallel",
+              "4"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:55.168304+00:00",
+            "finished_utc": "2026-11-17T15:36:57.026912+00:00",
+            "log_sha256": "52bb1bb4d057dce72ccf821462fc640e7ae885ad6f1de3c4964978d431d097be"
+          },
+          {
+            "name": "ctest",
+            "command": [
+              "ctest",
+              "--test-dir",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests\\build",
+              "--output-on-failure"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:36:57.035294+00:00",
+            "finished_utc": "2026-11-17T15:37:00.778651+00:00",
+            "log_sha256": "653fbf0c03976cdef89eb8845141883f03899f0b8946d428fd6e57728e27f1e2"
+          }
+        ]
+      },
+      "new_tests": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\source\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:00.789103+00:00",
+          "finished_utc": "2026-11-17T15:37:01.831587+00:00",
+          "log_sha256": "0d2faf9a4988a764d9a94eebfbf5bbc3a2155b4638a14c9e6606907949a0cc8a"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:01.839398+00:00",
+          "finished_utc": "2026-11-17T15:37:03.536971+00:00",
+          "log_sha256": "c99d4568fe64362c9a07cb8d34042bb3178996dd3ad93a4faa272d778df06aef"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests\\build",
+            "--output-on-failure",
+            "-R",
+            "^test-foc-motion$"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests",
+          "exit": 8,
+          "expected_exit": 8,
+          "started_utc": "2026-11-17T15:37:03.546498+00:00",
+          "finished_utc": "2026-11-17T15:37:03.691769+00:00",
+          "log_sha256": "2fad9dbea30c8c7542107bdfd933162e17eaeb5ae2e9ecfa05c42ad27fef417e"
+        },
+        {
+          "name": "executable",
+          "command": [
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests\\build\\test-foc-motion.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\commit-finite\\after-tests",
+          "exit": 1,
+          "expected_exit": 1,
+          "started_utc": "2026-11-17T15:37:03.701206+00:00",
+          "finished_utc": "2026-11-17T15:37:03.729040+00:00",
+          "log_sha256": "cd7e048683bb82fe044ed516d9244e68b793fa3b7c4a40b6bf08bd31e98a33a5"
+        }
+      ],
+      "failure": "velocity_atomicity policy=0 ref=2 status=-2 integral=0.25 expected=0.25\nvelocity_atomicity policy=0 ref=-2 status=-2 integral=0.25 expected=0.25\nvelocity_atomicity policy=1 ref=2 status=-2 integral=2.25 expected=0.25\nassertion failed: velocity_state_equal(&velocity, &before) at D:/study/Software/FalconFOC-motion-contract-01-20261117/mutations-fresh/commit-finite/source/core/tests/test_foc_motion.c:187\n"
+    },
+    "time-scale": {
+      "definition": {
+        "label": "time-scale",
+        "old": "(float)elapsed_us * 1.0e-6f;",
+        "new": "(float)elapsed_us * 1.000001e-6f;",
+        "mutant_sha256": "3397a9a06847ecc9fa92781002d54477c197f7e26f36f8d9f9de6ba9eab73836"
+      },
+      "old_tests": {
+        "count": 15,
+        "commands": [
+          {
+            "name": "configure",
+            "command": [
+              "cmake",
+              "-S",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\source\\core",
+              "-B",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests\\build",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Debug",
+              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:37:06.215764+00:00",
+            "finished_utc": "2026-11-17T15:37:07.649721+00:00",
+            "log_sha256": "5c0be63b94354181b9c7cf4c6a2b1dcff663a4ac78c2bda4e94859d57f7531fd"
+          },
+          {
+            "name": "build",
+            "command": [
+              "cmake",
+              "--build",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests\\build",
+              "--parallel",
+              "4"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:37:07.659711+00:00",
+            "finished_utc": "2026-11-17T15:37:09.650030+00:00",
+            "log_sha256": "8720660a888c1736605ecbdfba2c6a0d7619403dfce247212b0b998e3b41f6a7"
+          },
+          {
+            "name": "ctest",
+            "command": [
+              "ctest",
+              "--test-dir",
+              "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests\\build",
+              "--output-on-failure"
+            ],
+            "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\before-tests",
+            "exit": 0,
+            "expected_exit": 0,
+            "started_utc": "2026-11-17T15:37:09.660911+00:00",
+            "finished_utc": "2026-11-17T15:37:11.968800+00:00",
+            "log_sha256": "61f00f16f8a4bb2c1e31a1cdea641e4d35625a6b7492d2672abc3b44fee46303"
+          }
+        ]
+      },
+      "new_tests": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\source\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:11.979455+00:00",
+          "finished_utc": "2026-11-17T15:37:13.134946+00:00",
+          "log_sha256": "8bbd151caab87ca2bb28d825f406e38b615b485a30d46c289bbc95d04fec7fab"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:13.142691+00:00",
+          "finished_utc": "2026-11-17T15:37:17.624806+00:00",
+          "log_sha256": "9e2f0f0de044b9b5e75d30129f1e2b226c5fd6748161ac0f913745ad8867d416"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests\\build",
+            "--output-on-failure",
+            "-R",
+            "^test-foc-motion-reference$"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests",
+          "exit": 8,
+          "expected_exit": 8,
+          "started_utc": "2026-11-17T15:37:17.635944+00:00",
+          "finished_utc": "2026-11-17T15:37:18.522895+00:00",
+          "log_sha256": "3ca30a16b863c5197d2b78ff82afd0d8dc9a6c34f4a961356e1384424f5ded6e"
+        },
+        {
+          "name": "executable",
+          "command": [
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests\\build\\test-foc-motion-reference.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\mutations-fresh\\time-scale\\after-tests",
+          "exit": 1,
+          "expected_exit": 1,
+          "started_utc": "2026-11-17T15:37:18.531680+00:00",
+          "finished_utc": "2026-11-17T15:37:18.640877+00:00",
+          "log_sha256": "74ff691edeb3d3ab2c41e1a9fbfba7e0eb5cc35f03eebd4207b9728f8a92db8d"
+        }
+      ],
+      "failure": "prediction mismatch case=283 theta=0 omega=-7000 age_us=283 actual=4.3021831512451172 reference=4.3021853071795864 circular_error=2.1559344691723936e-06 budget=1.9999999999999999e-06 model=8.0088999999999985e-05 status=0\n"
+    }
+  },
+  "G4": {
+    "core-clang": {
+      "count": 15,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "core",
+            "-B",
+            "build/motion-contract-01",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:24.758469+00:00",
+          "finished_utc": "2026-11-17T15:40:25.709912+00:00",
+          "log_sha256": "acbb8a505ebcd631a3b196ac1ee1f520ce1d13ec8e30a5b4a28dd0cb032e860f"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "build/motion-contract-01",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:25.717071+00:00",
+          "finished_utc": "2026-11-17T15:40:27.238410+00:00",
+          "log_sha256": "ee744efdfdc34665d3ff432d90b3e18831e100770ae059919dc9f3310e7a11c8"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "build/motion-contract-01",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:27.246537+00:00",
+          "finished_utc": "2026-11-17T15:40:29.158748+00:00",
+          "log_sha256": "cc0f8242cd7dbcb100cca3d63631a40ee77e9bc6b4dd25884461544255d71a25"
+        }
+      ]
+    },
+    "core-gcc": {
+      "count": 15,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/mingw64/bin/gcc.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:52.489126+00:00",
+          "finished_utc": "2026-11-17T15:36:56.819115+00:00",
+          "log_sha256": "91f5d51eb2da05d06ad9b29f2d499d3edce450517689301f238a2cc97b4536fd"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:36:56.826935+00:00",
+          "finished_utc": "2026-11-17T15:37:01.649344+00:00",
+          "log_sha256": "9819fced1b08ea71fdc2d2352191ece1b516f0548e957017ad9dfdd7d777e820"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc\\build",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-gcc",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:01.660392+00:00",
+          "finished_utc": "2026-11-17T15:37:04.033807+00:00",
+          "log_sha256": "92a7a1c103b71e29222cbf1abfac95148bb1cee4604b913611dc551f8c37d8cc"
+        }
+      ]
+    },
+    "runtime": {
+      "count": 11,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\runtime",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:29.166437+00:00",
+          "finished_utc": "2026-11-17T15:40:30.115450+00:00",
+          "log_sha256": "8d6dddd9d9f5bcfd5229fcea4108f9eeca59d9e60e0740d69fd2edb0aabf03de"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:30.122992+00:00",
+          "finished_utc": "2026-11-17T15:40:31.355482+00:00",
+          "log_sha256": "9d774a71a77e1fc2509760134af753251a7b09f342fe11f40ba05578ec8b1927"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime\\build",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\runtime",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:31.362780+00:00",
+          "finished_utc": "2026-11-17T15:40:35.000971+00:00",
+          "log_sha256": "ae524205ed842cd9efb27abcbfb59d308fdc9b607677535db4fc80e79faa0e43"
+        }
+      ]
+    },
+    "simulation": {
+      "count": 15,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\simulation",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:35.008804+00:00",
+          "finished_utc": "2026-11-17T15:40:35.969203+00:00",
+          "log_sha256": "9519a056460e4b0d0af7706b1632fd5c190912d6f988098ead0cdeacd484576d"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:35.975628+00:00",
+          "finished_utc": "2026-11-17T15:40:38.030909+00:00",
+          "log_sha256": "c0f3b3a897f7daf5c93bf70772ea57fe34875a317e482dd7e3606176f9ea1a67"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation\\build",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\final\\simulation",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:40:38.038665+00:00",
+          "finished_utc": "2026-11-17T15:40:45.929761+00:00",
+          "log_sha256": "60a9cd72e34f407dba3a21a62d71971ce1ef2200fa10deca0f19e6bc56bed666"
+        }
+      ]
+    },
+    "core-asan-ubsan": {
+      "count": 15,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\core",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe",
+            "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:37.739430+00:00",
+          "finished_utc": "2026-11-17T15:37:39.253792+00:00",
+          "log_sha256": "3e43bc94beec612f54c28e5ea2cdd356151ab61cb7633fdeca5fe84ec1d549d1"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:39.260990+00:00",
+          "finished_utc": "2026-11-17T15:37:41.145036+00:00",
+          "log_sha256": "8f6f02b27aeade3ff1c35c44af196ff63c40d3104c460b4693a44d7dc3518443"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan\\build",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\core-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:41.151752+00:00",
+          "finished_utc": "2026-11-17T15:37:46.395805+00:00",
+          "log_sha256": "1f724fdd5961ee9f81560ab7c273adbefe9ef5c19f4a2799ccb8feb5d71f02d5"
+        }
+      ]
+    },
+    "simulation-asan-ubsan": {
+      "count": 15,
+      "commands": [
+        {
+          "name": "configure",
+          "command": [
+            "cmake",
+            "-S",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\simulation",
+            "-B",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan\\build",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe",
+            "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:46.405203+00:00",
+          "finished_utc": "2026-11-17T15:37:47.559621+00:00",
+          "log_sha256": "22a4f2f5f72e4c0d37ec7982f9f8fcce25f2c1cc5c8ceeb3149f3bf4dde3e900"
+        },
+        {
+          "name": "build",
+          "command": [
+            "cmake",
+            "--build",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan\\build",
+            "--parallel",
+            "4"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:47.566888+00:00",
+          "finished_utc": "2026-11-17T15:37:50.207537+00:00",
+          "log_sha256": "30a3d5f3ed94f99f866abd81f984e031ce6e1e3d41e8aff0d7e072a1bdbe1960"
+        },
+        {
+          "name": "ctest",
+          "command": [
+            "ctest",
+            "--test-dir",
+            "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan\\build",
+            "--output-on-failure"
+          ],
+          "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\regression\\simulation-asan",
+          "exit": 0,
+          "expected_exit": 0,
+          "started_utc": "2026-11-17T15:37:50.215970+00:00",
+          "finished_utc": "2026-11-17T15:38:14.404070+00:00",
+          "log_sha256": "918a398be2dcd559c0ad178ab43509d7cf5094bc1b5995c900898848f6e9760f"
+        }
+      ]
+    }
+  },
+  "numeric": {
+    "clang": {
+      "nominal": "prediction_nominal cases=74684 ages=0..650 max_error=1.0674847210623284e-06 budget=1.9999999999999999e-06 theta=6.2831850051879883 omega=7000 age_us=623 seed=0x0c012026",
+      "outside_nominal": "prediction_outside_nominal theta=0.35820722579956055 omega=65535000 age_us=400 actual=0.90759086608886719 reference=0.90910567256580066 circular_error=0.0015148064769334724 model=0.00016 nominal_budget_applies=0 status=0",
+      "count": 74684,
+      "max_error_rad": 1.0674847210623284e-06,
+      "budget_rad": 2e-06
+    },
+    "gcc": {
+      "nominal": "prediction_nominal cases=74684 ages=0..650 max_error=1.0674847210623284e-06 budget=1.9999999999999999e-06 theta=6.2831850051879883 omega=7000 age_us=623 seed=0x0c012026",
+      "outside_nominal": "prediction_outside_nominal theta=0.35820722579956055 omega=65535000 age_us=400 actual=0.90759086608886719 reference=0.90910567256580066 circular_error=0.0015148064769334724 model=0.00016 nominal_budget_applies=0 status=0",
+      "count": 74684,
+      "max_error_rad": 1.0674847210623284e-06,
+      "budget_rad": 2e-06
+    },
+    "asan-ubsan": {
+      "nominal": "prediction_nominal cases=74684 ages=0..650 max_error=1.0674847210623284e-06 budget=1.9999999999999999e-06 theta=6.2831850051879883 omega=7000 age_us=623 seed=0x0c012026",
+      "outside_nominal": "prediction_outside_nominal theta=0.35820722579956055 omega=65535000 age_us=400 actual=0.90759086608886719 reference=0.90910567256580066 circular_error=0.0015148064769334724 model=0.00016 nominal_budget_applies=0 status=0",
+      "count": 74684,
+      "max_error_rad": 1.0674847210623284e-06,
+      "budget_rad": 2e-06
+    }
+  },
+  "gate": {
+    "formal": [
+      {
+        "name": "strict-all",
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\scripts\\gates\\check_themis_quality_gate.ps1",
+          "-RepoRoot",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "-Scope",
+          "all",
+          "-RequireCMakeFormatter",
+          "-Summary"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:40:45.944567+00:00",
+        "finished_utc": "2026-11-17T15:41:21.888771+00:00",
+        "log_sha256": "b5be3edc270ce382e33cb8d04983d2907914afac07da695786e3c43aeb086e0d"
+      }
+    ],
+    "preliminary": [
+      {
+        "name": "seed-gcc",
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\scripts\\flows\\host\\run_host_tests.ps1",
+          "-RepoRoot",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "-CompilerPath",
+          "C:/mingw64/bin/gcc.exe"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:37:07.897168+00:00",
+        "finished_utc": "2026-11-17T15:37:33.757502+00:00",
+        "log_sha256": "d2f50f2753c397c0cd75b9cacee4bdbea50318d23de8d7f45ca6bd76f89b3e37"
+      },
+      {
+        "name": "source-contract",
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\scripts\\gates\\check_falconfoc_source_contract.ps1",
+          "-RepoRoot",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:37:33.768276+00:00",
+        "finished_utc": "2026-11-17T15:37:34.973656+00:00",
+        "log_sha256": "8a792cb045e923a8ea9e45bea5362cb46dfca8a595ca187020e7b4900301b0a0"
+      },
+      {
+        "name": "formatter",
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\scripts\\format_themis.ps1",
+          "-RepoRoot",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "-Mode",
+          "check",
+          "-Scope",
+          "all"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:37:34.980810+00:00",
+        "finished_utc": "2026-11-17T15:37:52.934205+00:00",
+        "log_sha256": "efe03eab4cd1488dc0333346dff12014a8d55434e50339afbeecf4d788b4c015"
+      },
+      {
+        "name": "strict-all",
+        "command": [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo\\scripts\\gates\\check_themis_quality_gate.ps1",
+          "-RepoRoot",
+          "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+          "-Scope",
+          "all",
+          "-RequireCMakeFormatter",
+          "-Summary"
+        ],
+        "cwd": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+        "exit": 0,
+        "expected_exit": 0,
+        "started_utc": "2026-11-17T15:37:52.944031+00:00",
+        "finished_utc": "2026-11-17T15:38:38.249727+00:00",
+        "log_sha256": "425d9ccc1e3f6dd3fe77a8bab5ae4d3f506e01e79e129da1f43ee7b8e64a64f9"
+      }
+    ],
+    "cmake_format_count": 30,
+    "legacy_host_tests": 45,
+    "isolation": {
+      "repo": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117\\green-repo",
+      "temp": "D:\\mc01-51aafa87",
+      "CI": null,
+      "GITHUB_ACTIONS": null,
+      "legacy_artifacts": [
+        {
+          "path": "build\\fw-tiny-carrier-minsizerel\\output\\falcon-foc-at32.elf",
+          "sha256": "d14d0b954733dcb0b499254927301eab14b9e474518ae2cd78e6b0579b53745e",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        },
+        {
+          "path": "build\\fw-tiny-carrier-minsizerel\\output\\falcon-foc-at32.map",
+          "sha256": "3446c223449fa664d52c522a9bba58d0b011ffc0b1b657688bf3806afb6690e4",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        },
+        {
+          "path": "build\\fw-standard-carrier-minsizerel\\output\\falcon-foc-at32.elf",
+          "sha256": "258baa189100b0379297f5ca9f47b0dd840ac41022b178c8bbc2c5bcae7c3f20",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        },
+        {
+          "path": "build\\fw-standard-carrier-minsizerel\\output\\falcon-foc-at32.map",
+          "sha256": "cdad600ad0d2c2fcceb9bd48015893721bc6442c764fbe8557479fbcdaeda144",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        },
+        {
+          "path": "build\\fw-full-diag-carrier-debug\\output\\falcon-foc-at32.elf",
+          "sha256": "80e7563d2e9a7558502067da046a06892f43d98174d56b76ae3d6c7afd2b12ae",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        },
+        {
+          "path": "build\\fw-full-diag-carrier-debug\\output\\falcon-foc-at32.map",
+          "sha256": "735c22078bb7c94e240d02304db61754d978cdfd7c7be6660ae303eabad3c176",
+          "origin": "historical artifact copy; not a fresh ARM build"
+        }
+      ]
+    }
+  },
+  "evidence_root": "D:\\study\\Software\\FalconFOC-motion-contract-01-20261117",
+  "raw_archive": {
+    "sha256": "ffb203e5c0a7702bcdabd10592ed2c7c2abb1e0d10d01c7a92e6a38281581007",
+    "files": 133,
+    "bytes": 1069624,
+    "invalid_initial_attempt": "mutations/commit-trial/after-tests; stale mtime prevented rebuild; excluded from G3"
+  }
+}

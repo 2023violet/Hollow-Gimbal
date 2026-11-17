@@ -118,7 +118,17 @@ Failed steps clear the entire output and leave the context unchanged. A cleared 
 
 `include/foc_motion.h` provides mechanical-to-electrical conversion, bounded angle prediction, velocity PI, and stateless position P. Supply continuous mechanical position in rad and coherent speed in rad/s. The producer owns the mechanical zero, direction normalization, and any single-turn unwrapping. The electrical angle is `wrap(pole_pairs * mechanical_position + electrical_offset)` and electrical speed is `pole_pairs * mechanical_speed`. The caller aligns encoder sign and phase polarity so positive q current produces positive mechanical torque. Position error keeps all mechanical turns. Only electrical phase is normalized.
 
-`foc_rotor_predict` takes an already validated forward interval in microseconds. It limits both the interval and the extrapolation contribution `0.5 * max_electrical_acceleration * dt_s^2`. Source-angle and speed uncertainty belong to the caller's sensor quality contract. `foc_velocity_step` uses actual `dt_s`, admits only the supported integral increment, and bounds the integral when the q current limit drops. A disabled step freezes state. Position P limits its velocity reference and has no state to reset. A new motion session resets the velocity PI.
+`foc_velocity_step` uses actual `dt_s`, admits only the supported integral increment, and bounds the integral when the q current limit drops. All validation/calculation errors leave the context (configuration, initialization flag and integral) unchanged and clear every output field. A valid disabled step freezes state and clears output; inputs are still validated first. Position P limits its velocity reference and has no state to reset. A new motion session resets the velocity PI.
+
+### Prediction admission, numerical accuracy and system error
+
+`foc_rotor_predict` retains constant-speed prediction, Float32 arithmetic and the existing normalization. Its contracts have three separate scopes:
+
+1. **Input admission.** The caller establishes a forward age with its modular clock check. The API checks pointers, finite sample/settings, nonnegative acceleration/error bounds, a horizon below the 32-bit clock half range, age within that horizon, and `0.5 * max_electrical_acceleration * dt_s^2 <= max_error_rad`. Normalization rejects a non-finite computed phase. A writable destination is cleared on failure. `FOC_STATUS_OK` means these existing checks passed; finite inputs alone do not grant arbitrary-input numerical accuracy.
+2. **Nominal calculation regression.** `test-foc-motion-reference` compares against independent Double time conversion, phase accumulation and mathematical `2*pi` reduction, starting from the actual stored Float32 input values. The test envelope is input phase `[0, Float32 2*pi)`, electrical speed `|omega_e| <= 7000 rad/s`, integer prediction ages `0..650 us`, and the default Board policy `{650 us, 2000 rad/s^2, 0.00065 rad}`. The acceptance budget is `2e-6 rad` measured by shortest periodic angle distance. Boundary matrices cover every integer age; extra samples use fixed seed `0x0c012026`. The tests assume binary32 float, at least binary64 double, normal round-to-nearest arithmetic and the project's standard build flags without fast-math. This is repeatable sampled regression, not a proof for every representable input or target MCU math implementation.
+3. **System total error.** Float32 calculation error is separate from acceleration-model error, encoder phase quantization, velocity-estimation error, sensor acquisition latency and timestamp uncertainty. Input representation error before storage is also outside the calculation Oracle. `max_error_rad` limits only the assumed acceleration-model contribution; it is not a total electrical-angle error guarantee. The acceleration assumption itself needs an application or measurement basis. At the default 650 us horizon, the assumed model contribution is `0.0004225 rad` before adding those other terms.
+
+The reference test retains an observation at `omega_e = 65535000 rad/s`, age `400 us` and phase `0.35820722579956055f` with an admitting policy. It prints its circular calculation error without imposing the nominal budget or requiring the error to remain large. Large speeds, large unbounded phases/offsets, longer horizons and nonstandard floating-point modes have no precision guarantee from this regression. API admission and success/failure behavior are unchanged.
 
 ## Optional current feedforward
 
@@ -146,7 +156,9 @@ cmake --build build/core-g2 --parallel
 ctest --test-dir build/core-g2 --output-on-failure
 ```
 
-Five test executables cover transforms, SVPWM, voltage-open-loop stepping, d/q current feedback, and the motion primitives. The current test uses a fixed-rotor R/L model driven by final duties. The Runtime test project exercises the cascaded controller with an electrical and mechanical PMSM model.
+The Host test executables cover transforms, SVPWM, voltage-open-loop stepping, d/q current feedback, and the motion primitives. The current test uses a fixed-rotor R/L model driven by final duties. The Runtime test project exercises the cascaded controller with an electrical and mechanical PMSM model.
+
+The existing `test-foc-motion` CTest entry includes positive/negative integral-trial and proportional-request overflow, poisoned-output clearing, complete logical context preservation, disabled/invalid inputs and same-instance recovery. `test-foc-motion-reference` adds the independent prediction Oracle described above to its existing rotor, PI, Position and Trajectory references. These checks extend the existing entries; they do not add a new test framework or certify physical control quality.
 
 ## Integration boundary
 

@@ -1,0 +1,29 @@
+{
+  "source_files_before": 2533,
+  "source_files_after": 2537,
+  "changed_existing": [
+    "core/README.md",
+    "core/include/foc_motion.h",
+    "core/tests/test_foc_motion.c",
+    "core/tests/test_foc_motion_reference.c",
+    "docs/governance/Themis_工程维护日志.md"
+  ],
+  "added": [
+    "docs/evidence/2026-11-17-next-motion-contract-01.md",
+    "docs/evidence/2026-11-17-next-motion-contract-01/change-verification.json",
+    "docs/evidence/2026-11-17-next-motion-contract-01/raw-logs.zip",
+    "docs/evidence/2026-11-17-next-motion-contract-01/results.json"
+  ],
+  "protected_control_files_unchanged": 92,
+  "existing_ignored_artifacts_unchanged": 2427,
+  "existing_ignored_bytes": 322054220,
+  "original_snapshot_unchanged": true,
+  "maintenance_prefix_preserved": true,
+  "main_worktree_unchanged": true,
+  "public_header_noncomment_content_unchanged": true,
+  "production_motion_sha256": "2c91ab2fcf2b202d3f94e199c1b31642f81cea2e51dbdb320194639680249174",
+  "head": "6b151a1ca745a37b0cd044528058f34b09834919",
+  "branch": "codex/falconfoc-v2-vm01a",
+  "remote_head_before_approval": "6b151a1ca745a37b0cd044528058f34b09834919",
+  "git_commit_push": "NOT_EXECUTED_PENDING_CONFIRMATION"
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "mutation": "baseline",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 0,
+      "test_foc_motion_reference": 0
+    },
+    "independent_negative_exit": 0
+  },
+  {
+    "mutation": "prediction-sign",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 1,
+      "test_foc_motion_reference": 0
+    },
+    "independent_negative_exit": null
+  },
+  {
+    "mutation": "prediction-time-unit",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 1,
+      "test_foc_motion_reference": 0
+    },
+    "independent_negative_exit": null
+  },
+  {
+    "mutation": "ignore-acceleration",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 1,
+      "test_foc_motion_reference": 0
+    },
+    "independent_negative_exit": null
+  },
+  {
+    "mutation": "early-integral-commit",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 0,
+      "test_foc_motion_reference": 0
+    },
+    "independent_negative_exit": 1
+  },
+  {
+    "mutation": "reverse-saturation",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 0,
+      "test_foc_motion_reference": 1
+    },
+    "independent_negative_exit": null
+  },
+  {
+    "mutation": "position-single-turn",
+    "production_compiled": true,
+    "existing_motion_tests": {
+      "test_foc_motion": 1,
+      "test_foc_motion_reference": 1
+    },
+    "independent_negative_exit": null
+  }
+]

@@ -1,0 +1,53 @@
+#include "foc_motion.h"
+#include <math.h>
+#include <stdio.h>
+
+int review_predict_b(const struct foc_prediction_config *,const struct foc_electrical_state *,uint32_t,float *);
+int review_predict_c(const struct foc_prediction_config *,const struct foc_electrical_state *,uint32_t,float *);
+
+int main(void)
+{
+    char kind;
+    while(scanf(" %c",&kind)==1){
+        if(kind=='P'){
+            struct foc_electrical_state s;
+            struct foc_prediction_config c;
+            unsigned age,maximum;
+            if(scanf("%f %f %u %u %f %f",&s.angle_rad,&s.velocity_rad_s,&age,&maximum,
+                     &c.max_accel_rad_s2,&c.max_error_rad)!=6)return 2;
+            c.max_prediction_us=maximum;
+            float a=999,b=999,d=999;
+            int sa=foc_rotor_predict(&c,&s,age,&a),sb=review_predict_b(&c,&s,age,&b),
+                sc=review_predict_c(&c,&s,age,&d);
+            volatile float dt=(float)age*1e-6f;
+            volatile float delta=s.velocity_rad_s*dt;
+            volatile float sum=s.angle_rad+delta;
+            volatile float model=.5f*dt*dt*c.max_accel_rad_s2;
+            printf("P,%d,%.17g,%d,%.17g,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n",
+                   sa,(double)a,sb,(double)b,sc,(double)d,(double)dt,(double)delta,(double)sum,
+                   (double)model,(double)sinf(a),(double)cosf(a));
+        }else if(kind=='V'){
+            struct foc_velocity_config c;
+            struct foc_velocity_input in;
+            struct foc_velocity_context ctx;
+            struct foc_velocity_output out;
+            float initial;unsigned enabled;
+            if(scanf("%f %f %f %f %f %f %f %f %u",&c.kp_a_per_rad_s,&c.ki_a_per_rad,&c.max_dt_s,
+                     &initial,&in.ref_rad_s,&in.measured_rad_s,&in.dt_s,&in.iq_limit_a,&enabled)!=9)return 2;
+            in.enabled=enabled!=0;
+            int status=foc_velocity_init(&ctx,&c);
+            if(status)return 3;
+            /* Controlled reachable finite state for local unit-property checks. */
+            ctx.integral_a=initial;
+            status=foc_velocity_step(&ctx,&in,&out);
+            printf("V,%d,%.17g,%.17g,%u,%u\n",status,(double)ctx.integral_a,
+                   (double)out.iq_ref_a,out.saturated,out.enabled);
+        }else if(kind=='X'){
+            struct foc_position_config c;struct foc_position_output out;float ref,meas;
+            if(scanf("%f %f %f %f",&c.kp_per_s,&c.velocity_limit_rad_s,&ref,&meas)!=4)return 2;
+            int status=foc_position_step(&c,ref,meas,&out);
+            printf("X,%d,%.17g,%u\n",status,(double)out.velocity_ref_rad_s,out.limited);
+        }else return 4;
+    }
+    return 0;
+}

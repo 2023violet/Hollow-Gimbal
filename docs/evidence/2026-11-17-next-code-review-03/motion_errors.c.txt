@@ -1,0 +1,94 @@
+#include "foc_motion.h"
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"error-contract assertion: %s at %d\n",#x,__LINE__);return 1;}}while(0)
+int main(void)
+{
+    unsigned checks=0;
+    struct foc_velocity_context v={0},saved;
+    struct foc_velocity_output vo;
+    struct foc_velocity_config vc={2,4,1};
+    struct foc_velocity_input vi={1,0,.1f,2,true};
+    CHECK(foc_velocity_init(NULL,&vc)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_velocity_init(&v,NULL)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_velocity_reset(NULL)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_velocity_reset(&v)==FOC_STATUS_ERR_NOT_INITIALIZED);
+    CHECK(foc_velocity_step(&v,&vi,&vo)==FOC_STATUS_ERR_NOT_INITIALIZED);
+    CHECK(!vo.enabled&&vo.iq_ref_a==0);
+    CHECK(foc_velocity_init(&v,&vc)==0);
+    CHECK(foc_velocity_step(&v,NULL,&vo)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_velocity_step(NULL,&vi,&vo)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_velocity_step(&v,&vi,NULL)==FOC_STATUS_ERR_NULL);
+    v.integral_a=.25f;saved=v;
+    float bads[]={0,-.1f,2,NAN,INFINITY};
+    for(unsigned j=0;j<5;j++){
+        struct foc_velocity_input bad=vi;bad.dt_s=bads[j];
+        CHECK(foc_velocity_step(&v,&bad,&vo)==FOC_STATUS_ERR_INVALID_DT);
+        CHECK(memcmp(&saved,&v,sizeof(v))==0&&!vo.enabled&&vo.iq_ref_a==0);
+    }
+    for(unsigned j=0;j<6;j++){
+        struct foc_velocity_input bad=vi;
+        if(j==0)bad.ref_rad_s=NAN;else if(j==1)bad.measured_rad_s=INFINITY;
+        else bad.iq_limit_a=(float[]){0,0,0,-1,NAN,INFINITY}[j];
+        CHECK(foc_velocity_step(&v,&bad,&vo)<0);
+        CHECK(memcmp(&saved,&v,sizeof(v))==0&&vo.iq_ref_a==0&&!vo.enabled);
+    }
+    for(unsigned j=0;j<5;j++){
+        struct foc_velocity_config bad=vc;
+        if(j==0)bad.kp_a_per_rad_s=NAN;else if(j==1)bad.ki_a_per_rad=-1;
+        else if(j==2)bad.max_dt_s=0;else if(j==3)bad.max_dt_s=INFINITY;else bad.kp_a_per_rad_s=-1;
+        CHECK(foc_velocity_init(&v,&bad)<0);
+        CHECK(memcmp(&saved,&v,sizeof(v))==0);
+    }
+    vc=(struct foc_velocity_config){0,FLT_MAX,1};
+    CHECK(foc_velocity_init(&v,&vc)==0);v.integral_a=.25f;saved=v;
+    vi=(struct foc_velocity_input){2,0,1,2,true};
+    CHECK(foc_velocity_step(&v,&vi,&vo)==FOC_STATUS_ERR_NONFINITE);
+    CHECK(memcmp(&saved,&v,sizeof(v))==0&&!vo.enabled&&vo.iq_ref_a==0);
+    vc=(struct foc_velocity_config){FLT_MAX,0,1};
+    CHECK(foc_velocity_init(&v,&vc)==0);v.integral_a=.25f;saved=v;
+    CHECK(foc_velocity_step(&v,&vi,&vo)==FOC_STATUS_ERR_NONFINITE);
+    CHECK(memcmp(&saved,&v,sizeof(v))==0);
+    vi.enabled=false;vi.iq_limit_a=.1f;
+    CHECK(foc_velocity_step(&v,&vi,&vo)==0&&v.integral_a==.25f&&!vo.enabled);
+    vi.dt_s=0;
+    CHECK(foc_velocity_step(&v,&vi,&vo)==FOC_STATUS_ERR_INVALID_DT);
+    CHECK(foc_velocity_reset(&v)==0&&v.integral_a==0);
+    struct foc_position_config pc={2,3};struct foc_position_output po;
+    CHECK(foc_position_step(NULL,0,0,&po)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_position_step(&pc,0,0,NULL)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_position_step(&pc,INFINITY,0,&po)==FOC_STATUS_ERR_NONFINITE&&po.velocity_ref_rad_s==0);
+    pc.kp_per_s=-1;CHECK(foc_position_step(&pc,0,0,&po)==FOC_STATUS_ERR_INVALID_CONFIG);
+    pc=(struct foc_position_config){2,0};CHECK(foc_position_step(&pc,0,0,&po)==FOC_STATUS_ERR_INVALID_CONFIG);
+    pc=(struct foc_position_config){FLT_MAX,3};
+    CHECK(foc_position_step(&pc,2,0,&po)==FOC_STATUS_ERR_NONFINITE&&po.velocity_ref_rad_s==0);
+    struct foc_prediction_config pr={400,2000,.0003f};
+    struct foc_electrical_state s={.35820722579956055f,65535000};float out;
+    CHECK(foc_rotor_predict(&pr,&s,400,&out)==0);
+    const double truth=(double)s.angle_rad+(double)s.velocity_rad_s*.0004;
+    const double err=fabs(atan2(sin(out-truth),cos(out-truth)));
+    printf("historical_counterexample status=0 error_rad=%.17g output=%.17g\n",err,(double)out);
+    CHECK(err>.001&&err<.002);
+    CHECK(foc_rotor_predict(NULL,&s,0,&out)==FOC_STATUS_ERR_NULL&&out==0);
+    CHECK(foc_rotor_predict(&pr,NULL,0,&out)==FOC_STATUS_ERR_NULL&&out==0);
+    CHECK(foc_rotor_predict(&pr,&s,0,NULL)==FOC_STATUS_ERR_NULL);
+    CHECK(foc_rotor_predict(&pr,&s,401,&out)==FOC_STATUS_ERR_INVALID_DT&&out==0);
+    pr.max_error_rad=0;
+    CHECK(foc_rotor_predict(&pr,&s,400,&out)==FOC_STATUS_ERR_PREDICTION&&out==0);
+    pr.max_prediction_us=UINT32_C(0x80000000);
+    CHECK(foc_rotor_predict(&pr,&s,0,&out)==FOC_STATUS_ERR_INVALID_CONFIG&&out==0);
+    pr=(struct foc_prediction_config){400,2000,.0003f};s.velocity_rad_s=NAN;
+    CHECK(foc_rotor_predict(&pr,&s,0,&out)==FOC_STATUS_ERR_NONFINITE&&out==0);
+    struct foc_rotor_config rotor={7,0};struct foc_electrical_state e;
+    CHECK(foc_rotor_electrical(NULL,0,0,&e)==FOC_STATUS_ERR_NULL&&e.angle_rad==0);
+    CHECK(foc_rotor_electrical(&rotor,0,0,NULL)==FOC_STATUS_ERR_NULL);
+    rotor.pole_pairs=0;CHECK(foc_rotor_electrical(&rotor,0,0,&e)==FOC_STATUS_ERR_INVALID_CONFIG);
+    rotor.pole_pairs=65535;
+    CHECK(foc_rotor_electrical(&rotor,0,FLT_MAX,&e)==FOC_STATUS_ERR_NONFINITE&&e.angle_rad==0);
+    CHECK(foc_rotor_phase_from_counts(NULL,0,2,&out)==FOC_STATUS_ERR_NULL&&out==0);
+    CHECK(foc_rotor_phase_from_counts(&rotor,2,2,&out)==FOC_STATUS_ERR_INVALID_CONFIG&&out==0);
+    printf("error_contract_checks=%u passed\n",checks);
+    return 0;
+}

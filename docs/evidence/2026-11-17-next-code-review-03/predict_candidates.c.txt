@@ -1,0 +1,41 @@
+#include "foc_motion.h"
+#include <math.h>
+#include <stddef.h>
+
+/* Audit-only alternatives. The production implementation is never changed. */
+static int validate(const struct foc_prediction_config *c,const struct foc_electrical_state *s,
+                    uint32_t age,float *out)
+{
+    if(!out)return FOC_STATUS_ERR_NULL;
+    *out=0;
+    if(!c||!s)return FOC_STATUS_ERR_NULL;
+    if(!isfinite(c->max_accel_rad_s2)||!isfinite(c->max_error_rad)||
+       !isfinite(s->angle_rad)||!isfinite(s->velocity_rad_s))return FOC_STATUS_ERR_NONFINITE;
+    if(c->max_accel_rad_s2<0||c->max_error_rad<0||c->max_prediction_us>=UINT32_C(0x80000000))
+        return FOC_STATUS_ERR_INVALID_CONFIG;
+    if(age>c->max_prediction_us)return FOC_STATUS_ERR_INVALID_DT;
+    const float dt=(float)age*1e-6f;
+    if(.5f*dt*dt*c->max_accel_rad_s2>c->max_error_rad)return FOC_STATUS_ERR_PREDICTION;
+    return 0;
+}
+
+int review_predict_b(const struct foc_prediction_config *c,const struct foc_electrical_state *s,
+                     uint32_t age,float *out)
+{
+    int status=validate(c,s,age,out);if(status)return status;
+    const float increment=s->velocity_rad_s*((float)age*1e-6f);
+    return foc_angle_normalize(s->angle_rad+fmodf(increment,6.28318530717958647692f),out);
+}
+
+int review_predict_c(const struct foc_prediction_config *c,const struct foc_electrical_state *s,
+                     uint32_t age,float *out)
+{
+    int status=validate(c,s,age,out);if(status)return status;
+    const double tau=6.283185307179586476925286766559;
+    double phase=fmod((double)s->angle_rad+(double)s->velocity_rad_s*((double)age*1e-6),tau);
+    if(phase<0)phase+=tau;
+    if(!isfinite(phase))return FOC_STATUS_ERR_NONFINITE;
+    *out=(float)phase;
+    if(*out>=6.28318530717958647692f)*out=0;
+    return 0;
+}

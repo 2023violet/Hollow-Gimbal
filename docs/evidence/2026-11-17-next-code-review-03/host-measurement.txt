@@ -1,0 +1,9 @@
+round=0 candidate=A ns_per_call=30.4956
+round=0 candidate=B ns_per_call=35.1731
+round=0 candidate=C ns_per_call=11.2709
+round=1 candidate=A ns_per_call=30.8339
+round=1 candidate=B ns_per_call=33.7106
+round=1 candidate=C ns_per_call=10.7022
+round=2 candidate=A ns_per_call=29.0337
+round=2 candidate=B ns_per_call=34.6028
+round=2 candidate=C ns_per_call=11.9757

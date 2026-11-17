@@ -2836,3 +2836,10 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `[回归]` Core 15/15、Sensors 2/2、Runtime 11/11、Simulation 15/15、Board 4/4、Python/C CLI 11/11、Legacy Host 45/45；Core/Sensor/Simulation/Board Clang ASan/UBSan 通过。Source 81/9/9、Formatter、CMake Quality、Scope falconfoc/all 退出 0。五个 CLI 工作流集成通过，既有 Current 短窗口 CONTROL_QUALITY_FAIL 与 Position/Load EXPECTED_DEGRADED 标签保留，未改阈值/PI。
 - `[ARM]` 起始源码隔离重建匹配原 37864 B SHA；新 BIN 38304 B，SHA-256 73EE73C4FB1570417DF7842520CCA8BA07204C86FE644D837F00DBDDB7EA9E89。原始 .text +440 B、.data +0、.bss +20 B；Sensor/Feedback/Encoder/Runtime 大小 28/52/192/1236 B。H1 自身静态栈 288→328 B，非调用链高水位/WCET。
 - `[边界/保护]` 详见 docs/evidence/2026-11-16-next-code-improve-02b.md 与外部 FalconFOC-code-improve-02b-20261116。仅本授权的软件相位链验收 PASS；Board1 LOCKED、ARM/START OUTPUT_LOCKED、真实 UPDATE REJECTED、physical_applied=false。Safety、PI、UART V1、Target Policy、外设/功率输出未改变；不删除/覆盖历史构建或 CSV/JSON/Golden/evidence，不提交/推送/合并/发布/刷机/上电/运行真实电机。
+
+## 2026-11-17 FalconFOC V2 NEXT-CODE-REVIEW-03 Motion 独立审查与 Git 交付
+
+- `[审查]` foc_motion 全函数/跨模块合同、61233 预测、20000 PI、20021 Position、72 错误检查及六类生产变异；主结论 IMPROVE/P2，无确认 P0/P1 或 BLOCK。默认域保留预测 A、Velocity PI 和连续位置 P；先补精度合同与计算错误原子性测试。
+- `[证据]` Core 15/15、Runtime 11/11、Core/Simulation ASan/UBSan 15/15；错误分支提交积分的私有变异虽 Core 15/15 仍被独立探针检出。P2-B 保持 OPEN — NEXT-QUALITY-GATE-01。本轮未改生产、正式测试、Golden、PI/Safety/相位链/功率输出。
+- `[交付]` 用户最新明确要求每轮完成后提交推送，覆盖附件旧 Commit/Push 禁令；此前已完成 VM/相位成果与本轮审查文档分开提交，推送 codex/falconfoc-v2-vm01a，不合并主分支。审查期只读验证与提交期身份变化分开记录。报告 docs/evidence/2026-11-17-next-code-review-03.md；完整探针/构建保留外部新目录，既有产物不清理。
+- `[边界]` G3-PWR LOCKED；硬件安全、MCU WCET/栈高水位、真实电机运行仍未验证。本轮不自动修复或进入下一文件。

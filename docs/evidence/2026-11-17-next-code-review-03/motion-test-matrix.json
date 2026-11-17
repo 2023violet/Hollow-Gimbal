@@ -1,0 +1,2101 @@
+{
+  "source_before_head": "a198f6d4a6c61f1bb9dd5968a46e7f38ac49a3f0",
+  "method": "File-Centered, Contract-Aware Review V2; independent probes outside repository",
+  "regression": {
+    "core": 15,
+    "runtime": 11,
+    "core_asan_ubsan": 15,
+    "simulation_asan_ubsan": 15,
+    "independent_error_checks": 72
+  },
+  "mutation_results": [
+    {
+      "mutation": "baseline",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 0,
+        "test_foc_motion_reference": 0
+      },
+      "independent_negative_exit": 0
+    },
+    {
+      "mutation": "prediction-sign",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 1,
+        "test_foc_motion_reference": 0
+      },
+      "independent_negative_exit": null
+    },
+    {
+      "mutation": "prediction-time-unit",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 1,
+        "test_foc_motion_reference": 0
+      },
+      "independent_negative_exit": null
+    },
+    {
+      "mutation": "ignore-acceleration",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 1,
+        "test_foc_motion_reference": 0
+      },
+      "independent_negative_exit": null
+    },
+    {
+      "mutation": "early-integral-commit",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 0,
+        "test_foc_motion_reference": 0
+      },
+      "independent_negative_exit": 1
+    },
+    {
+      "mutation": "reverse-saturation",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 0,
+        "test_foc_motion_reference": 1
+      },
+      "independent_negative_exit": null
+    },
+    {
+      "mutation": "position-single-turn",
+      "production_compiled": true,
+      "existing_motion_tests": {
+        "test_foc_motion": 1,
+        "test_foc_motion_reference": 1
+      },
+      "independent_negative_exit": null
+    }
+  ],
+  "error_path_commit_mutant_all_core_passed": 15,
+  "host_median_ns": {
+    "A": 30.4956,
+    "B": 34.6028,
+    "C": 11.2709
+  },
+  "gates": {
+    "strict_formatter": "OPEN — NEXT-QUALITY-GATE-01; not modified; prior verified failure retained",
+    "scope_all": "Not rerun for this read-only review; exact source manifest matches preceding full independent audit"
+  },
+  "commands": [
+    {
+      "name": "configure",
+      "command": [
+        "cmake",
+        "-S",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\source\\core",
+        "-B",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:20.468832+00:00",
+      "finished_utc": "2026-11-17T12:12:23.825586+00:00",
+      "log_sha256": "4e403b40c51c6c444739dbed46e2f43f4e1954aa5eef3edcede2fac978a0e8a7",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\configure.log"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cmake",
+        "--build",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\build",
+        "--parallel",
+        "4"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:23.833609+00:00",
+      "finished_utc": "2026-11-17T12:12:25.902045+00:00",
+      "log_sha256": "2dcbbd8890b5dc1d0264b5609137f185bc80c9a112641498be08df54f95fc0b3",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\build.log"
+    },
+    {
+      "name": "ctest",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\build",
+        "--output-on-failure"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:25.910817+00:00",
+      "finished_utc": "2026-11-17T12:12:30.118949+00:00",
+      "log_sha256": "65111b4a8e645eb1ae4b4e21f7a2a6b94de74720ea278a02be3d0edf0ac5237a",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core\\ctest.log"
+    },
+    {
+      "name": "configure",
+      "command": [
+        "cmake",
+        "-S",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\source\\core",
+        "-B",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe",
+        "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:40.818285+00:00",
+      "finished_utc": "2026-11-17T12:12:42.306559+00:00",
+      "log_sha256": "24afd194aa0e6eb58968e8fc53edc454ee381455f65578245568f489b396c7fc",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\configure.log"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cmake",
+        "--build",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\build",
+        "--parallel",
+        "4"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:42.315891+00:00",
+      "finished_utc": "2026-11-17T12:12:44.337689+00:00",
+      "log_sha256": "1d4d9e381718e4e0fb779eceaf1217be86911bf68637dda4252b553ded2bc760",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\build.log"
+    },
+    {
+      "name": "ctest",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\build",
+        "--output-on-failure"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:44.346982+00:00",
+      "finished_utc": "2026-11-17T12:12:48.963297+00:00",
+      "log_sha256": "44519a97400234756752c5b8b60e1a045ab7f185c34c83908f6e39861f83c73e",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\core-asan\\ctest.log"
+    },
+    {
+      "name": "configure",
+      "command": [
+        "cmake",
+        "-S",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\source\\runtime",
+        "-B",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:30.763288+00:00",
+      "finished_utc": "2026-11-17T12:12:31.955115+00:00",
+      "log_sha256": "c5227cfa9cc6138380b64406cbf181c79c59179718cbff2dbe0abbbabdf41f18",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\configure.log"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cmake",
+        "--build",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\build",
+        "--parallel",
+        "4"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:31.965735+00:00",
+      "finished_utc": "2026-11-17T12:12:33.609571+00:00",
+      "log_sha256": "4763f703fbe58f019cc0773c967ac7871a6bcc7ce0cd239ddf4c308839352597",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\build.log"
+    },
+    {
+      "name": "ctest",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\build",
+        "--output-on-failure"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:12:33.622022+00:00",
+      "finished_utc": "2026-11-17T12:12:38.544449+00:00",
+      "log_sha256": "0560fd25bb24b46c799a576f3ac10e1135c24b5bffadabcb8eb4b5abf9c550a7",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\runtime\\ctest.log"
+    },
+    {
+      "name": "configure",
+      "command": [
+        "cmake",
+        "-S",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\source\\simulation",
+        "-B",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe",
+        "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:52.758548+00:00",
+      "finished_utc": "2026-11-17T12:20:54.445071+00:00",
+      "log_sha256": "49e8650ac4f20a071a01319f8b8dcc1b72393786692b3cedee114d31da68ea4a",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\configure.log"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cmake",
+        "--build",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\build",
+        "--parallel",
+        "4"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:54.455078+00:00",
+      "finished_utc": "2026-11-17T12:20:57.706530+00:00",
+      "log_sha256": "14372dea706ea755ea96909e4f2c26211750355c83e57862295b8ae0d0a242c7",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\build.log"
+    },
+    {
+      "name": "ctest",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\build",
+        "--output-on-failure"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:57.717290+00:00",
+      "finished_utc": "2026-11-17T12:21:24.696952+00:00",
+      "log_sha256": "148bb06e6b3f4e4c4ce1cdcf936844ca161d5ed5a46c6eef654503360b0087a1",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\tests\\simulation-asan\\ctest.log"
+    },
+    {
+      "name": "compile",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_export.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\motion-export.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:17:52.784548+00:00",
+      "finished_utc": "2026-11-17T12:17:53.392213+00:00",
+      "log_sha256": "a44941b306d00f1109044652c5aff16d5f7c91b7ae9a6f62990c542e6ad4fc52",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\compile.log"
+    },
+    {
+      "name": "compile-errors",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\motion-errors.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:17:53.401205+00:00",
+      "finished_utc": "2026-11-17T12:17:53.979412+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\compile-errors.log"
+    },
+    {
+      "name": "errors",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\motion-errors.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:17:53.979970+00:00",
+      "finished_utc": "2026-11-17T12:17:54.419803+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\errors.log"
+    },
+    {
+      "name": "measure",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\motion-export.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:17:55.075513+00:00",
+      "finished_utc": "2026-11-17T12:17:55.855409+00:00",
+      "log_sha256": "7d7b738c30e8a4eda77bdb0cedf7c7e4e01f4985e57e28a7e366d26cc5acab89",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical\\measure.log"
+    },
+    {
+      "name": "compile",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_export.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\motion-export.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:46.918353+00:00",
+      "finished_utc": "2026-11-17T12:21:47.439549+00:00",
+      "log_sha256": "a44941b306d00f1109044652c5aff16d5f7c91b7ae9a6f62990c542e6ad4fc52",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\compile.log"
+    },
+    {
+      "name": "compile-errors",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\motion-errors.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:47.442204+00:00",
+      "finished_utc": "2026-11-17T12:21:48.012912+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\compile-errors.log"
+    },
+    {
+      "name": "errors",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\motion-errors.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:48.013545+00:00",
+      "finished_utc": "2026-11-17T12:21:48.190272+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\errors.log"
+    },
+    {
+      "name": "measure",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\motion-export.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:49.134441+00:00",
+      "finished_utc": "2026-11-17T12:21:49.988773+00:00",
+      "log_sha256": "c6db2f7300b98e41d270a2bfaac7522b48e4725dc99bb4d0bae2a6fbeb115567",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\numerical2\\measure.log"
+    },
+    {
+      "name": "compile",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:24:09.576275+00:00",
+      "finished_utc": "2026-11-17T12:24:10.129327+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan\\compile.log"
+    },
+    {
+      "name": "negative",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:24:10.130470+00:00",
+      "finished_utc": "2026-11-17T12:24:10.376941+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\probe-asan\\negative.log"
+    },
+    {
+      "name": "host-compile",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O2",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\prediction_bench.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\host-bench.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:45.993426+00:00",
+      "finished_utc": "2026-11-17T12:20:46.960052+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\host-compile.log"
+    },
+    {
+      "name": "host-measure",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\host-bench.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:46.960870+00:00",
+      "finished_utc": "2026-11-17T12:20:47.642341+00:00",
+      "log_sha256": "1b065e79d00f92d23bd3681b126c73e2468bfee33d599f32fd363d6fc061c117",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\host-measure.log"
+    },
+    {
+      "name": "compile-motion",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:47.648763+00:00",
+      "finished_utc": "2026-11-17T12:20:48.576742+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-motion.log"
+    },
+    {
+      "name": "symbols-motion",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-S",
+        "--size-sort",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.577389+00:00",
+      "finished_utc": "2026-11-17T12:20:48.618257+00:00",
+      "log_sha256": "265c9a62e5cc5725522ec538bbfd59301b4b809104b288d723d30d810aea264e",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\symbols-motion.log"
+    },
+    {
+      "name": "undefined-motion",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-u",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.627022+00:00",
+      "finished_utc": "2026-11-17T12:20:48.647422+00:00",
+      "log_sha256": "fc43bf8120c29acf6d7417ee0a018ae5b617408d33ff02d4c6369be16b505d5d",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\undefined-motion.log"
+    },
+    {
+      "name": "disassembly-motion",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-objdump.exe",
+        "-dr",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.656612+00:00",
+      "finished_utc": "2026-11-17T12:20:48.706705+00:00",
+      "log_sha256": "289762e81d6ee0a255f0138e8bdd9cd3e23d1325ea26ee321f1d0f60218265d2",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\disassembly-motion.log"
+    },
+    {
+      "name": "compile-core",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.718173+00:00",
+      "finished_utc": "2026-11-17T12:20:48.961083+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-core.log"
+    },
+    {
+      "name": "symbols-core",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-S",
+        "--size-sort",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.961648+00:00",
+      "finished_utc": "2026-11-17T12:20:48.975619+00:00",
+      "log_sha256": "d427b62c3371e7cd4c7851ca7c5974da167664e3c79b3cf6bc32d57964a0a86c",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\symbols-core.log"
+    },
+    {
+      "name": "undefined-core",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-u",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:48.983240+00:00",
+      "finished_utc": "2026-11-17T12:20:48.997011+00:00",
+      "log_sha256": "12f39a5e8c1982131ffcec2ef518c6f29a0826db28d942c47cd61ec01458915f",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\undefined-core.log"
+    },
+    {
+      "name": "disassembly-core",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-objdump.exe",
+        "-dr",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.005449+00:00",
+      "finished_utc": "2026-11-17T12:20:49.021917+00:00",
+      "log_sha256": "5959a638980a9e7ee3d1bcd74fda7ec8351873df7dc3609c8892e6de08301276",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\disassembly-core.log"
+    },
+    {
+      "name": "compile-candidates",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\predict_candidates.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.029548+00:00",
+      "finished_utc": "2026-11-17T12:20:49.181703+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-candidates.log"
+    },
+    {
+      "name": "symbols-candidates",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-S",
+        "--size-sort",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.182315+00:00",
+      "finished_utc": "2026-11-17T12:20:49.235187+00:00",
+      "log_sha256": "5756876367091ba205fb7a5fdd1b51a4a5d9cce9c8c6a00b9801df57fe810897",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\symbols-candidates.log"
+    },
+    {
+      "name": "undefined-candidates",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-nm.exe",
+        "-u",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.244197+00:00",
+      "finished_utc": "2026-11-17T12:20:49.258732+00:00",
+      "log_sha256": "f1e98adb2ea1f901fdb90deaede05d2ceeed7def30164d1e932373e68a2eea2b",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\undefined-candidates.log"
+    },
+    {
+      "name": "disassembly-candidates",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-objdump.exe",
+        "-dr",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.265650+00:00",
+      "finished_utc": "2026-11-17T12:20:49.278815+00:00",
+      "log_sha256": "d7f66ea032290626d6b3f01bf9b2528d2094af4081205ad19beb55e4374d1052",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\disassembly-candidates.log"
+    },
+    {
+      "name": "compile-main-A",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-DAUDIT_VARIANT=0",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\arm_link_probe.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-A.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.288415+00:00",
+      "finished_utc": "2026-11-17T12:20:49.362075+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-main-A.log"
+    },
+    {
+      "name": "link-A",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "--specs=nosys.specs",
+        "-nostartfiles",
+        "-Wl,--gc-sections,--entry=main",
+        "-Wl,-Map,D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-A.map",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-A.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o",
+        "-lm",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-A.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.362637+00:00",
+      "finished_utc": "2026-11-17T12:20:49.557060+00:00",
+      "log_sha256": "a976fe06561a08efcc4c84d1eb877e803a6e3101af159d7e4cbd06f052305195",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-A.log"
+    },
+    {
+      "name": "size-A",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-size.exe",
+        "-A",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-A.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.567578+00:00",
+      "finished_utc": "2026-11-17T12:20:49.597749+00:00",
+      "log_sha256": "3a3539e4c0d34bc57517c6fd49dda19706668cf01d29eee74e39c916e88bc0b0",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\size-A.log"
+    },
+    {
+      "name": "compile-main-B",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-DAUDIT_VARIANT=1",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\arm_link_probe.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-B.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.604597+00:00",
+      "finished_utc": "2026-11-17T12:20:49.671572+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-main-B.log"
+    },
+    {
+      "name": "link-B",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "--specs=nosys.specs",
+        "-nostartfiles",
+        "-Wl,--gc-sections,--entry=main",
+        "-Wl,-Map,D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-B.map",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-B.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o",
+        "-lm",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-B.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.672212+00:00",
+      "finished_utc": "2026-11-17T12:20:49.762598+00:00",
+      "log_sha256": "a976fe06561a08efcc4c84d1eb877e803a6e3101af159d7e4cbd06f052305195",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-B.log"
+    },
+    {
+      "name": "size-B",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-size.exe",
+        "-A",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-B.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.764571+00:00",
+      "finished_utc": "2026-11-17T12:20:49.777125+00:00",
+      "log_sha256": "4f8f294b27ef9625ac14f2e847413f279e2da5cfd652e7725e27a63665cfb96a",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\size-B.log"
+    },
+    {
+      "name": "compile-main-C",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-std=c11",
+        "-Os",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-fstack-usage",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "-DAUDIT_VARIANT=2",
+        "-c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\arm_link_probe.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-C.o"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.784395+00:00",
+      "finished_utc": "2026-11-17T12:20:49.851285+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\compile-main-C.log"
+    },
+    {
+      "name": "link-C",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-gcc.exe",
+        "-mcpu=cortex-m4",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "--specs=nosys.specs",
+        "-nostartfiles",
+        "-Wl,--gc-sections,--entry=main",
+        "-Wl,-Map,D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-C.map",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\main-C.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\motion.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\core.o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\candidates.o",
+        "-lm",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-C.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.852051+00:00",
+      "finished_utc": "2026-11-17T12:20:49.941477+00:00",
+      "log_sha256": "a976fe06561a08efcc4c84d1eb877e803a6e3101af159d7e4cbd06f052305195",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-C.log"
+    },
+    {
+      "name": "size-C",
+      "command": [
+        "C:\\Program Files (x86)\\Arm GNU Toolchain arm-none-eabi\\14.3 rel1\\bin\\arm-none-eabi-size.exe",
+        "-A",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\link-C.elf"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:49.943329+00:00",
+      "finished_utc": "2026-11-17T12:20:49.957153+00:00",
+      "log_sha256": "330b458e681c74ccd96014efedf5f8652c2f87644cf7ca4fed1dbcc43d9f29c1",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\resources\\size-C.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:42.451322+00:00",
+      "finished_utc": "2026-11-17T12:20:42.886327+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:42.887311+00:00",
+      "finished_utc": "2026-11-17T12:20:43.031150+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:43.031718+00:00",
+      "finished_utc": "2026-11-17T12:20:43.600163+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:43.600897+00:00",
+      "finished_utc": "2026-11-17T12:20:43.763437+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-independent-negative",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:43.771394+00:00",
+      "finished_utc": "2026-11-17T12:20:44.188025+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\compile-independent-negative.log"
+    },
+    {
+      "name": "independent-negative",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:44.188543+00:00",
+      "finished_utc": "2026-11-17T12:20:44.335469+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\baseline\\independent-negative.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:44.338259+00:00",
+      "finished_utc": "2026-11-17T12:20:44.757775+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:20:44.758461+00:00",
+      "finished_utc": "2026-11-17T12:20:44.892835+00:00",
+      "log_sha256": "12eceadae3514829ad3d4a6e21267f898d62f2541ce4f26db57934162457de4f",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:20:44.899875+00:00",
+      "finished_utc": "2026-11-17T12:20:45.294766+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:20:45.295302+00:00",
+      "finished_utc": "2026-11-17T12:20:45.444362+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations\\prediction-sign\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:41.071373+00:00",
+      "finished_utc": "2026-11-17T12:21:41.487775+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:41.488431+00:00",
+      "finished_utc": "2026-11-17T12:21:41.622128+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:41.622655+00:00",
+      "finished_utc": "2026-11-17T12:21:41.984398+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:41.985117+00:00",
+      "finished_utc": "2026-11-17T12:21:42.117042+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-independent-negative",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:42.119045+00:00",
+      "finished_utc": "2026-11-17T12:21:42.509672+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\compile-independent-negative.log"
+    },
+    {
+      "name": "independent-negative",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:42.510175+00:00",
+      "finished_utc": "2026-11-17T12:21:42.651737+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\baseline\\independent-negative.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:45.868264+00:00",
+      "finished_utc": "2026-11-17T12:21:46.263968+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit",
+      "exit": 1,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:46.264587+00:00",
+      "finished_utc": "2026-11-17T12:21:46.400778+00:00",
+      "log_sha256": "ba9480a4b1188ebda6142f732e8f6cb9ec6ada81c554119cb22e6a5b0f7a30d1",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\early-integral-commit\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:44.812442+00:00",
+      "finished_utc": "2026-11-17T12:21:45.210804+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:21:45.211654+00:00",
+      "finished_utc": "2026-11-17T12:21:45.344925+00:00",
+      "log_sha256": "18d8ce01f5e3791b99bb2bf7a49613258ae97455cafd93316ae0bc948c361bbc",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:45.352733+00:00",
+      "finished_utc": "2026-11-17T12:21:45.734759+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:45.735257+00:00",
+      "finished_utc": "2026-11-17T12:21:45.865503+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\ignore-acceleration\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:42.655439+00:00",
+      "finished_utc": "2026-11-17T12:21:43.063627+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:21:43.064437+00:00",
+      "finished_utc": "2026-11-17T12:21:43.194938+00:00",
+      "log_sha256": "12eceadae3514829ad3d4a6e21267f898d62f2541ce4f26db57934162457de4f",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:43.196761+00:00",
+      "finished_utc": "2026-11-17T12:21:43.570945+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:43.571526+00:00",
+      "finished_utc": "2026-11-17T12:21:43.721448+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-sign\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:43.724681+00:00",
+      "finished_utc": "2026-11-17T12:21:44.148301+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:21:44.149157+00:00",
+      "finished_utc": "2026-11-17T12:21:44.279355+00:00",
+      "log_sha256": "a6bce9cf020a3461d01d87db6a7d526908ad1780c245f9fe6baf14bf6275dde6",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:44.287834+00:00",
+      "finished_utc": "2026-11-17T12:21:44.672547+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:21:44.673043+00:00",
+      "finished_utc": "2026-11-17T12:21:44.809271+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations2\\prediction-time-unit\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:46.393153+00:00",
+      "finished_utc": "2026-11-17T12:22:46.806749+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:46.807495+00:00",
+      "finished_utc": "2026-11-17T12:22:46.949209+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:46.949810+00:00",
+      "finished_utc": "2026-11-17T12:22:47.327058+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:47.327600+00:00",
+      "finished_utc": "2026-11-17T12:22:47.472436+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-independent-negative",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:47.474288+00:00",
+      "finished_utc": "2026-11-17T12:22:47.873823+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\compile-independent-negative.log"
+    },
+    {
+      "name": "independent-negative",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:47.874405+00:00",
+      "finished_utc": "2026-11-17T12:22:48.519766+00:00",
+      "log_sha256": "00a67efefe7813436c3c6d6fbd0e8c1e2c1c76fc45b0d660bac628cb7360a700",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\baseline\\independent-negative.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:52.167118+00:00",
+      "finished_utc": "2026-11-17T12:22:52.568189+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:52.569160+00:00",
+      "finished_utc": "2026-11-17T12:22:52.709744+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:52.710298+00:00",
+      "finished_utc": "2026-11-17T12:22:53.094173+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:53.094698+00:00",
+      "finished_utc": "2026-11-17T12:22:53.234564+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-independent-negative",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\motion_errors.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:53.236149+00:00",
+      "finished_utc": "2026-11-17T12:22:53.637653+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\compile-independent-negative.log"
+    },
+    {
+      "name": "independent-negative",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\negative.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:22:53.638251+00:00",
+      "finished_utc": "2026-11-17T12:22:53.801019+00:00",
+      "log_sha256": "9c23f00264c8486ff79604ece6e00bb83d6ffa9a2f509b3cb60627ab6e3fa757",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\independent-negative.log"
+    },
+    {
+      "name": "configure-all-core",
+      "command": [
+        "cmake",
+        "-S",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\source\\core",
+        "-B",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\build",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:56.059532+00:00",
+      "finished_utc": "2026-11-17T12:22:57.496676+00:00",
+      "log_sha256": "a7579d4260623d8f1379ba7b5c925c37a4b8d8bb1dfdb97bf995abc3de7296d1",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\configure-all-core.log"
+    },
+    {
+      "name": "build-all-core",
+      "command": [
+        "cmake",
+        "--build",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\build",
+        "--parallel",
+        "4"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:57.505762+00:00",
+      "finished_utc": "2026-11-17T12:22:59.799786+00:00",
+      "log_sha256": "0943669aaae07249db35fdab59116d1ab51901db3d62aa06b2f4d620c74ffe1f",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\build-all-core.log"
+    },
+    {
+      "name": "all-core-mutant",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\build",
+        "--output-on-failure"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:59.809722+00:00",
+      "finished_utc": "2026-11-17T12:23:02.837882+00:00",
+      "log_sha256": "59e62267f849c73544eb7b4d88d6c0d5fe901e22e9f33c875a4589849d4099b0",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\early-integral-commit\\all-core-mutant.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:51.097051+00:00",
+      "finished_utc": "2026-11-17T12:22:51.502937+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:22:51.503624+00:00",
+      "finished_utc": "2026-11-17T12:22:51.641280+00:00",
+      "log_sha256": "18d8ce01f5e3791b99bb2bf7a49613258ae97455cafd93316ae0bc948c361bbc",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:51.643155+00:00",
+      "finished_utc": "2026-11-17T12:22:52.024730+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:52.025287+00:00",
+      "finished_utc": "2026-11-17T12:22:52.163573+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\ignore-acceleration\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:24:07.675154+00:00",
+      "finished_utc": "2026-11-17T12:24:08.136923+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn",
+      "exit": 1,
+      "expected_exit": [
+        0,
+        1
+      ],
+      "started_utc": "2026-11-17T12:24:08.145297+00:00",
+      "finished_utc": "2026-11-17T12:24:08.306185+00:00",
+      "log_sha256": "05f25d29a25a09d7ef6e905443cc3888b7ed2dc95c17a837aa56caae5780c2a8",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:24:08.322599+00:00",
+      "finished_utc": "2026-11-17T12:24:08.758852+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn",
+      "exit": 1,
+      "expected_exit": [
+        0,
+        1
+      ],
+      "started_utc": "2026-11-17T12:24:08.769500+00:00",
+      "finished_utc": "2026-11-17T12:24:08.944603+00:00",
+      "log_sha256": "675542093fddc7a2ee5f0e1575352fba17a494b06f26b5a1c848ad82cfb8ec0d",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\position-single-turn\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:48.523872+00:00",
+      "finished_utc": "2026-11-17T12:22:48.968665+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:22:48.969272+00:00",
+      "finished_utc": "2026-11-17T12:22:49.098006+00:00",
+      "log_sha256": "12eceadae3514829ad3d4a6e21267f898d62f2541ce4f26db57934162457de4f",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:49.100273+00:00",
+      "finished_utc": "2026-11-17T12:22:49.482566+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:49.483091+00:00",
+      "finished_utc": "2026-11-17T12:22:50.016572+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-sign\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:50.024082+00:00",
+      "finished_utc": "2026-11-17T12:22:50.425300+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit",
+      "exit": 1,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:22:50.426182+00:00",
+      "finished_utc": "2026-11-17T12:22:50.577868+00:00",
+      "log_sha256": "a6bce9cf020a3461d01d87db6a7d526908ad1780c245f9fe6baf14bf6275dde6",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:50.579825+00:00",
+      "finished_utc": "2026-11-17T12:22:50.951869+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:22:50.952380+00:00",
+      "finished_utc": "2026-11-17T12:22:51.094333+00:00",
+      "log_sha256": "16ad2fdc39f65d15f25f048bc70ce0c534f8502e64580d4ffd3250d42b0ca1f9",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\prediction-time-unit\\run-test_foc_motion_reference.log"
+    },
+    {
+      "name": "compile-test_foc_motion",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:23:02.847977+00:00",
+      "finished_utc": "2026-11-17T12:23:03.319951+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\compile-test_foc_motion.log"
+    },
+    {
+      "name": "run-test_foc_motion",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\test_foc_motion.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation",
+      "exit": 0,
+      "expected_exit": 1,
+      "started_utc": "2026-11-17T12:23:03.320774+00:00",
+      "finished_utc": "2026-11-17T12:23:03.483132+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\run-test_foc_motion.log"
+    },
+    {
+      "name": "compile-test_foc_motion_reference",
+      "command": [
+        "C:/Program Files/LLVM/bin/clang.exe",
+        "-std=c11",
+        "-O0",
+        "-ID:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\include",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_core.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\src\\foc_trajectory.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\foc_motion.c",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\snapshot\\core\\tests\\test_foc_motion_reference.c",
+        "-o",
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation",
+      "exit": 0,
+      "expected_exit": 0,
+      "started_utc": "2026-11-17T12:24:07.086938+00:00",
+      "finished_utc": "2026-11-17T12:24:07.509308+00:00",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\compile-test_foc_motion_reference.log"
+    },
+    {
+      "name": "run-test_foc_motion_reference",
+      "command": [
+        "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\test_foc_motion_reference.exe"
+      ],
+      "cwd": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation",
+      "exit": 1,
+      "expected_exit": [
+        0,
+        1
+      ],
+      "started_utc": "2026-11-17T12:24:07.519833+00:00",
+      "finished_utc": "2026-11-17T12:24:07.666881+00:00",
+      "log_sha256": "6ef10633de667654c4a034af5be2b4a4935f3e0cdbbe2f2508b90dbfe95fd212",
+      "log": "D:\\study\\Software\\FalconFOC-code-review-03-20261117\\mutations3\\reverse-saturation\\run-test_foc_motion_reference.log"
+    }
+  ],
+  "harness_corrections": [
+    "Initial assumption that motion_reference tests prediction was false; actual pass retained.",
+    "Broad unconditional early commit changes saturated metadata and is detected; separate error-branch-only mutation isolates failure atomicity.",
+    "Reverse branch mutant passes basic motion test but fails independent motion_reference at index 317."
+  ],
+  "source_identity_matches_audit02b": true
+}

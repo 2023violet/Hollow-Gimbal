@@ -140,6 +140,58 @@ Current tests also execute positive and negative multi-turn trajectories.
 The `1e-5 rad` phase budget is a declared Host numerical test budget, not a
 hardware accuracy or real-time guarantee.
 
+## System angle error acceptance
+
+The existing `test-foc-periodic-chain` entry also runs `NEXT-SYSTEM-ANGLE-01`.
+It reuses the Virtual context/output adapter and real Encoder, H1, H0,
+Pipeline and Current implementation. Prescribed Double mechanical trajectories
+drive the real virtual encoder-code generator; neither H1 speed nor H0 phase
+is overwritten in these acceptance cases. This is kinematic sensor/control
+integration with an exactly representable 1 A alpha-axis current, not a motor
+response or hardware-quality test.
+
+The test-only `tests/foc_system_angle_oracle.h` supplies analytic motion,
+nearest-count quantization and a separate Double difference/LPF reference.
+Thirteen deterministic cases cover static/low/constant speed, capture delay,
+acceleration/reversal, capture-stamp bias/jitter, ADC sampling jitter,
+execution jitter, counter/timestamp wrap, combined disturbances and both four
+and seven pole pairs. H0/H1 remain 200/500 us. The test profile selects Board's
+650 us prediction policy; production Virtual and Board settings are unchanged.
+The 20 ms history establishes Encoder speed before the measured run; the
+existing startup/readiness cases remain separate and unchanged.
+`assumed_transport_complete_us` declares test input availability at capture+5 us
+and checks that H1 runs afterwards. It is not a transport simulation or a
+measurement of SPI completion. Capture, H1 publication, ADC sample and H0
+execution times remain separate columns.
+
+Error accounting separates quantization, phase mapping, raw-speed estimation,
+LPF lag, capture-stamp bias, constant-speed model error and Float32 prediction
+error. The independent speed-reference comparison has a 0.001 mechanical
+rad/s arithmetic tolerance; it does not promise that the estimated speed is
+within 0.001 rad/s of physical truth. The `2e-6 rad` prediction tolerance
+likewise covers calculation only. Conditional triangle bounds and actual
+combined errors are reported separately; no product total-angle limit or
+statistical independence is assumed. Current/Park measurements are checked
+against Double rotations and `2 * |I_alpha_beta| * |sin(phase_error/2)|`.
+Paired PI calculations use the same pre-step state, currents and target.
+
+Export every accepted measurement, its component errors and timestamps:
+
+```powershell
+build/vm01a-simulation/test-foc-periodic-chain.exe --system-angle-csv build/vm01a-simulation/system-angle.csv
+```
+
+The normal CTest invocation retains the complete old periodic-chain group and
+adds this group; the CSV option runs only the new group. Rejected Encoder
+transport/code feedback and an expired accepted source cannot create a new
+UPDATE. H1 rejection of a future/duplicate/expired **candidate** retains the
+previous accepted snapshot: H0 may still UPDATE while that previous source is
+fresh. The tests verify that source identity explicitly. This is not a promise
+that every rejected publication immediately latches a fault.
+Rejected candidates carry deliberately different phase/speed. Retained logical
+payload and Current dq must remain consistent, and the original source expiry
+must still inhibit after each rejection.
+
 ## Host control-tuning research
 
 `tools/falconfoc-cli/control_tuning.py` runs the deterministic

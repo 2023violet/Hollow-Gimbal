@@ -2861,3 +2861,13 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - [回归] Core Clang/GCC各15/15、Runtime11/11、Simulation15/15；Core/Simulation ASan+UBSan各15/15；Source81/9/9、修改C/H格式、严格Scope all含30项CMake格式和Legacy Host45/45通过。原15个Core CTest入口保持。
 - [范围] 仅测试、Motion头注释/Core说明、新证据及本日志；生产Motion/参数/Board1/Safety/PWM/UART/整数相位/Golden均未改。区分准入、计算回归与系统总误差；max_error仅约束加速度模型贡献，不称控制品质提升或任意输入精度保证。2427个旧ignored产物保留；Gate使用的6个Legacy ELF/MAP为核对SHA的历史副本，非新ARM重建。
 - [交付/边界] 报告docs/evidence/2026-11-17-next-motion-contract-01.md，软件验收PASS，按本轮第7节先请求确认，用户明确批准后才普通commit/push并读回远端核对；最终SHA单独记录，保护收据保留确认前时点。不自动进入下一轮。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。
+
+
+## 2026-11-17 FalconFOC V2 NEXT-SYSTEM-ANGLE-01 系统角度误差与组合扰动
+
+- [链路/Oracle] 扩展原periodic-chain CTest，真实Encoder→H1→H0→Pipeline/Current。Double强制运动、最近码值和独立速度/LPF参考；分离量化、源映射、raw/LPF、时间戳、模型与Float32计算项，不覆盖生产H1速度/H0角度。
+- [实测] 13类预热场景及6类拒绝，2587接受测量行；最大总相位0.0290408770921rad、组合RMS0.0121325047757rad，最大Id/Iq误差0.0233581373120/0.0286009012699A（1A向量）。量化p7上界0.00033555829735rad，计算项最大3.98386820422e-7rad；条件三角界不当作产品总精度保证。
+- [准入] 用户明确接受拒绝候选后保留旧新鲜源继续控制；正式检查拒绝payload不污染Current，原源过期后INHIBIT、UPDATE不增。传输失败/越界码发布invalid亦禁止新UPDATE。独立复核P2测试遗漏已通过污染旧槽的可编译变异0→1和正常GREEN关闭，无确认生产缺陷。
+- [归因] 当前10ms Current基线与隔离理想ADC相位对照均保留CONTROL_QUALITY_FAIL；RUNNING RMSE仅0.089168893772→0.089167571490A。历史quality判据包含STOP后的full-window末项；不把该标签解释成相位主因，也不修改PI/电压/质量阈值。
+- [回归/保护] Core15/15、Runtime11/11、复核后Simulation Clang/GCC/ASan+UBSan各15/15，Core ASan15/15，Source82/9/9、格式、strict Scope all含30项CMake和Host45/45通过。仅测试/helper/说明/本日志/新证据；生产、旧证据及2427既有产物保留，Gate使用历史ELF/MAP副本，非新ARM重建。
+- [交付/边界] 报告docs/evidence/2026-11-17-next-system-angle-01.md，受控Host合同PASS；先交付验收并停止，用户随后明确要求GitHub提交推送，获授权后仅普通提交推送本任务8文件并读回远端核对。保护收据保留授权前时点，最终SHA另记。不进入下一阶段。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。

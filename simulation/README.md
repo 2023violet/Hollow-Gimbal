@@ -223,3 +223,23 @@ This project does not call `foc_board_init()`, does not alter
 `foc_board_output_submit()`, and cannot unlock real Board1 PWM.
 
 /* ---------------------------------------- end of file ----------------------------------------- */
+
+## Model identification and PI comparison
+
+The Simulation suite includes `test-foc-motor-id-virtual`. It feeds standstill
+voltage and current observations from the existing RK4 plant into the portable
+calibration API, then runs fixed gains, model-truth gains and fitted-model gains
+through the same Runtime-backed Current/Virtual Motor research profile.
+Run the test executable with `--trace` to emit per-H0 observations for the
+existing Host quality metrics. The q-axis standstill fixture isolates the
+electrical axis with zero magnet flux and zero d current. A separate free-rotor
+fixture retains magnet flux and verifies rejection. Use `--quality` to
+emit voltage, timing and frame qualification rows. The voltage fixture
+applies a test-only transfer gain at the RK4 input and shares the resulting
+current endpoints across requested- and terminal-voltage fits. The angle
+fixture superposes independent d/q trajectories at fixed rotor angle and
+rotates their observations. The quality rows report the configured voltage
+class. The request-rejected arm submits an unverified class and admits zero
+voltage intervals. Virtual Motor defaults and the original `--trace`
+experiment retain their behavior. See the
+[calibration assumptions](../calibration/README.md#standstill-motor-rl-and-pi-design).

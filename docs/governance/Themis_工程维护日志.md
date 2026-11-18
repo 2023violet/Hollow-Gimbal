@@ -2897,3 +2897,15 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - [实现] `foc_pipeline_submit` 取消候选寄存器的 20 B 旧值预拷贝。UPDATE/INHIBIT 成功完整写入五字段，提交确认、回调及 PI Trial 的顺序保持。
 - [验收] A/B 11 条事务记录一致，独立复核无 P0/P1/P2；ARM 函数和对象各减 14 B，整镜像 FLASH 减 12 B，静态帧与 RAM 原值。Runtime 11、Simulation 15、Core 15、NP 2、Board 4、Runtime/Simulation sanitizer 11/15、Source、格式及严格 Scope all 通过。
 - [交付] 报告 `docs/evidence/2026-11-17-next-code-improve-05.md` 附原始证据，保留 REVIEW-05 和 2,427 个原有忽略产物，等待 Git 交付确认。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。
+
+## 2026-11-17 NEXT-MOTOR-ID-01A R/L 参数辨识与 PI 候选
+
+- 新增独立 C11 逐轴静止 R/L 窗积分拟合、候选组合及 PI 设计。配置限制最快 RL 极点的采样孔径，拟合有效性、源身份、残差和采样/延迟/电压增益守卫公开可查。
+- Host Virtual Motor 三组受控捕获，最大逐轴 Rs/L 误差约 0.273%/0.229%。固定、真值和辨识增益的 Current 比较保留饱和段失败标签，恢复通过。独立审查关闭采样 P1，最终无 P0/P1/P2 发现。
+- Core 15/15、Calibration 2/2、Simulation 18/18、ASan/UBSan 2/2、18/18，严格 Scope all 通过。ARM 单轴实例 216 B、新对象 text 4018 B，锁定镜像哈希相同。证据见 `docs/evidence/2026-11-17-next-motor-id-01a.md`。硬件安全、WCET 和实机运行未验证，功率输出锁定。
+
+## 2026-11-27 NEXT-MOTOR-ID-01B R/L 观测准入与可信端电压
+
+- 在 01A 拟合前新增采集身份、端电压类别、真实作用区间与坐标/静止证据检查。无效观测使会话失效，保留诊断并清零参数，双轴组合验证同一采集设置。
+- Virtual Motor 三种子 d/q 对照中，误标请求电压使 Rs 与 L 偏高约 25%，端电压来源正确时恢复拟合。原 01A 的 677 行轨迹一致。独立复核最终无 P0/P1/P2。
+- Core 15/15、Calibration 2/2、Simulation 18/18、Runtime 11/11、Device 2/2、ASan/UBSan 和严格 Scope all 通过。ARM 单轴 +8 B，新增对象 text +132 B，锁定固件哈希一致。见 `docs/evidence/2026-11-27-next-motor-id-01b.md`。硬件与 WCET 待证，功率输出锁定。

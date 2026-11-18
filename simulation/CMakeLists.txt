@@ -17,6 +17,7 @@ enable_testing()
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../runtime" runtime)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../protocol" protocol)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../calibration" calibration)
 
 add_library(
   falconfoc-virtual-motor STATIC src/foc_virtual_motor.c src/foc_virtual_current.c
@@ -79,3 +80,9 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/../sensors/include"
 )
 target_link_libraries(falconfoc-virtual-device PRIVATE falconfoc-virtual-motor falconfoc-wire)
+
+add_executable(test-foc-motor-id-virtual tests/test_foc_motor_id_virtual.c)
+target_link_libraries(
+  test-foc-motor-id-virtual PRIVATE falconfoc-virtual-motor falconfoc-calibration
+)
+add_test(NAME test-foc-motor-id-virtual COMMAND test-foc-motor-id-virtual)

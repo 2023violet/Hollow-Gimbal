@@ -50,6 +50,9 @@ struct foc_virtual_current_profile {
     struct foc_current_config current;
     struct foc_safe_config safety;
     struct foc_runtime_config runtime;
+    /** Host encoder distortion in undirected raw coordinates, zero disables. */
+    double encoder_fundamental_error_rad;
+    double encoder_third_error_rad;
 };
 
 /** Host output disposition used by the virtual plant. */

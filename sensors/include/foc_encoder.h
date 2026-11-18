@@ -111,6 +111,25 @@ enum foc_encoder_status {
     FOC_ENCODER_STATUS_ERR_SPEED = -7,
     /** The sample or calculated value was invalid. */
     FOC_ENCODER_STATUS_ERR_SAMPLE = -8,
+    /** A LUT does not belong to this encoder identity or CPR. */
+    FOC_ENCODER_STATUS_ERR_LUT_IDENTITY = -9,
+    /** An offset exceeds the allowed magnitude. */
+    FOC_ENCODER_STATUS_ERR_LUT_RANGE = -10,
+    /** A segment, including the closing segment, has an unsupported slope. */
+    FOC_ENCODER_STATUS_ERR_LUT_SLOPE = -11,
+};
+
+/**
+ * Periodic correction in raw encoder coordinates, before direction.
+ * Offsets in signed whole counts at knot k * CPR / length, k = 0..length-1.
+ * The final segment closes to knot zero. Use a distinct nonzero identity
+ * for each encoder and mounting/calibration configuration.
+ */
+struct foc_encoder_lut {
+    const int16_t *offset_counts;
+    uint32_t length;
+    uint32_t counts_per_revolution;
+    uint32_t encoder_identity;
 };
 
 /** Static policy for one absolute encoder instance. */
@@ -165,11 +184,13 @@ struct foc_encoder_feedback {
     enum foc_encoder_quality quality;
     /**
      * Directed integer cycle in [0, config.counts_per_revolution), from this
-     * accepted raw observation; equal to mathematical_mod(position_counts, CPR).
+     * accepted corrected observation; equal to mathematical_mod(position_counts, CPR).
      * Present on the first position-only frame without making speed/valid true.
      * Cleared on rejected observations; zero alone never implies validity.
      */
     uint32_t mechanical_phase_count;
+    /** Corrected undirected code, in [0, CPR). Cleared on rejection. */
+    uint32_t corrected_code;
 };
 
 /** Caller-owned state for one encoder instance. */
@@ -194,12 +215,42 @@ struct foc_encoder_context {
     bool velocity_seen;
     bool tracker_seen;
     bool continuity_lost;
+    bool lut_varies;
+    /** Admitted immutable offsets and count. Null offsets disable compensation. */
+    const int16_t *lut_offsets;
+    uint32_t lut_length;
+    /** Last accepted undirected corrected code. */
+    uint32_t previous_corrected_code;
 };
 
 /* Public Functions ------------------------------------------------------------- */
 
 /** Validate configuration and initialize one encoder context. */
 int foc_encoder_init(struct foc_encoder_context *context, const struct foc_encoder_config *config);
+
+/**
+ * Validate table storage, identity, shape, range and all circular slopes.
+ * Length is 2..min(CPR, 1024). Absolute offset cannot exceed floor(CPR/8).
+ * The piecewise-linear corrected mapping has slope in [0.5, 1.5].
+ */
+int foc_encoder_lut_validate(const struct foc_encoder_lut *lut,
+                             uint32_t counts_per_revolution,
+                             uint32_t encoder_identity);
+
+/**
+ * Initialize a new session with an admitted LUT. Failure preserves context.
+ * The descriptor can expire after this call. Its offset array stays alive
+ * and immutable through updates and reset. Replace it only by quiesced init.
+ */
+int foc_encoder_init_with_lut(struct foc_encoder_context *context,
+                              const struct foc_encoder_config *config,
+                              uint32_t encoder_identity,
+                              const struct foc_encoder_lut *lut);
+
+/** Query the undirected correction for an admitted context. Failure leaves output untouched. */
+int foc_encoder_correct_code(const struct foc_encoder_context *context,
+                             uint32_t raw_code,
+                             uint32_t *corrected_code);
 
 /** Reset position, timing, filter history, and quality while retaining policy. */
 int foc_encoder_reset(struct foc_encoder_context *context);

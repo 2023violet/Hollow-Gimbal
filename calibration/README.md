@@ -106,6 +106,53 @@ duty constraints and control schedule. The bounds define design policy for
 the ideal model. Apply candidates explicitly to an offline configuration and
 validate the closed-loop response before using them in another context.
 
+## Offline encoder LUT generation
+
+The encoder calibrator lives in `foc_encoder_calibration.h`. It fits the
+inverse mapping from raw hardware code to measured mechanical reference.
+The caller supplies a real Sensor policy, fixed setup and reference identity,
+and a known mechanical reference zero in radians. Each pair must carry the
+same raw aperture and reference timestamp on a shared microsecond clock.
+The acquisition owner verifies reference independence, time synchronization,
+direction and zero alignment. Calibration checks the supplied identities,
+validity, timestamps, continuous sequence and reference qualification.
+
+`foc_encoder_cal_init()` begins training; `foc_encoder_cal_push()` accepts
+pairs. Each segment must have the configured count, samples in all four
+quarters and sufficient position variance during training. Use 4–64 equally
+spaced knots and at least four raw codes per segment. Local linear fits in
+raw coordinates estimate their two endpoints. The two estimates meeting
+at a knot are averaged, including the periodic seam. The signed knot mean
+is checked as a zero-bias diagnostic and removed before rounding. The
+unrounded nodal mean is zero; integer quantization can leave up to half a
+count of mean. The reference and electrical zero settings remain external
+to the generated table. The training diagnostic measures the interpolant
+of the integer knots before the Sensor's per-sample integer rounding and
+includes a scale-dependent allowance for roundoff. Its per-segment gate
+retains sensitivity to local residuals despite uneven global coverage.
+
+`foc_encoder_cal_freeze()` checks training diagnostics, quantizes knots and
+runs the existing Sensor LUT admission. Start a distinct, later holdout
+capture with `foc_encoder_cal_begin_holdout()`. Its full coverage is
+required, and its errors use `foc_encoder_correct_code()` on the frozen
+table. `foc_encoder_cal_finish()` checks RMS, peak and non-degradation
+against the raw angle. A rejected holdout cannot modify the fit and still
+be accepted in that session. Host datasets should be distinct in capture
+and sample trajectory. Chronology and IDs support provenance, and the
+caller is responsible for ensuring observations are actually independent.
+
+`foc_encoder_cal_export()` copies a valid result into caller-owned storage.
+Keep the result and its acquisition policy for traceability. Borrow the
+read-only Sensor descriptor with `foc_encoder_cal_make_lut()` and install
+it explicitly at Sensor initialization. The result must outlive that
+Sensor use. Reset retains policy and starts a new capture with a fresh ID.
+Invalid operations preserve independently exported results. This module
+does not enter Runtime or the current reference firmware build.
+
+The Simulation periodic-chain test accepts `--encoder-calibration-study`
+for quality and control-chain summaries and `--encoder-calibration-dataset`
+to also emit the underlying training, holdout and negative-case pairs.
+
 ## Build and test
 
 ```powershell

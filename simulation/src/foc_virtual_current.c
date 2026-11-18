@@ -131,14 +131,28 @@ static int foc_virtual_integrate_to(struct foc_virtual_current *context, uint32_
     return 0;
 }
 
+static int foc_virtual_encoder_code(const struct foc_virtual_current *context, uint16_t *code)
+{
+    const double fundamental = context->profile.encoder_fundamental_error_rad;
+    const double third = context->profile.encoder_third_error_rad;
+    const struct foc_encoder_config *encoder = &context->profile.encoder;
+    if (fundamental == 0.0 && third == 0.0) {
+        return foc_virtual_motor_make_encoder_code(&context->motor, encoder, code);
+    }
+    /* Bias the simulated transducer before its existing quantizer. The real
+     * Plant angle remains available for ADC synthesis and the Host reference. */
+    struct foc_virtual_motor observation = context->motor;
+    const double direction = encoder->direction;
+    const double phase = direction * observation.state.mechanical_position_rad;
+    const double error = fundamental * sin(phase + 0.41) + third * sin(3.0 * phase - 0.23);
+    observation.state.mechanical_position_rad += direction * error;
+    return foc_virtual_motor_make_encoder_code(&observation, encoder, code);
+}
+
 static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
 {
     uint16_t raw_code = 0U;
-    if (foc_virtual_motor_make_encoder_code(
-            &context->motor,
-            &context->profile.encoder,
-            &raw_code
-        ) != 0) {
+    if (foc_virtual_encoder_code(context, &raw_code) != 0) {
         return -1;
     }
     struct foc_encoder_feedback feedback;
@@ -325,6 +339,12 @@ int foc_virtual_current_init(
 )
 {
     if (context == NULL || profile == NULL) {
+        return -1;
+    }
+    /* Keep the continuous raw-angle map strictly increasing. */
+    const double error_slope =
+        fabs(profile->encoder_fundamental_error_rad) + 3.0 * fabs(profile->encoder_third_error_rad);
+    if (!isfinite(error_slope) || error_slope >= 1.0) {
         return -1;
     }
     *context = (struct foc_virtual_current){0};

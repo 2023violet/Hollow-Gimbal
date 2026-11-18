@@ -13,10 +13,12 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_virtual_current.h"
+#include "foc_encoder_calibration.h"
 #include "foc_system_angle_oracle.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Private Macros --------------------------------------------------------------- */
@@ -956,6 +958,711 @@ static int test_system_angles(FILE *csv)
     return 0;
 }
 
+/* Encoder linearization acceptance ------------------------------------------- */
+
+#define ENCODER_STUDY_KNOTS 64U
+
+struct encoder_study_case {
+    const char *name;
+    double speed;
+    double fundamental;
+    double third;
+    uint32_t cpr;
+    uint32_t poles;
+    enum foc_encoder_direction direction;
+};
+
+struct encoder_error {
+    double square_sum;
+    double peak;
+};
+
+struct encoder_study_stats {
+    struct encoder_error mechanical;
+    struct encoder_error electrical;
+    struct encoder_error raw_speed;
+    struct encoder_error lpf_speed;
+    struct encoder_error d_current;
+    struct encoder_error q_current;
+    double seam_max_rad;
+    unsigned h1_count;
+    unsigned h0_count;
+    unsigned seams;
+    uint32_t max_prediction_us;
+};
+
+static void encoder_error_add(struct encoder_error *metric, double error)
+{
+    metric->square_sum += error * error;
+    metric->peak = fmax(metric->peak, fabs(error));
+}
+
+static void encoder_study_table(const struct encoder_study_case *test, int16_t *offsets)
+{
+    const double tau = 6.28318530717958647692;
+    const double bound = fabs(test->fundamental) + fabs(test->third);
+    for (unsigned i = 0U; i < ENCODER_STUDY_KNOTS; ++i) {
+        const double measured = tau * i / ENCODER_STUDY_KNOTS;
+        double lo = measured - bound;
+        double hi = measured + bound;
+        /* Cold test oracle: invert the continuous sensor model, without the
+         * production correction or its discrete interpolation. */
+        for (unsigned k = 0U; k < 48U; ++k) {
+            const double real = (lo + hi) * 0.5;
+            const double prediction =
+                real + test->fundamental * sin(real + 0.41) + test->third * sin(3.0 * real - 0.23);
+            if (prediction < measured) {
+                lo = real;
+            } else {
+                hi = real;
+            }
+        }
+        offsets[i] = (int16_t)lround(((lo + hi) * 0.5 - measured) * test->cpr / tau);
+    }
+}
+
+static int encoder_study_run(
+    const struct encoder_study_case *test,
+    uint32_t encoder_identity,
+    const struct foc_encoder_lut *lut,
+    bool distorted,
+    struct encoder_study_stats *stats
+)
+{
+    const double tau = 6.28318530717958647692;
+    struct foc_virtual_current vm;
+    struct foc_virtual_current_profile profile = foc_virtual_current_default_profile();
+    profile.encoder.counts_per_revolution = test->cpr;
+    profile.encoder.direction = test->direction;
+    profile.motor.pole_pairs = test->poles;
+    profile.runtime.motion.rotor.pole_pairs = (uint16_t)test->poles;
+    profile.motor.electrical_offset_rad =
+        (double)profile.runtime.motion.rotor.electrical_offset_rad;
+    profile.runtime.motion.prediction.max_prediction_us = 650U;
+    profile.runtime.angle_timeout_us = 650U;
+    if (distorted) {
+        profile.encoder_fundamental_error_rad = test->fundamental;
+        profile.encoder_third_error_rad = test->third;
+    }
+    CHECK(foc_virtual_current_init(&vm, &profile) == 0);
+    if (lut != NULL) {
+        CHECK(foc_encoder_init_with_lut(&vm.encoder, &profile.encoder, encoder_identity, lut) == 0);
+    }
+    static const uint32_t jitter_us[] = {0U, 7U, 19U, 3U, 13U};
+    const uint32_t end_us = (uint32_t)(1.1 * tau / fabs(test->speed) * 1.0e6);
+    const double start = test->speed > 0.0 ? -0.016 : 0.016;
+    const double radians_per_count = tau / test->cpr;
+    uint32_t h1_index = 0U;
+    uint32_t last_capture = 0U;
+    int64_t last_position = 0;
+
+    while (true) {
+        const bool capture = vm.next_h1_us <= vm.next_h0_us;
+        const uint32_t t = capture ? vm.next_h1_us : vm.next_h0_us;
+        if (t > end_us) {
+            break;
+        }
+        /* Constrain the same Plant motion and alpha/beta current across arms.
+         * The actual scheduler, encoder producer, ADC, H1/H0 and Current run. */
+        vm.virtual_time_us = t;
+        vm.motor.state.mechanical_position_rad = start + test->speed * t * 1.0e-6;
+        vm.motor.state.mechanical_velocity_rad_s = test->speed;
+        const double truth = test->poles * vm.motor.state.mechanical_position_rad +
+            profile.motor.electrical_offset_rad;
+        vm.motor.state.id_a = cos(truth);
+        vm.motor.state.iq_a = -sin(truth);
+
+        if (t % 1000U == 0U) {
+            CHECK(foc_virtual_current_publish_iq(&vm, 0.0f, 0.45f) == 0);
+        }
+        if (t == 600U || t == 800U) {
+            CHECK(
+                foc_virtual_current_queue_action(
+                    &vm,
+                    t == 600U ? FOC_RUNTIME_ACTION_ARM : FOC_RUNTIME_ACTION_START
+                ) == 0
+            );
+        }
+        const uint32_t updates = vm.output.accepted_updates;
+        const bool h0 = vm.next_h0_us == t;
+        CHECK(foc_virtual_current_run_until(&vm, t) == 0);
+        if (capture) {
+            CHECK(vm.encoder.previous_us == t && vm.encoder.invalid_count == 0U);
+            const unsigned slot = atomic_load(&vm.runtime.sensor_slot);
+            CHECK(slot < 2U);
+            const struct foc_runtime_sensor *sensor = &vm.runtime.sensor_slots[slot].sample;
+            CHECK(sensor->valid && sensor->electrical_phase_valid && sensor->captured_us == t);
+            const int64_t position = vm.encoder.position_counts;
+            const double angle = (double)position * radians_per_count;
+            encoder_error_add(
+                &stats->mechanical,
+                distance(angle, vm.motor.state.mechanical_position_rad)
+            );
+            CHECK(
+                distance(
+                    sensor->theta_elec_rad,
+                    test->poles * angle + profile.motor.electrical_offset_rad
+                ) < 2.0e-6
+            );
+            if (h1_index != 0U) {
+                const double dt = (t - last_capture) * 1.0e-6;
+                const double delta = (double)(position - last_position) * radians_per_count;
+                const double delta_error = fabs(delta - test->speed * dt);
+                CHECK(delta_error < 0.004);
+                const uint32_t cycle = system_cycle(position, test->cpr);
+                const uint32_t last_cycle = system_cycle(last_position, test->cpr);
+                if (llabs((int64_t)cycle - last_cycle) > (int64_t)test->cpr / 2) {
+                    ++stats->seams;
+                    stats->seam_max_rad = fmax(stats->seam_max_rad, delta_error);
+                }
+                if (t >= 20000U) {
+                    encoder_error_add(&stats->raw_speed, delta / dt - test->speed);
+                    encoder_error_add(&stats->lpf_speed, sensor->mechanical_rad_s - test->speed);
+                    ++stats->h1_count;
+                }
+            }
+            last_capture = t;
+            last_position = position;
+            ++h1_index;
+            vm.next_h1_us = h1_index * 500U + jitter_us[h1_index % 5U];
+        }
+        if (h0 && t >= 1000U) {
+            CHECK(vm.output.accepted_updates == updates + 1U);
+            CHECK(vm.runtime.angle_prediction_us == t - last_capture);
+            if (vm.runtime.angle_prediction_us > stats->max_prediction_us) {
+                stats->max_prediction_us = vm.runtime.angle_prediction_us;
+            }
+            const struct foc_vector_dq measured = vm.runtime.pipeline.measured_dq_a;
+            CHECK(fabs(hypot(measured.d, measured.q) - 1.0) < 1.0e-6);
+            const double phase = atan2(-measured.q, measured.d);
+            encoder_error_add(&stats->electrical, distance(phase, truth));
+            encoder_error_add(&stats->d_current, measured.d - cos(truth));
+            encoder_error_add(&stats->q_current, measured.q + sin(truth));
+            ++stats->h0_count;
+        }
+    }
+    CHECK(vm.output.rejected_updates == 0U && vm.runtime.pipeline.safety.latched_faults == 0U);
+    CHECK(stats->seams > 0U && stats->h0_count > 0U && stats->h1_count > 0U);
+    CHECK(stats->max_prediction_us > 200U);
+    /* Mechanical includes the warm-up samples; speed RMS uses settled LPF. */
+    stats->mechanical.square_sum /= h1_index;
+    return 0;
+}
+
+static int test_encoder_linearization_chain(void)
+{
+    static const struct encoder_study_case cases[] = {
+        {"single", 25.0, 0.035, 0.0, 65536U, 4U, FOC_ENCODER_DIRECTION_NORMAL},
+        {"harmonic-reverse", -40.0, 0.028, 0.011, 50001U, 7U, FOC_ENCODER_DIRECTION_REVERSED},
+        {"crawl", 0.9, 0.028, 0.011, 16384U, 11U, FOC_ENCODER_DIRECTION_NORMAL},
+    };
+    puts(
+        "ENCODER,case,arm,h1_speed_samples,h0_samples,mechanical_rms_rad,mechanical_peak_rad,"
+        "electrical_rms_rad,electrical_peak_rad,raw_speed_rms_rad_s,lpf_speed_rms_rad_s,"
+        "d_rms_a,q_rms_a,seams,seam_max_error_rad,max_prediction_us"
+    );
+    for (unsigned i = 0U; i < sizeof cases / sizeof cases[0]; ++i) {
+        const struct encoder_study_case *test = &cases[i];
+        int16_t offsets[ENCODER_STUDY_KNOTS];
+        encoder_study_table(test, offsets);
+        const struct foc_encoder_lut lut = {offsets, ENCODER_STUDY_KNOTS, test->cpr, 17U};
+        struct encoder_study_stats stats[4] = {0};
+        CHECK(encoder_study_run(test, 17U, NULL, false, &stats[0]) == 0);
+        CHECK(encoder_study_run(test, 17U, NULL, true, &stats[1]) == 0);
+        CHECK(encoder_study_run(test, 17U, &lut, true, &stats[2]) == 0);
+        /* Counterexample: a valid table is not proof that current distortion matches it. */
+        const unsigned arms = i == 0U ? 4U : 3U;
+        if (arms == 4U) {
+            CHECK(encoder_study_run(test, 17U, &lut, false, &stats[3]) == 0);
+            CHECK(stats[3].mechanical.square_sum > 10.0 * stats[0].mechanical.square_sum);
+        }
+        for (unsigned arm = 0U; arm < arms; ++arm) {
+            const struct encoder_study_stats *s = &stats[arm];
+            CHECK(s->h0_count == stats[0].h0_count && s->h1_count == stats[0].h1_count);
+            printf(
+                "ENCODER,%s,%c,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%u\n",
+                test->name,
+                'A' + (int)arm,
+                s->h1_count,
+                s->h0_count,
+                sqrt(s->mechanical.square_sum),
+                s->mechanical.peak,
+                sqrt(s->electrical.square_sum / s->h0_count),
+                s->electrical.peak,
+                sqrt(s->raw_speed.square_sum / s->h1_count),
+                sqrt(s->lpf_speed.square_sum / s->h1_count),
+                sqrt(s->d_current.square_sum / s->h0_count),
+                sqrt(s->q_current.square_sum / s->h0_count),
+                s->seams,
+                s->seam_max_rad,
+                s->max_prediction_us
+            );
+        }
+        CHECK(stats[2].mechanical.square_sum < 0.04 * stats[1].mechanical.square_sum);
+        CHECK(stats[2].electrical.square_sum < 0.04 * stats[1].electrical.square_sum);
+        CHECK(
+            stats[2].d_current.square_sum + stats[2].q_current.square_sum <
+            0.04 * (stats[1].d_current.square_sum + stats[1].q_current.square_sum)
+        );
+    }
+    return 0;
+}
+
+/* Encoder calibration and independent holdout --------------------------------- */
+
+enum encoder_cal_fixture {
+    ENCODER_CAL_NORMAL,
+    ENCODER_CAL_GAP,
+    ENCODER_CAL_OUTLIER,
+    ENCODER_CAL_BAD_TIME,
+    ENCODER_CAL_BAD_ZERO,
+};
+
+static const double encoder_cal_tau = 6.28318530717958647692;
+static const double encoder_cal_reference_zero = 0.21;
+
+static double encoder_cal_wrap(double angle)
+{
+    const double phase = fmod(angle, encoder_cal_tau);
+    return phase < 0.0 ? phase + encoder_cal_tau : phase;
+}
+
+static struct foc_encoder_cal_config
+encoder_cal_policy(const struct encoder_study_case *test, uint32_t nodes, uint32_t identity)
+{
+    struct foc_encoder_config encoder = foc_virtual_current_default_profile().encoder;
+    encoder.counts_per_revolution = test->cpr;
+    encoder.direction = test->direction;
+    const double count_rad = encoder_cal_tau / test->cpr;
+    const double width = encoder_cal_tau / nodes;
+    /* Predeclared curvature/error budget for the research family. Training
+     * and holdout use different sample locations and independent noise. */
+    const double curvature_budget = 0.18 * width * width;
+    return (struct foc_encoder_cal_config){
+        .encoder = encoder,
+        .encoder_identity = identity,
+        .reference_identity = 91U,
+        .source = FOC_ENCODER_CAL_SOURCE_VIRTUAL,
+        .nodes = nodes,
+        .min_samples_per_segment = 16U,
+        .reference_zero_rad = encoder_cal_reference_zero,
+        .max_zero_bias_rad = 0.001 + 2.0 * count_rad,
+        .max_training_segment_rms_rad = 1.1 * count_rad + curvature_budget / 8.0,
+        .max_holdout_rms_rad = 1.25 * count_rad + curvature_budget / 8.0,
+        .max_holdout_peak_rad = 2.5 * count_rad + curvature_budget / 4.0,
+    };
+}
+
+static int
+encoder_capture_init(struct foc_virtual_current *vm, const struct encoder_study_case *test)
+{
+    struct foc_virtual_current_profile profile = foc_virtual_current_default_profile();
+    profile.encoder.counts_per_revolution = test->cpr;
+    profile.encoder.direction = test->direction;
+    profile.encoder_fundamental_error_rad = test->fundamental;
+    profile.encoder_third_error_rad = test->third;
+    CHECK(foc_virtual_current_init(vm, &profile) == 0);
+    /* Collect the real virtual H1 producer independently of the ADC/Current
+     * study. The software control chain is run separately on the frozen LUT. */
+    vm->next_h0_us = UINT32_MAX;
+    vm->next_foreground_us = UINT32_MAX;
+    return 0;
+}
+
+static int encoder_capture_raw(struct foc_virtual_current *vm, double angle, uint32_t *raw)
+{
+    const uint32_t now = vm->next_h1_us;
+    vm->virtual_time_us = now;
+    vm->motor.state.mechanical_position_rad = angle;
+    CHECK(foc_virtual_current_run_until(vm, now) == 0);
+    CHECK(
+        vm->encoder.previous_seen && vm->encoder.previous_us == now &&
+        vm->encoder.invalid_count == 0U
+    );
+    *raw = vm->encoder.previous_code;
+    return 0;
+}
+
+static int encoder_cal_record(
+    const struct encoder_study_case *test,
+    struct foc_encoder_cal_context *fit,
+    bool holdout,
+    enum encoder_cal_fixture fixture,
+    bool print_pairs
+)
+{
+    struct foc_virtual_current vm;
+    CHECK(encoder_capture_init(&vm, test) == 0);
+    const uint32_t id = holdout ? fit->result.holdout.capture_id : fit->result.training.capture_id;
+    const uint32_t samples = holdout ? 4093U : 6143U;
+    const uint32_t origin = holdout ? 10000000U : 15000U;
+    const double start = holdout ? 0.371 : -0.133;
+    const double density = holdout ? -0.29 : 0.63;
+    const double sign = (holdout ? -1.0 : 1.0) * (test->speed < 0.0 ? -1.0 : 1.0);
+    uint32_t random = holdout ? UINT32_C(0x931e2a13) : UINT32_C(0x49f65a7b);
+    const double noise_counts = holdout ? 0.16 : 0.20;
+    const double span = fixture == ENCODER_CAL_GAP ? 0.31 : 1.0;
+    for (uint32_t i = 0U; i < samples; ++i) {
+        const double f = ((double)i + (holdout ? 0.37 : 0.11)) / samples;
+        const double travel = encoder_cal_tau * f + density * sin(encoder_cal_tau * f);
+        const double angle = start + sign * span * travel;
+        uint32_t raw;
+        const uint32_t time = origin + vm.next_h1_us;
+        CHECK(encoder_capture_raw(&vm, angle, &raw) == 0);
+        random = random * UINT32_C(1664525) + UINT32_C(1013904223);
+        const double noise =
+            ((double)(random >> 16) / 32767.5 - 1.0) * noise_counts * encoder_cal_tau / test->cpr;
+        const double outlier = fixture == ENCODER_CAL_OUTLIER && i == 61U ? 0.025 : 0.0;
+        const struct foc_encoder_cal_sample sample = {
+            .setup = fit->result.setup,
+            .capture_id = id,
+            .sequence = i,
+            .encoder_us = time,
+            .reference_us = time + (fixture == ENCODER_CAL_BAD_TIME && i == 61U ? 1U : 0U),
+            .raw_code = raw,
+            .reference_rad = encoder_cal_wrap(angle + encoder_cal_reference_zero + noise + outlier),
+            .encoder_valid = true,
+            .reference_valid = true,
+            .reference_confirmed = true,
+        };
+        if (print_pairs) {
+            printf(
+                "PAIR,%s,%u,%u,%u,%u,%u,%u,%.17g\n",
+                test->name,
+                fit->result.nodes,
+                id,
+                i,
+                sample.encoder_us,
+                sample.reference_us,
+                raw,
+                sample.reference_rad
+            );
+        }
+        const int status = foc_encoder_cal_push(fit, &sample);
+        if (fixture == ENCODER_CAL_BAD_TIME && i == 61U) {
+            CHECK(status == FOC_ENCODER_CAL_ERR_SAMPLE);
+            return 0;
+        }
+        CHECK(status == FOC_ENCODER_CAL_OK);
+    }
+    return 0;
+}
+
+static int encoder_cal_generate(
+    const struct encoder_study_case *test,
+    uint32_t nodes,
+    uint32_t id,
+    bool print_pairs,
+    struct foc_encoder_cal_result *result
+)
+{
+    struct foc_encoder_cal_context fit = {0};
+    const struct foc_encoder_cal_config config = encoder_cal_policy(test, nodes, id);
+    CHECK(foc_encoder_cal_init(&fit, &config, id * 2U) == 0);
+    CHECK(encoder_cal_record(test, &fit, false, ENCODER_CAL_NORMAL, print_pairs) == 0);
+    CHECK(foc_encoder_cal_freeze(&fit) == 0);
+    struct foc_encoder_cal_result frozen = fit.result;
+    CHECK(foc_encoder_cal_begin_holdout(&fit, id * 2U + 1U) == 0);
+    CHECK(encoder_cal_record(test, &fit, true, ENCODER_CAL_NORMAL, print_pairs) == 0);
+    const int finish = foc_encoder_cal_finish(&fit);
+    const struct foc_encoder_cal_result *r = &fit.result;
+    printf(
+        "FIT,%s,%u,%u,%u,%u,%u,%u,%u,%u,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+        test->name,
+        nodes,
+        id,
+        r->setup.reference_identity,
+        r->training.capture_id,
+        r->holdout.capture_id,
+        r->training.samples,
+        r->holdout.samples,
+        test->cpr,
+        finish,
+        r->zero_bias_rad,
+        r->training_rms_rad,
+        r->training_max_segment_rms_rad,
+        r->holdout_raw_rms_rad,
+        r->holdout_rms_rad,
+        r->holdout_peak_rad,
+        config.max_training_segment_rms_rad,
+        config.max_holdout_rms_rad,
+        config.max_holdout_peak_rad
+    );
+    CHECK(finish == FOC_ENCODER_CAL_OK);
+    CHECK(memcmp(frozen.offsets, fit.result.offsets, sizeof frozen.offsets) == 0);
+    CHECK(foc_encoder_cal_export(&fit, result) == 0);
+    printf(
+        "LUT,%s,%u,%u,%u,%.17g,%d",
+        test->name,
+        nodes,
+        id,
+        test->cpr,
+        config.reference_zero_rad,
+        test->direction
+    );
+    for (uint32_t i = 0U; i < nodes; ++i) {
+        printf(",%d", (int)result->offsets[i]);
+    }
+    puts("");
+    for (uint32_t i = 0U; i < nodes; ++i) {
+        printf(
+            "COVERAGE,%s,%u,%u,%u,%u,%u,%u\n",
+            test->name,
+            id,
+            i,
+            (unsigned)result->training.segment_samples[i],
+            (unsigned)result->training.coverage[i],
+            (unsigned)result->holdout.segment_samples[i],
+            (unsigned)result->holdout.coverage[i]
+        );
+    }
+    return 0;
+}
+
+static int encoder_cal_negative(const struct encoder_study_case *test, bool print_pairs)
+{
+    struct foc_encoder_cal_context fit = {0};
+    const enum foc_calibration_failure reasons[] = {
+        FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE,
+        FOC_CALIBRATION_FAILURE_RESIDUAL,
+        FOC_CALIBRATION_FAILURE_TIME_ORDER,
+        FOC_CALIBRATION_FAILURE_CONFIG_MISMATCH,
+    };
+    for (unsigned i = 0U; i < sizeof reasons / sizeof reasons[0]; ++i) {
+        const enum encoder_cal_fixture fixture = (enum encoder_cal_fixture)(i + 1U);
+        struct foc_encoder_cal_config policy = encoder_cal_policy(test, 64U, 51U);
+        if (fixture == ENCODER_CAL_BAD_ZERO) {
+            policy.reference_zero_rad += 0.02;
+        }
+        CHECK(foc_encoder_cal_init(&fit, &policy, 1000U + i) == 0);
+        CHECK(encoder_cal_record(test, &fit, false, fixture, print_pairs) == 0);
+        if (fixture != ENCODER_CAL_BAD_TIME) {
+            CHECK(foc_encoder_cal_freeze(&fit) == FOC_ENCODER_CAL_ERR_QUALITY);
+        }
+        printf(
+            "REJECT,%u,%u,%u,%d,%.9g,%.9g\n",
+            i + 1U,
+            fit.result.training.capture_id,
+            fit.result.training.samples,
+            fit.result.failure,
+            fit.result.zero_bias_rad,
+            fit.result.training_max_segment_rms_rad
+        );
+        CHECK(
+            fit.result.state == FOC_CALIBRATION_STATE_INVALID && fit.result.failure == reasons[i]
+        );
+        struct foc_encoder_lut unset = {.length = 99U};
+        CHECK(foc_encoder_cal_make_lut(&fit.result, &unset) != 0 && unset.length == 99U);
+    }
+    return 0;
+}
+
+static int encoder_cal_control_chain(
+    const struct encoder_study_case *test,
+    uint32_t identity,
+    const struct foc_encoder_lut *generated
+)
+{
+    int16_t oracle_offsets[ENCODER_STUDY_KNOTS];
+    encoder_study_table(test, oracle_offsets);
+    const struct foc_encoder_lut oracle =
+        {oracle_offsets, ENCODER_STUDY_KNOTS, test->cpr, identity};
+    struct encoder_study_stats metrics[4] = {0};
+    CHECK(encoder_study_run(test, identity, NULL, false, &metrics[0]) == 0);
+    CHECK(encoder_study_run(test, identity, NULL, true, &metrics[1]) == 0);
+    CHECK(encoder_study_run(test, identity, generated, true, &metrics[2]) == 0);
+    CHECK(encoder_study_run(test, identity, &oracle, true, &metrics[3]) == 0);
+    for (unsigned i = 0U; i < sizeof metrics / sizeof metrics[0]; ++i) {
+        const struct encoder_study_stats *m = &metrics[i];
+        CHECK(m->h0_count == metrics[0].h0_count && m->h1_count == metrics[0].h1_count);
+        printf(
+            "CHAIN,%s,%c,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%u\n",
+            test->name,
+            'A' + (int)i,
+            m->h1_count,
+            m->h0_count,
+            sqrt(m->mechanical.square_sum),
+            m->mechanical.peak,
+            sqrt(m->electrical.square_sum / m->h0_count),
+            m->electrical.peak,
+            sqrt(m->raw_speed.square_sum / m->h1_count),
+            sqrt(m->lpf_speed.square_sum / m->h1_count),
+            sqrt(m->d_current.square_sum / m->h0_count),
+            sqrt(m->q_current.square_sum / m->h0_count),
+            m->seams,
+            m->seam_max_rad,
+            m->max_prediction_us
+        );
+    }
+    CHECK(metrics[2].mechanical.square_sum < 0.04 * metrics[1].mechanical.square_sum);
+    CHECK(metrics[2].electrical.square_sum < 0.04 * metrics[1].electrical.square_sum);
+    CHECK(
+        metrics[2].d_current.square_sum + metrics[2].q_current.square_sum <
+        0.04 * (metrics[1].d_current.square_sum + metrics[1].q_current.square_sum)
+    );
+    return 0;
+}
+
+/* Low-speed attribution replays the same captured raw codes through two
+ * Sensors. Analog reconstruction is a Host-only diagnostic, never a fit input. */
+static double encoder_speed_linear(const struct foc_encoder_lut *lut, double raw)
+{
+    const double cpr = lut->counts_per_revolution;
+    double periodic = fmod(raw, cpr);
+    if (periodic < 0.0) {
+        periodic += cpr;
+    }
+    const double x = periodic * lut->length / cpr;
+    const uint32_t bin = (uint32_t)x;
+    if (bin == lut->length) {
+        return raw + lut->offset_counts[0];
+    }
+    const double lo = lut->offset_counts[bin];
+    const double hi = lut->offset_counts[(bin + 1U) % lut->length];
+    return raw + lo + (x - bin) * (hi - lo);
+}
+
+static double encoder_speed_analog_raw(const struct encoder_study_case *test, double angle)
+{
+    const double x = test->direction * angle;
+    const double biased = x + test->fundamental * sin(x + 0.41) + test->third * sin(3.0 * x - 0.23);
+    return biased * test->cpr / encoder_cal_tau;
+}
+
+static int encoder_speed_run(
+    const struct encoder_study_case *test,
+    const struct foc_encoder_cal_result *result,
+    uint32_t interval_us
+)
+{
+    struct foc_virtual_current vm;
+    CHECK(encoder_capture_init(&vm, test) == 0);
+    struct foc_encoder_lut lut;
+    CHECK(foc_encoder_cal_make_lut(result, &lut) == 0);
+    struct foc_encoder_context baseline;
+    struct foc_encoder_context compensated;
+    CHECK(foc_encoder_init(&baseline, &vm.profile.encoder) == 0);
+    CHECK(
+        foc_encoder_init_with_lut(
+            &compensated,
+            &vm.profile.encoder,
+            result->setup.encoder_identity,
+            &lut
+        ) == 0
+    );
+    const double scale = encoder_cal_tau / test->cpr;
+    const double dt = interval_us * 1.0e-6;
+    const unsigned frames = (unsigned)(1.1 * encoder_cal_tau / (fabs(test->speed) * dt));
+    double sq[9] = {0};
+    double prior_analog = 0.0;
+    double prior_integer = 0.0;
+    int64_t before_base = 0;
+    int64_t before_fit = 0;
+    unsigned seen = 0U;
+    unsigned repeated[2] = {0};
+    unsigned multi_code[2] = {0};
+    for (unsigned i = 0U; i <= frames; ++i) {
+        const uint32_t time = i * interval_us;
+        const double angle = -0.041 + test->speed * time * 1.0e-6;
+        uint32_t raw;
+        CHECK(encoder_capture_raw(&vm, angle, &raw) == 0);
+        struct foc_encoder_feedback b, c;
+        CHECK(foc_encoder_update(&baseline, time, raw, FOC_ENCODER_TRANSPORT_OK, &b) == 0);
+        CHECK(foc_encoder_update(&compensated, time, raw, FOC_ENCODER_TRANSPORT_OK, &c) == 0);
+        const double analog_raw = encoder_speed_analog_raw(test, angle);
+        const double lifted = analog_raw + remainder((double)raw - analog_raw, (double)test->cpr);
+        const double analog = test->direction * encoder_speed_linear(&lut, analog_raw) * scale;
+        const double integer = test->direction * encoder_speed_linear(&lut, lifted) * scale;
+        if (time > 20000U) {
+            CHECK(b.valid && c.valid);
+            const double va = (analog - prior_analog) / dt;
+            const double vi = (integer - prior_integer) / dt;
+            const double p = c.raw_velocity_rad_s;
+            const double terms[] = {
+                b.raw_velocity_rad_s - test->speed,
+                p - test->speed,
+                b.filtered_velocity_rad_s - test->speed,
+                c.filtered_velocity_rad_s - test->speed,
+                va - test->speed,
+                vi - va,
+                p - vi,
+                distance(c.single_turn_rad, angle),
+                distance(analog, angle),
+            };
+            for (unsigned k = 0U; k < sizeof terms / sizeof terms[0]; ++k) {
+                sq[k] += terms[k] * terms[k];
+            }
+            const int64_t base_delta = llabs(baseline.position_counts - before_base);
+            const int64_t fit_delta = llabs(compensated.position_counts - before_fit);
+            repeated[0] += base_delta == 0;
+            repeated[1] += fit_delta == 0;
+            multi_code[0] += base_delta >= 2;
+            multi_code[1] += fit_delta >= 2;
+            ++seen;
+        }
+        prior_analog = analog;
+        prior_integer = integer;
+        before_base = baseline.position_counts;
+        before_fit = compensated.position_counts;
+    }
+    CHECK(seen > 0U);
+    printf(
+        "SPEED,%s,%u,%u,%u,%.9g,%d,%u,%u,%u,%u,%u",
+        test->name,
+        result->nodes,
+        test->cpr,
+        interval_us,
+        test->speed,
+        test->direction,
+        seen,
+        repeated[0],
+        repeated[1],
+        multi_code[0],
+        multi_code[1]
+    );
+    for (unsigned k = 0U; k < sizeof sq / sizeof sq[0]; ++k) {
+        printf(",%.9g", sqrt(sq[k] / seen));
+    }
+    puts("");
+    return 0;
+}
+
+static int test_encoder_calibration_chain(bool print_pairs)
+{
+    static const struct encoder_study_case cases[] = {
+        {"single", 25.0, 0.035, 0.0, 65536U, 4U, FOC_ENCODER_DIRECTION_NORMAL},
+        {"harmonic-reverse", -40.0, 0.028, 0.011, 50001U, 7U, FOC_ENCODER_DIRECTION_REVERSED},
+        {"crawl", 0.9, 0.028, 0.011, 16384U, 11U, FOC_ENCODER_DIRECTION_NORMAL},
+    };
+    for (unsigned i = 0U; i < sizeof cases / sizeof cases[0]; ++i) {
+        struct foc_encoder_cal_result result;
+        const uint32_t identity = 17U + i;
+        CHECK(encoder_cal_generate(&cases[i], 64U, identity, print_pairs, &result) == 0);
+        struct foc_encoder_lut lut;
+        CHECK(foc_encoder_cal_make_lut(&result, &lut) == 0);
+        CHECK(encoder_cal_control_chain(&cases[i], identity, &lut) == 0);
+        if (i == 2U) {
+            CHECK(encoder_speed_run(&cases[i], &result, 500U) == 0);
+            CHECK(encoder_speed_run(&cases[i], &result, 1000U) == 0);
+        }
+    }
+    struct foc_encoder_cal_result study;
+    CHECK(encoder_cal_generate(&cases[2], 16U, 19U, print_pairs, &study) == 0);
+    CHECK(encoder_speed_run(&cases[2], &study, 500U) == 0);
+    struct encoder_study_case high = cases[2];
+    high.name = "crawl-hires";
+    high.cpr = 65536U;
+    CHECK(encoder_cal_generate(&high, 64U, 24U, print_pairs, &study) == 0);
+    CHECK(encoder_speed_run(&high, &study, 500U) == 0);
+    struct encoder_study_case slow = cases[2];
+    slow.name = "crawl-reverse";
+    slow.direction = FOC_ENCODER_DIRECTION_REVERSED;
+    slow.speed = -0.3;
+    CHECK(encoder_cal_generate(&slow, 64U, 25U, print_pairs, &study) == 0);
+    CHECK(encoder_speed_run(&slow, &study, 1000U) == 0);
+    return encoder_cal_negative(&cases[0], print_pairs);
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 3 && strcmp(argv[1], "--system-angle-csv") == 0) {
@@ -964,8 +1671,18 @@ int main(int argc, char **argv)
         const int status = test_system_angles(csv);
         return fclose(csv) == 0 ? status : 1;
     }
+    if (argc == 2 && strcmp(argv[1], "--encoder-linearization") == 0) {
+        return test_encoder_linearization_chain();
+    }
+    if (argc == 2 && strcmp(argv[1], "--encoder-calibration-study") == 0) {
+        return test_encoder_calibration_chain(false);
+    }
+    if (argc == 2 && strcmp(argv[1], "--encoder-calibration-dataset") == 0) {
+        return test_encoder_calibration_chain(true);
+    }
     CHECK(argc == 1);
-    return test_direct_angle_compatibility() || test_startup_transport_failure() ||
+    return test_encoder_calibration_chain(false) || test_encoder_linearization_chain() ||
+        test_direct_angle_compatibility() || test_startup_transport_failure() ||
         test_long_chain() || test_startup(false, 0U) || test_startup(true, 0U) ||
         test_startup(true, 1U) || test_startup(true, 2U) || test_system_angles(NULL);
 }

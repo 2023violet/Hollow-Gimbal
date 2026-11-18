@@ -1,6 +1,6 @@
 # Themis FalconFOC portable calibration project. Role: build bounded
-# current-zero, rotor-reference, and standstill R/L candidate estimators without Runtime, Board,
-# Device, Safety, Flash, MCU, or hardware dependencies.
+# current-zero, rotor-reference, standstill R/L, and offline encoder LUT
+# candidate estimators without Runtime, Board, Device, Safety, or MCU dependencies.
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -16,7 +16,15 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 enable_testing()
 
-add_library(falconfoc-calibration STATIC src/foc_calibration.c src/foc_motor_id.c)
+if(NOT TARGET falconfoc-encoder)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../sensors" encoder)
+endif()
+
+add_library(
+  falconfoc-calibration STATIC src/foc_calibration.c src/foc_motor_id.c
+                               src/foc_encoder_calibration.c
+)
+target_link_libraries(falconfoc-calibration PUBLIC falconfoc-encoder)
 target_include_directories(falconfoc-calibration PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -34,3 +42,7 @@ add_test(NAME test-foc-calibration COMMAND test-foc-calibration)
 add_executable(test-foc-motor-id tests/test_foc_motor_id.c)
 target_link_libraries(test-foc-motor-id PRIVATE falconfoc-calibration)
 add_test(NAME test-foc-motor-id COMMAND test-foc-motor-id)
+
+add_executable(test-foc-encoder-calibration tests/test_foc_encoder_calibration.c)
+target_link_libraries(test-foc-encoder-calibration PRIVATE falconfoc-calibration)
+add_test(NAME test-foc-encoder-calibration COMMAND test-foc-encoder-calibration)

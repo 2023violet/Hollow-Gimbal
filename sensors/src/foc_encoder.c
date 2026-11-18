@@ -21,8 +21,8 @@
  *
  * Public Functions
  * ----------------
- * foc_encoder_init(), foc_encoder_reset(), and foc_encoder_update() are the
- * complete module boundary.
+ * Admit the optional correction at initialization and apply it before direction.
+ * Use the same corrected observation for phase, velocity, and continuous position.
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -35,9 +35,10 @@
 
 /* Private Macros and Constants ------------------------------------------------- */
 
-#define FOC_ENCODER_TWO_PI     6.28318530717958647692f
-#define FOC_ENCODER_PI         3.14159265358979323846f
-#define FOC_ENCODER_HALF_RANGE UINT32_C(0x80000000)
+#define FOC_ENCODER_TWO_PI         6.28318530717958647692f
+#define FOC_ENCODER_PI             3.14159265358979323846f
+#define FOC_ENCODER_HALF_RANGE     UINT32_C(0x80000000)
+#define FOC_ENCODER_MAX_LUT_LENGTH 1024U
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -51,6 +52,31 @@ static void foc_encoder_invalidate_count(struct foc_encoder_context *context)
     if (context->invalid_count < UINT32_MAX) {
         ++context->invalid_count;
     }
+}
+
+static uint32_t foc_encoder_apply_lut(const struct foc_encoder_context *context, uint32_t raw_code)
+{
+    if (context->lut_offsets == NULL) {
+        return raw_code;
+    }
+    const int32_t cpr = (int32_t)context->config.counts_per_revolution;
+    const uint32_t length = context->lut_length;
+    const uint32_t scaled = raw_code * length;
+    const uint32_t index = scaled / (uint32_t)cpr;
+    const uint32_t next = index + 1U == length ? 0U : index + 1U;
+    const int32_t fraction = (int32_t)(scaled - index * (uint32_t)cpr);
+    const int32_t left = context->lut_offsets[index];
+    const int32_t diff = (int32_t)context->lut_offsets[next] - left;
+    /* The admitted slope bounds diff * fraction. Round ties towards +infinity. */
+    int32_t numerator = diff * fraction + cpr / 2;
+    if (numerator < 0) {
+        numerator -= cpr - 1;
+    }
+    const int32_t corrected = (int32_t)raw_code + left + numerator / cpr;
+    if (corrected < 0) {
+        return (uint32_t)(corrected + cpr);
+    }
+    return (uint32_t)(corrected >= cpr ? corrected - cpr : corrected);
 }
 
 static uint32_t
@@ -90,7 +116,8 @@ static void foc_encoder_feedback_base(
     };
     if (context->previous_seen) {
         feedback->mechanical_rad = foc_encoder_code_to_rad(context, context->position_counts);
-        feedback->single_turn_rad = foc_encoder_single_turn_rad(context, context->previous_code);
+        feedback->single_turn_rad =
+            foc_encoder_single_turn_rad(context, context->previous_corrected_code);
         feedback->filtered_velocity_rad_s = context->lpf_velocity_rad_s;
         feedback->tracked_velocity_rad_s = context->tracker_velocity_rad_s;
     }
@@ -157,25 +184,91 @@ static int foc_encoder_config_validate(const struct foc_encoder_config *config)
     return FOC_ENCODER_STATUS_OK;
 }
 
-static int foc_encoder_delta_counts(
-    const struct foc_encoder_context *context,
-    uint32_t raw_code,
-    int64_t *delta_counts
-)
+static bool foc_encoder_short_arc(int32_t counts, uint32_t previous, uint32_t current, int32_t *arc)
 {
-    const int64_t counts = (int64_t)context->config.counts_per_revolution;
-    int64_t delta = (int64_t)raw_code - (int64_t)context->previous_code;
-    const int64_t half = counts / 2;
-
+    int32_t delta = (int32_t)current - (int32_t)previous;
+    const int32_t half = counts / 2;
     if ((counts % 2) == 0 && (delta == half || delta == -half)) {
-        return FOC_ENCODER_STATUS_ERR_DISCONTINUITY;
+        return false;
     }
     if (delta > half) {
         delta -= counts;
     } else if (delta < -half) {
         delta += counts;
     }
-    *delta_counts = delta * (int64_t)context->config.direction;
+    *arc = delta;
+    return true;
+}
+
+static bool foc_encoder_delta_counts(
+    const struct foc_encoder_context *context,
+    uint32_t raw_code,
+    uint32_t corrected_code,
+    int64_t *delta_counts
+)
+{
+    const int32_t counts = (int32_t)context->config.counts_per_revolution;
+    int32_t corrected;
+    if (!foc_encoder_short_arc(
+            counts,
+            context->previous_corrected_code,
+            corrected_code,
+            &corrected
+        )) {
+        return false;
+    }
+    if (context->lut_varies) {
+        /* Each endpoint can have 0.75 count of raw quantization error
+         * (slope <= 1.5), then 0.5 count of output rounding. Keep 2.5
+         * counts clear of the ambiguous half-turn for a varying table. */
+        const int32_t twice_limit = counts - 5;
+        int32_t raw;
+        if (2 * corrected >= twice_limit || 2 * corrected <= -twice_limit ||
+            !foc_encoder_short_arc(counts, context->previous_code, raw_code, &raw) ||
+            (raw > 0 && corrected < 0) || (raw < 0 && corrected > 0)) {
+            return false;
+        }
+    }
+    *delta_counts = (int64_t)corrected * (int64_t)context->config.direction;
+    return true;
+}
+
+static int foc_encoder_validate_lut(
+    const struct foc_encoder_lut *lut,
+    uint32_t counts_per_revolution,
+    uint32_t encoder_identity,
+    bool *varies
+)
+{
+    if (lut == NULL || lut->offset_counts == NULL) {
+        return FOC_ENCODER_STATUS_ERR_NULL;
+    }
+    if (encoder_identity == 0U || lut->encoder_identity != encoder_identity ||
+        lut->counts_per_revolution != counts_per_revolution) {
+        return FOC_ENCODER_STATUS_ERR_LUT_IDENTITY;
+    }
+    const uint32_t length = lut->length;
+    if (counts_per_revolution < 2U || counts_per_revolution > UINT32_C(65536) || length < 2U ||
+        length > FOC_ENCODER_MAX_LUT_LENGTH || length > counts_per_revolution) {
+        return FOC_ENCODER_STATUS_ERR_CONFIG;
+    }
+    const int32_t amplitude = (int32_t)(counts_per_revolution / 8U);
+    const int32_t max_step = (int32_t)(counts_per_revolution / (2U * length));
+    bool changing = false;
+    int32_t previous = lut->offset_counts[length - 1U];
+    for (uint32_t i = 0U; i < length; ++i) {
+        const int32_t offset = lut->offset_counts[i];
+        if (offset < -amplitude || offset > amplitude) {
+            return FOC_ENCODER_STATUS_ERR_LUT_RANGE;
+        }
+        const int32_t step = offset - previous;
+        if (step < -max_step || step > max_step) {
+            return FOC_ENCODER_STATUS_ERR_LUT_SLOPE;
+        }
+        changing |= step != 0;
+        previous = offset;
+    }
+    *varies = changing;
     return FOC_ENCODER_STATUS_OK;
 }
 
@@ -197,6 +290,60 @@ int foc_encoder_init(struct foc_encoder_context *context, const struct foc_encod
     return FOC_ENCODER_STATUS_OK;
 }
 
+int foc_encoder_lut_validate(
+    const struct foc_encoder_lut *lut,
+    uint32_t counts_per_revolution,
+    uint32_t encoder_identity
+)
+{
+    bool varies;
+    return foc_encoder_validate_lut(lut, counts_per_revolution, encoder_identity, &varies);
+}
+
+int foc_encoder_init_with_lut(
+    struct foc_encoder_context *context,
+    const struct foc_encoder_config *config,
+    uint32_t encoder_identity,
+    const struct foc_encoder_lut *lut
+)
+{
+    if (context == NULL || config == NULL) {
+        return FOC_ENCODER_STATUS_ERR_NULL;
+    }
+    bool varies;
+    const int validation =
+        foc_encoder_validate_lut(lut, config->counts_per_revolution, encoder_identity, &varies);
+    if (validation != FOC_ENCODER_STATUS_OK) {
+        return validation;
+    }
+    const int status = foc_encoder_init(context, config);
+    if (status == FOC_ENCODER_STATUS_OK) {
+        context->lut_varies = varies;
+        context->lut_offsets = lut->offset_counts;
+        context->lut_length = lut->length;
+    }
+    return status;
+}
+
+int foc_encoder_correct_code(
+    const struct foc_encoder_context *context,
+    uint32_t raw_code,
+    uint32_t *corrected_code
+)
+{
+    if (context == NULL || corrected_code == NULL) {
+        return FOC_ENCODER_STATUS_ERR_NULL;
+    }
+    if (!context->initialized) {
+        return FOC_ENCODER_STATUS_ERR_NOT_INITIALIZED;
+    }
+    if (raw_code >= context->config.counts_per_revolution) {
+        return FOC_ENCODER_STATUS_ERR_SAMPLE;
+    }
+    *corrected_code = foc_encoder_apply_lut(context, raw_code);
+    return FOC_ENCODER_STATUS_OK;
+}
+
 int foc_encoder_reset(struct foc_encoder_context *context)
 {
     if (context == NULL) {
@@ -211,6 +358,9 @@ int foc_encoder_reset(struct foc_encoder_context *context)
         .config = config,
         .lpf_tau_s = tau,
         .initialized = true,
+        .lut_varies = context->lut_varies,
+        .lut_offsets = context->lut_offsets,
+        .lut_length = context->lut_length,
     };
     return FOC_ENCODER_STATUS_OK;
 }
@@ -264,12 +414,15 @@ int foc_encoder_update(
         );
     }
 
-    const uint32_t directed = foc_encoder_directed_code(context, raw_code);
+    const uint32_t corrected = foc_encoder_apply_lut(context, raw_code);
+    const uint32_t directed = foc_encoder_directed_code(context, corrected);
     if (!context->previous_seen) {
         context->previous_seen = true;
         context->previous_us = captured_us;
         context->previous_code = raw_code;
+        context->previous_corrected_code = corrected;
         context->position_counts = (int64_t)directed;
+        feedback->corrected_code = corrected;
         feedback->mechanical_phase_count = directed;
         feedback->single_turn_rad = foc_encoder_code_to_rad(context, directed);
         feedback->mechanical_rad = foc_encoder_code_to_rad(context, context->position_counts);
@@ -332,7 +485,7 @@ int foc_encoder_update(
     }
 
     int64_t delta_counts;
-    if (foc_encoder_delta_counts(context, raw_code, &delta_counts) != FOC_ENCODER_STATUS_OK) {
+    if (!foc_encoder_delta_counts(context, raw_code, corrected, &delta_counts)) {
         context->continuity_lost = true;
         return foc_encoder_reject(
             context,
@@ -408,6 +561,7 @@ int foc_encoder_update(
 
     context->previous_us = captured_us;
     context->previous_code = raw_code;
+    context->previous_corrected_code = corrected;
     context->position_counts = next_position;
     context->lpf_velocity_rad_s = filtered_velocity;
     context->tracker_position_rad = tracker_position;
@@ -417,6 +571,7 @@ int foc_encoder_update(
 
     feedback->single_turn_rad = foc_encoder_code_to_rad(context, directed);
     feedback->mechanical_rad = position_rad;
+    feedback->corrected_code = corrected;
     feedback->mechanical_phase_count = directed;
     feedback->delta_rad = delta_rad;
     feedback->dt_s = dt_s;

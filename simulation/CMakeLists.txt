@@ -19,19 +19,14 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../runtime" runtime)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../protocol" protocol)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../calibration" calibration)
 
-add_library(
-  falconfoc-virtual-motor STATIC src/foc_virtual_motor.c src/foc_virtual_current.c
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/../sensors/src/foc_encoder.c"
-)
+add_library(falconfoc-virtual-motor STATIC src/foc_virtual_motor.c src/foc_virtual_current.c)
 target_include_directories(
   falconfoc-virtual-motor
-  PUBLIC include
-         "${CMAKE_CURRENT_SOURCE_DIR}/../core/include"
+  PUBLIC include "${CMAKE_CURRENT_SOURCE_DIR}/../core/include"
          "${CMAKE_CURRENT_SOURCE_DIR}/../g3/np/include"
          "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include"
-         "${CMAKE_CURRENT_SOURCE_DIR}/../sensors/include"
 )
-target_link_libraries(falconfoc-virtual-motor PUBLIC falconfoc-pipeline)
+target_link_libraries(falconfoc-virtual-motor PUBLIC falconfoc-pipeline falconfoc-encoder)
 
 target_compile_definitions(test-foc-motion-model PRIVATE FOC_VIRTUAL_SHARED_PLANT=1)
 target_include_directories(test-foc-motion-model PRIVATE include)
@@ -58,7 +53,7 @@ target_link_libraries(test-foc-virtual-current PRIVATE falconfoc-virtual-motor)
 add_test(NAME test-foc-virtual-current COMMAND test-foc-virtual-current)
 
 add_executable(test-foc-periodic-chain tests/test_foc_periodic_chain.c)
-target_link_libraries(test-foc-periodic-chain PRIVATE falconfoc-virtual-motor)
+target_link_libraries(test-foc-periodic-chain PRIVATE falconfoc-virtual-motor falconfoc-calibration)
 add_test(NAME test-foc-periodic-chain COMMAND test-foc-periodic-chain)
 
 add_executable(falconfoc-virtual-current src/falconfoc_virtual_current.c)

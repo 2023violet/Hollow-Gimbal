@@ -563,8 +563,162 @@ static int test_phase_at_count_overflow(void)
 
 /* Test Entry ------------------------------------------------------------------- */
 
+static int test_encoder_lut(void)
+{
+    static const int16_t offsets[] = {6, 12, 3, -6};
+    static const int16_t zero[] = {0, 0, 0, 0};
+    static const int16_t out_of_range[] = {6, 13, 3, -6};
+    static const int16_t seam_jump[] = {12, 4, -4, -12};
+    static const int16_t reverse_mapping[] = {12, -12, 0, 0};
+    const struct foc_encoder_lut table = {offsets, 4U, 100U, 41U};
+    const struct foc_encoder_lut no_change = {zero, 4U, 100U, 42U};
+    struct foc_encoder_config config = test_config();
+    config.counts_per_revolution = 100U;
+    config.max_speed_rad_s = 1000.0f;
+    config.max_dt_us = 2400U;
+    struct foc_encoder_context normal = {0}, reverse = {0}, disabled = {0}, zeros = {0};
+    TEST_ASSERT(foc_encoder_lut_validate(&table, 100U, 41U) == FOC_ENCODER_STATUS_OK);
+    TEST_ASSERT(foc_encoder_lut_validate(&table, 101U, 41U) == FOC_ENCODER_STATUS_ERR_LUT_IDENTITY);
+    TEST_ASSERT(foc_encoder_lut_validate(&table, 100U, 42U) == FOC_ENCODER_STATUS_ERR_LUT_IDENTITY);
+    TEST_ASSERT(foc_encoder_lut_validate(&table, 100U, 0U) == FOC_ENCODER_STATUS_ERR_LUT_IDENTITY);
+    struct foc_encoder_lut bad = table;
+    bad.offset_counts = out_of_range;
+    TEST_ASSERT(foc_encoder_lut_validate(&bad, 100U, 41U) == FOC_ENCODER_STATUS_ERR_LUT_RANGE);
+    bad.offset_counts = seam_jump;
+    TEST_ASSERT(foc_encoder_lut_validate(&bad, 100U, 41U) == FOC_ENCODER_STATUS_ERR_LUT_SLOPE);
+    bad.offset_counts = reverse_mapping;
+    TEST_ASSERT(foc_encoder_lut_validate(&bad, 100U, 41U) == FOC_ENCODER_STATUS_ERR_LUT_SLOPE);
+    bad.length = 1U;
+    TEST_ASSERT(foc_encoder_lut_validate(&bad, 100U, 41U) == FOC_ENCODER_STATUS_ERR_CONFIG);
+    TEST_ASSERT(foc_encoder_init_with_lut(&normal, &config, 41U, &table) == FOC_ENCODER_STATUS_OK);
+    TEST_ASSERT(
+        foc_encoder_init_with_lut(&zeros, &config, 42U, &no_change) == FOC_ENCODER_STATUS_OK
+    );
+    TEST_ASSERT(foc_encoder_init(&disabled, &config) == FOC_ENCODER_STATUS_OK);
+    config.direction = FOC_ENCODER_DIRECTION_REVERSED;
+    TEST_ASSERT(foc_encoder_init_with_lut(&reverse, &config, 41U, &table) == FOC_ENCODER_STATUS_OK);
+
+    static const uint32_t raw[] = {89U, 95U, 96U, 99U, 0U, 1U};
+    static const uint32_t corrected[] = {90U, 99U, 0U, 5U, 6U, 7U};
+    struct foc_encoder_feedback n, r, off, z;
+    uint32_t us = UINT32_MAX - 2500U;
+    for (unsigned k = 0U; k < sizeof raw / sizeof raw[0]; ++k, us += 1000U) {
+        uint32_t direct;
+        TEST_ASSERT(foc_encoder_correct_code(&normal, raw[k], &direct) == 0);
+        TEST_ASSERT(direct == corrected[k]);
+        TEST_ASSERT(foc_encoder_update(&normal, us, raw[k], FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+        TEST_ASSERT(foc_encoder_update(&reverse, us, raw[k], FOC_ENCODER_TRANSPORT_OK, &r) == 0);
+        TEST_ASSERT(foc_encoder_update(&disabled, us, raw[k], FOC_ENCODER_TRANSPORT_OK, &off) == 0);
+        TEST_ASSERT(foc_encoder_update(&zeros, us, raw[k], FOC_ENCODER_TRANSPORT_OK, &z) == 0);
+        const uint32_t opposite = direct == 0U ? 0U : 100U - direct;
+        TEST_ASSERT(
+            n.raw_code == raw[k] && n.corrected_code == direct && r.corrected_code == direct
+        );
+        TEST_ASSERT(n.mechanical_phase_count == direct && r.mechanical_phase_count == opposite);
+        TEST_ASSERT(normal.position_counts == (int64_t)(direct + (k >= 2U ? 100U : 0U)));
+        TEST_ASSERT(normal.position_counts + reverse.position_counts == 100);
+        TEST_ASSERT(n.raw_velocity_rad_s == -r.raw_velocity_rad_s);
+        TEST_ASSERT(
+            off.corrected_code == z.corrected_code &&
+            off.mechanical_phase_count == z.mechanical_phase_count && off.valid == z.valid &&
+            off.mechanical_rad == z.mechanical_rad && off.single_turn_rad == z.single_turn_rad &&
+            off.delta_rad == z.delta_rad && off.raw_velocity_rad_s == z.raw_velocity_rad_s &&
+            off.filtered_velocity_rad_s == z.filtered_velocity_rad_s &&
+            off.tracked_velocity_rad_s == z.tracked_velocity_rad_s
+        );
+    }
+    TEST_ASSERT(foc_encoder_init_with_lut(&normal, &config, 41U, &bad) != FOC_ENCODER_STATUS_OK);
+    TEST_ASSERT(normal.config.direction == FOC_ENCODER_DIRECTION_NORMAL);
+    const float last_lpf = normal.lpf_velocity_rad_s;
+    const float last_tracker = normal.tracker_velocity_rad_s;
+    TEST_ASSERT(
+        foc_encoder_update(&normal, us, 2U, FOC_ENCODER_TRANSPORT_TIMEOUT, &n) ==
+        FOC_ENCODER_STATUS_ERR_TRANSPORT
+    );
+    TEST_ASSERT(
+        foc_encoder_update(&normal, us - 1000U, 2U, FOC_ENCODER_TRANSPORT_OK, &n) ==
+        FOC_ENCODER_STATUS_ERR_ORDER
+    );
+    TEST_ASSERT(!n.valid && n.corrected_code == 0U && n.mechanical_phase_count == 0U);
+    TEST_ASSERT(
+        normal.position_counts == 107 && normal.previous_code == 1U &&
+        normal.previous_corrected_code == 7U && normal.lpf_velocity_rad_s == last_lpf &&
+        normal.tracker_velocity_rad_s == last_tracker
+    );
+    TEST_ASSERT(foc_encoder_update(&normal, us + 1000U, 3U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+    TEST_ASSERT(n.valid && n.corrected_code == 10U && normal.position_counts == 110);
+    TEST_ASSERT(foc_encoder_reset(&normal) == 0);
+    TEST_ASSERT(foc_encoder_update(&normal, 0U, 95U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+    TEST_ASSERT(!n.valid && n.corrected_code == 99U && normal.position_counts == 99);
+    TEST_ASSERT(foc_encoder_init(&normal, &config) == 0);
+    TEST_ASSERT(foc_encoder_update(&normal, 0U, 95U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+    TEST_ASSERT(n.corrected_code == 95U && n.mechanical_phase_count == 5U);
+
+    /* The same raw short arc can cross half a turn after correction.
+     * Do not admit the opposite corrected short arc even if speed allows it. */
+    static const int16_t stretched[] = {-10, 10};
+    const struct foc_encoder_lut ambiguity = {stretched, 2U, 100U, 41U};
+    config.direction = FOC_ENCODER_DIRECTION_NORMAL;
+    config.max_speed_rad_s = 2500.0f;
+    TEST_ASSERT(foc_encoder_init_with_lut(&normal, &config, 41U, &ambiguity) == 0);
+    TEST_ASSERT(foc_encoder_update(&normal, 0U, 0U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+    TEST_ASSERT(
+        foc_encoder_update(&normal, 1000U, 49U, FOC_ENCODER_TRANSPORT_OK, &n) ==
+        FOC_ENCODER_STATUS_ERR_DISCONTINUITY
+    );
+    TEST_ASSERT(n.continuity_lost && normal.position_counts == 90 && normal.previous_code == 0U);
+    /* Quantization can push the corrected arc past half a turn even when
+     * both shortest arcs agree. The exact calibration maps analog
+     * coordinates 5.20 -> 66.51 to +49.994 counts, while raw 5 -> 67
+     * maps to 13 -> 64 and the shorter apparent corrected arc is -49. */
+    static const int16_t compressed[] = {10, -10};
+    const struct foc_encoder_lut quantized_ambiguity = {compressed, 2U, 100U, 41U};
+    config.max_speed_rad_s = 3141.5f;
+    TEST_ASSERT(foc_encoder_init_with_lut(&normal, &config, 41U, &quantized_ambiguity) == 0);
+    TEST_ASSERT(foc_encoder_update(&normal, 0U, 5U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+    TEST_ASSERT(
+        foc_encoder_update(&normal, 1000U, 67U, FOC_ENCODER_TRANSPORT_OK, &n) ==
+        FOC_ENCODER_STATUS_ERR_DISCONTINUITY
+    );
+    TEST_ASSERT(n.continuity_lost && normal.position_counts == 13);
+    config.max_speed_rad_s = 1000.0f;
+
+    /* Non-divisible CPR, both senses of travel and well beyond float32 exact integer range. */
+    const struct foc_encoder_lut odd = {offsets, 4U, 101U, 41U};
+    config.counts_per_revolution = 101U;
+    for (int direction = -1; direction <= 1; direction += 2) {
+        config.direction = (enum foc_encoder_direction)direction;
+        TEST_ASSERT(foc_encoder_init_with_lut(&normal, &config, 41U, &odd) == 0);
+        TEST_ASSERT(foc_encoder_update(&normal, 0U, 0U, FOC_ENCODER_TRANSPORT_OK, &n) == 0);
+        const int64_t turns = (int64_t)direction * 1000000 * 101;
+        normal.position_counts += turns; /* Seed complete integer turns. */
+        const int64_t initial = normal.position_counts;
+        uint32_t prev = n.corrected_code;
+        for (unsigned k = 1U; k <= 10100U; ++k) {
+            TEST_ASSERT(
+                foc_encoder_update(&normal, k * 1000U, k % 101U, FOC_ENCODER_TRANSPORT_OK, &n) == 0
+            );
+            const uint32_t advance = (n.corrected_code + 101U - prev) % 101U;
+            TEST_ASSERT(advance <= 2U);
+            const int64_t phase = (normal.position_counts % 101 + 101) % 101;
+            TEST_ASSERT(n.mechanical_phase_count == (uint32_t)phase);
+            TEST_ASSERT(near(
+                n.delta_rad,
+                (float)(direction * (int)advance) * (6.28318530718f / 101.0f),
+                1.0e-6f
+            ));
+            prev = n.corrected_code;
+        }
+        TEST_ASSERT(normal.position_counts == initial + direction * 10100);
+    }
+    return 0;
+}
+
 int main(void)
 {
+    if (test_encoder_lut() != 0) {
+        return 1;
+    }
     return test_lifecycle_and_single_turn() || test_wrap_direction_and_multiturn() ||
         test_timestamps_and_continuity() || test_transport_and_invalid_samples() ||
         test_speed_filters_and_deterministic_dataset() || test_algorithm_comparison_metrics() ||

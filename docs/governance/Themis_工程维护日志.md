@@ -2909,3 +2909,15 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 在 01A 拟合前新增采集身份、端电压类别、真实作用区间与坐标/静止证据检查。无效观测使会话失效，保留诊断并清零参数，双轴组合验证同一采集设置。
 - Virtual Motor 三种子 d/q 对照中，误标请求电压使 Rs 与 L 偏高约 25%，端电压来源正确时恢复拟合。原 01A 的 677 行轨迹一致。独立复核最终无 P0/P1/P2。
 - Core 15/15、Calibration 2/2、Simulation 18/18、Runtime 11/11、Device 2/2、ASan/UBSan 和严格 Scope all 通过。ARM 单轴 +8 B，新增对象 text +132 B，锁定固件哈希一致。见 `docs/evidence/2026-11-27-next-motor-id-01b.md`。硬件与 WCET 待证，功率输出锁定。
+
+## 2026-11-27 NEXT-ENCODER-LINEAR-01A 编码器周期性非线性补偿
+
+- Encoder 可显式启用按 CPR 与编码器身份准入的整码周期 LUT。校正码同时驱动单圈相位、多圈展开和速度。半圈歧义保护有定向回归。
+- Virtual Encoder → Sensor → H1 → H0 → Current 三组 A/B/C 电角 RMS 下降约 99.09%–99.77%，爬行 LPF 速度 RMS 增加 6.70%。关闭时旧系统 2,587 条记录与 Motor-ID 677 行轨迹一致。
+- Sensors、Core、Runtime、Simulation、ASan/UBSan、严格 Scope all 和目标构建通过。独立复核最终无 P0/P1/P2。锁定镜像 Flash/RAM 增加 200/16 B。证据见 `docs/evidence/2026-11-27-next-encoder-linear-01a.md`。功率输出锁定，硬件与 WCET 待证。
+
+## 2026-11-27 NEXT-ENCODER-LINEAR-01B 独立参考 LUT 标定和 Holdout
+
+- 新增纯 C11 离线逆向拟合、逐段覆盖和参考零位准入。冻结整数表后由另一采集会话使用生产 Sensor 校验，导出结果可显式试装。
+- 五组拆分采集生成六张表，三个 64 节点控制链的 Holdout RMS 为 0.049–0.180 mrad。低速专题观测到输入量化及输出舍入占主要速度扰动，保留 16,384 CPR 爬行速度 RMS 上升。
+- Core 15/15、Sensors 2/2、Calibration 5/5、Runtime 11/11、Simulation 21/21、Sanitizer 和严格 Scope all 通过。01A、Motor-ID 与锁定固件哈希基线复现。证据见 `docs/evidence/2026-11-27-next-encoder-linear-01b.md`。实机与 WCET 待证，功率输出锁定。

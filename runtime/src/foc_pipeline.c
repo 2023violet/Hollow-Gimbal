@@ -56,7 +56,7 @@ foc_pipeline_submit(struct foc_pipeline *pipeline, const struct foc_device_pwm_r
     struct foc_pipeline_mock *mock = &pipeline->mock;
     const bool update = request->action == FOC_DEVICE_OUTPUT_UPDATE;
     const bool forced_rejection = update ? mock->reject_update : mock->reject_inhibit;
-    struct foc_device_sim_registers candidate = mock->registers;
+    struct foc_device_sim_registers candidate;
 
     mock->attempts++;
     mock->last_request = *request;

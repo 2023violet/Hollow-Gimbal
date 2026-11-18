@@ -2885,3 +2885,15 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - [修复] 仅Runtime解耦生命周期拒绝与本拍采样/Safety；预先保存动作资格，过期邮箱不再跳过control，单拍仅一次Pipeline。原REVIEW-04 F1/P1通过正式RED/GREEN和第二出口隔离变异关闭。
 - [验证] 新鲜/无效ADC、invalid sensor、健康过期32组及STOP/FAULT/恢复/重复身份；Core15、Runtime11、Simulation15、受影响ASan/UBSan11/15、GCC Runtime11、Legacy45及严格Scope all均通过，独立复核无新P1。两处依赖旧旁路的正式测试预期作直接必要修订。
 - [资源/边界] ARM soft -Os Runtime对象text6484→6512B，实例1236B、H0/control静态帧168/224B不变；非完整镜像/WCET/栈水位。提交后STOP终态REJECTED/CANCELLED分类为独立P2后续。保护旧七项成果及2427个build产物；未commit/push，等待明确Git批准，不自动下一轮。报告docs/evidence/2026-11-17-next-code-improve-04.md；硬件安全/WCET/实机未验证，功率LOCKED。
+
+## 2026-11-17 NEXT-CODE-REVIEW-05 Pipeline 控制事务评审
+
+- [Runtime P2] 8 个交错探针验证终态和输出。已拒绝的 ARM 在已接受 UPDATE 后遇 STOP 保留 REJECTED，待应用的有效 START 遇 STOP 返回 CANCELLED；最终 confirmed INHIBIT。裁决 KEEP，生产代码与正式测试零差异。
+- [Pipeline] 无确认 P0/P1；保留 Safety、STOP guard、输出确认与 PI Trial 事务。推荐下轮仅删 submit 的 20 B 旧寄存器预拷贝。隔离 ARM 对比函数 204→190 B，帧 48 B；Safety 重复检查候选待周期与栈证据。
+- [证据] Runtime Clang/GCC 各 11/11、Simulation Clang 15/15、锁定 V2 ARM 通过。报告 `docs/evidence/2026-11-17-next-code-review-05.md`。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。
+
+## 2026-11-17 NEXT-CODE-IMPROVE-05 Pipeline 冗余寄存器预拷贝优化
+
+- [实现] `foc_pipeline_submit` 取消候选寄存器的 20 B 旧值预拷贝。UPDATE/INHIBIT 成功完整写入五字段，提交确认、回调及 PI Trial 的顺序保持。
+- [验收] A/B 11 条事务记录一致，独立复核无 P0/P1/P2；ARM 函数和对象各减 14 B，整镜像 FLASH 减 12 B，静态帧与 RAM 原值。Runtime 11、Simulation 15、Core 15、NP 2、Board 4、Runtime/Simulation sanitizer 11/15、Source、格式及严格 Scope all 通过。
+- [交付] 报告 `docs/evidence/2026-11-17-next-code-improve-05.md` 附原始证据，保留 REVIEW-05 和 2,427 个原有忽略产物，等待 Git 交付确认。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。

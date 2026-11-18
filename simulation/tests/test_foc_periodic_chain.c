@@ -328,12 +328,17 @@ static int test_startup_transport_failure(void)
             view.state,
             view.updates
         );
-        /* Rejected START in DISABLED does not count a second invalid sample.
-         * Baseline and migrated producer both stay disabled, without auto-arm. */
+        /* Rejected ARM/START cannot hide invalid observations. The third bad
+         * cycle latches the existing sample fault; later feedback cannot rearm. */
+        const bool latched = at >= 400U;
         CHECK(
-            view.state == FOC_SAFE_STATE_DISABLED && view.faults == 0U &&
+            view.state == (latched ? FOC_SAFE_STATE_FAULT_LATCHED : FOC_SAFE_STATE_DISABLED) &&
+            view.faults == (latched ? FOC_SAFE_FAULT_SAMPLE_INVALID : 0U) &&
             view.action == FOC_DEVICE_OUTPUT_INHIBIT
         );
+        if (at <= 400U) {
+            CHECK(vm.runtime.pipeline.safety.invalid_sample_streak == at / 200U + 1U);
+        }
     }
     CHECK(vm.encoder.velocity_seen); /* Later valid phase/speed cannot auto-restart. */
     return 0;

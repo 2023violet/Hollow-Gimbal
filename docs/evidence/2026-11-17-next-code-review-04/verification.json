@@ -1,0 +1,20 @@
+{
+  "head": "54f6e47d6a67d62684cfe84f704114c8ca7a8b6b",
+  "changed_existing": [
+    "AGENTS.md",
+    "docs/architecture/README.md",
+    "docs/governance/Themis_工程维护日志.md"
+  ],
+  "added_before_receipt": [
+    "docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md",
+    "docs/evidence/2026-11-17-next-code-review-04.md",
+    "docs/evidence/2026-11-17-next-code-review-04/raw-evidence.zip"
+  ],
+  "production_and_tests_unchanged": true,
+  "ignored_unchanged": 2427,
+  "main_unchanged": true,
+  "charter_move_sha256": "648c1c6bd0f35b540fbf57a99c8ed92573d8ddc648d71caa314bd3659f646a98",
+  "verdict": "BLOCK_F1_P1",
+  "git_commit_push": "NOT_EXECUTED",
+  "function_count": 40
+}

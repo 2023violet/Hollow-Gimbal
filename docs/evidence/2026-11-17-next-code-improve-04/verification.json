@@ -1,0 +1,44 @@
+{
+  "verdict": "PASS WITH FOLLOW-UPS",
+  "closed": "REVIEW-04 F1/P1 both bypasses",
+  "head": "54f6e47d6a67d62684cfe84f704114c8ca7a8b6b",
+  "branch": "codex/falconfoc-v2-vm01a",
+  "git_delivery": "AWAITING_EXPLICIT_APPROVAL",
+  "changed_vs_task_baseline": [
+    "docs/governance/Themis_工程维护日志.md",
+    "runtime/src/foc_runtime.c",
+    "runtime/tests/test_foc_motion_runtime.c",
+    "runtime/tests/test_foc_runtime_mailbox.c",
+    "simulation/tests/test_foc_periodic_chain.c"
+  ],
+  "added": [
+    "docs/evidence/2026-11-17-next-code-improve-04.md",
+    "docs/evidence/2026-11-17-next-code-improve-04/raw-evidence.zip",
+    "docs/evidence/2026-11-17-next-code-improve-04/verification.json"
+  ],
+  "code_sha256": {
+    "runtime/src/foc_runtime.c": "4a68022216125138a7af647309ceb76fb513eb66356eb0ee39241d66755b5c6f",
+    "runtime/tests/test_foc_runtime_mailbox.c": "9fb5a319e12826f8b71f77aa186a200a330115d27e7b931dec38d8185f0f3b55",
+    "runtime/tests/test_foc_motion_runtime.c": "235746f489f1eb35d51e9bcb969b641067f04980c3b43aeb6501fab57bc67436",
+    "simulation/tests/test_foc_periodic_chain.c": "46e309e139059e224d1767e46cab9db031e2c354cd6d55cd20bab62cddcad381"
+  },
+  "final_ctest_counts": {
+    "core": 15,
+    "runtime-final": 11,
+    "simulation-final": 15,
+    "runtime-asan": 11,
+    "simulation-asan": 15,
+    "runtime-gcc": 11
+  },
+  "original_snapshot_files_unchanged": 2546,
+  "ignored_files_unchanged": 2427,
+  "ignored_bytes_unchanged": 322054220,
+  "prior_review_files_preserved": true,
+  "maintenance_append_only": true,
+  "main_worktree_status_unchanged": true,
+  "staged_files": 0,
+  "raw_zip_sha256": "5981d22fc1d028f19ffa10b4382d88b5d54c8dd6738bf9f0090f37daf77ea3ae",
+  "report_sha256": "285559acf7296c8ba9f5cf562cdc86ec423829f032f40d1b8134a54252b372be",
+  "follow_up": "P2: post-admission nonfault STOP terminal classification REJECTED/CANCELLED; output inhibited",
+  "status_before_receipt": " M AGENTS.md\n M docs/architecture/README.md\n M docs/governance/Themis_工程维护日志.md\n M runtime/src/foc_runtime.c\n M runtime/tests/test_foc_motion_runtime.c\n M runtime/tests/test_foc_runtime_mailbox.c\n M simulation/tests/test_foc_periodic_chain.c\n?? docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md\n?? docs/evidence/2026-11-17-next-code-improve-04.md\n?? docs/evidence/2026-11-17-next-code-improve-04/raw-evidence.zip\n?? docs/evidence/2026-11-17-next-code-review-04.md\n?? docs/evidence/2026-11-17-next-code-review-04/raw-evidence.zip\n?? docs/evidence/2026-11-17-next-code-review-04/verification.json\n"
+}

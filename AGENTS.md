@@ -8,6 +8,8 @@ This file is the live repo entry contract.
 
 Read these first, in order:
 
+0. `docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md`
+   - Product principles govern direction; current Git/source/evidence supersede its dated progress snapshot.
 1. `README.md`
 2. `docs/README.md`
 3. `docs/architecture/README.md`

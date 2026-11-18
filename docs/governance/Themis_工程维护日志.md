@@ -2871,3 +2871,17 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - [归因] 当前10ms Current基线与隔离理想ADC相位对照均保留CONTROL_QUALITY_FAIL；RUNNING RMSE仅0.089168893772→0.089167571490A。历史quality判据包含STOP后的full-window末项；不把该标签解释成相位主因，也不修改PI/电压/质量阈值。
 - [回归/保护] Core15/15、Runtime11/11、复核后Simulation Clang/GCC/ASan+UBSan各15/15，Core ASan15/15，Source82/9/9、格式、strict Scope all含30项CMake和Host45/45通过。仅测试/helper/说明/本日志/新证据；生产、旧证据及2427既有产物保留，Gate使用历史ELF/MAP副本，非新ARM重建。
 - [交付/边界] 报告docs/evidence/2026-11-17-next-system-angle-01.md，受控Host合同PASS；先交付验收并停止，用户随后明确要求GitHub提交推送，获授权后仅普通提交推送本任务8文件并读回远端核对。保护收据保留授权前时点，最终SHA另记。不进入下一阶段。G3-SAFE HARDWARE NOT VERIFIED / G3-PWR LOCKED / AT32F415 WCET NOT VERIFIED / MOTOR PHYSICAL OPERATION UNVERIFIED。
+
+
+## 2026-11-17 NEXT-CODE-REVIEW-04 Runtime只读深审
+
+- [裁决] 一项P1/BLOCK：生命周期wrong-state/消费时过期拒绝可绕过本拍invalid ADC失效处理，旧确认UPDATE保持；配对反例独立重编译确认，无新增UPDATE。生产/正式测试未改，下一轮先补RED并修两处拒绝出口。
+- [证据] Runtime11/11、Simulation15/15仍绿；ARM M4 soft -Os实例1236B、Host1296B，Runtime对象text6484B，静态H0/H1栈168/328B，非WCET/栈高水位。H1窄快照/遥测屏障仅候选待证，不擅自优化。
+- [纲领/对照] 用户授权将Downloads原文逐字节移入docs/architecture并添加AGENTS/README入口；原文阶段快照保留、当前Git事实优先。robot_mc固定2f1fb61有限源码对照，无外部代码移植。报告docs/evidence/2026-11-17-next-code-review-04.md。未commit/push，不自动修复或启动下一轮；功率LOCKED，硬件安全/WCET/实机运行未验证。
+
+
+## 2026-11-17 NEXT-CODE-IMPROVE-04 生命周期拒绝路径修复
+
+- [修复] 仅Runtime解耦生命周期拒绝与本拍采样/Safety；预先保存动作资格，过期邮箱不再跳过control，单拍仅一次Pipeline。原REVIEW-04 F1/P1通过正式RED/GREEN和第二出口隔离变异关闭。
+- [验证] 新鲜/无效ADC、invalid sensor、健康过期32组及STOP/FAULT/恢复/重复身份；Core15、Runtime11、Simulation15、受影响ASan/UBSan11/15、GCC Runtime11、Legacy45及严格Scope all均通过，独立复核无新P1。两处依赖旧旁路的正式测试预期作直接必要修订。
+- [资源/边界] ARM soft -Os Runtime对象text6484→6512B，实例1236B、H0/control静态帧168/224B不变；非完整镜像/WCET/栈水位。提交后STOP终态REJECTED/CANCELLED分类为独立P2后续。保护旧七项成果及2427个build产物；未commit/push，等待明确Git批准，不自动下一轮。报告docs/evidence/2026-11-17-next-code-improve-04.md；硬件安全/WCET/实机未验证，功率LOCKED。

@@ -187,8 +187,19 @@ static int test_mode_and_ack(void)
 {
     struct foc_runtime runtime = {0};
     TEST_ASSERT(start_current(&runtime, &config, 0U) == 0);
-    const float current_integral = runtime.pipeline.current.integral_v.q;
-    TEST_ASSERT(current_integral > 0.0f);
+    TEST_ASSERT(runtime.pipeline.current.integral_v.q > 0.0f);
+    struct foc_runtime normal = {0};
+    TEST_ASSERT(start_current(&normal, &config, 0U) == 0);
+    TEST_ASSERT(
+        drive(
+            &normal,
+            400U,
+            4U,
+            FOC_RUNTIME_ACTION_NONE,
+            FOC_RUNTIME_MODE_CURRENT,
+            FOC_RUNTIME_OK
+        ) == 0
+    );
     TEST_ASSERT(
         drive(
             &runtime,
@@ -204,9 +215,13 @@ static int test_mode_and_ack(void)
         runtime.pipeline.safety.state == FOC_SAFE_STATE_RUNNING
     );
     TEST_ASSERT(
-        runtime.pipeline.mock.updates == 1U &&
-        runtime.pipeline.current.integral_v.q == current_integral
+        runtime.pipeline.mock.updates == 2U &&
+        runtime.pipeline.mock.updates == normal.pipeline.mock.updates &&
+        runtime.pipeline.current.integral_v.d == normal.pipeline.current.integral_v.d &&
+        runtime.pipeline.current.integral_v.q == normal.pipeline.current.integral_v.q
     );
+    /* The rejected mode change still services exactly one normal current cycle. */
+    const float current_integral = runtime.pipeline.current.integral_v.q;
     TEST_ASSERT(
         motion_command(&runtime, FOC_RUNTIME_MODE_VELOCITY, 500U, 2U, 10.0f) == FOC_RUNTIME_OK
     );

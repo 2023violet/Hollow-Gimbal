@@ -520,7 +520,13 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     struct foc_pipeline *pipeline = &runtime->pipeline;
     const struct foc_device_adc_raw *adc = &input->adc;
     const uint32_t now_us = input->now_us;
-    if (input->action == FOC_RUNTIME_ACTION_SET_MODE) {
+    /* A valid disabled mode change retains its existing control-free boundary.
+     * Rejected actions must still observe this cycle's sample and Safety. */
+    if (input->action == FOC_RUNTIME_ACTION_SET_MODE &&
+        pipeline->safety.state == FOC_SAFE_STATE_DISABLED && pipeline->mock.output_confirmed &&
+        pipeline->mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT &&
+        (input->requested_mode == FOC_RUNTIME_MODE_CURRENT ||
+         (runtime->config.motion.enabled && foc_runtime_outer_mode(input->requested_mode)))) {
         return foc_runtime_set_mode(runtime, input->requested_mode, now_us);
     }
     if (!foc_safe_sequence_newer(adc->sample_seq, runtime->adc.seq, runtime->adc.seen) ||
@@ -579,10 +585,9 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     if (foc_runtime_drain_stop(runtime, now_us)) {
         return FOC_RUNTIME_ERR_STOP;
     }
-    if (!foc_runtime_action_valid(input->action, pipeline->safety.state)) {
-        runtime->pipeline_status = FOC_PIPELINE_ERR_STATE;
-        return FOC_RUNTIME_ERR_CONTROL;
-    }
+    /* Decide before observation can disable/fault the controller. Never reinterpret
+     * a rejected ARM as eligible after an invalid sample changes RUNNING to DISABLED. */
+    const bool action_valid = foc_runtime_action_valid(input->action, pipeline->safety.state);
 
     const int status =
         foc_pipeline_step_guarded(pipeline, &step, foc_runtime_admit_update, runtime);
@@ -597,11 +602,14 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
             runtime->accepted_outer_seq = sensor.sample.seq;
             runtime->accepted_outer_seen = true;
         }
-        return FOC_RUNTIME_OK;
+        return action_valid ? FOC_RUNTIME_OK : FOC_RUNTIME_ERR_CONTROL;
     }
     if (stopped || status == FOC_PIPELINE_ERR_STOP) {
         runtime->pipeline_status = status;
         return FOC_RUNTIME_ERR_STOP;
+    }
+    if (!action_valid) {
+        return FOC_RUNTIME_ERR_CONTROL;
     }
     if (input->action == FOC_RUNTIME_ACTION_CLEAR_FAULT ||
         (input->action != FOC_RUNTIME_ACTION_NONE && status == FOC_PIPELINE_ERR_STATE)) {
@@ -1185,9 +1193,15 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
                     : FOC_RUNTIME_CLEAR_REJECTED
             );
         } else {
-            status = lifecycle_result == FOC_RUNTIME_REQUEST_NONE
-                ? foc_runtime_control(runtime, &control_input)
-                : lifecycle_status;
+            /* A rejected mailbox stays separate from the ordinary H0 cycle.
+             * Its action was not copied into control_input above. */
+            status = foc_runtime_control(runtime, &control_input);
+        }
+        if (lifecycle_claimed && lifecycle_result != FOC_RUNTIME_REQUEST_NONE &&
+            (status == FOC_RUNTIME_ERR_STOP ||
+             runtime->pipeline.safety.state == FOC_SAFE_STATE_FAULT_LATCHED)) {
+            lifecycle_result = FOC_RUNTIME_REQUEST_CANCELLED;
+            lifecycle_status = status;
         }
         if (lifecycle_claimed && lifecycle_result == FOC_RUNTIME_REQUEST_NONE) {
             lifecycle_status = status;

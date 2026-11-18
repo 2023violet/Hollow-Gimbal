@@ -27,6 +27,7 @@ add_library(
   src/foc_uart_buffer.c
   "${repo}/core/src/foc_core.c"
   "${repo}/core/src/foc_current.c"
+  "${repo}/core/src/foc_impedance.c"
   "${repo}/core/src/foc_motion.c"
   "${repo}/core/src/foc_trajectory.c"
   "${repo}/calibration/src/foc_calibration.c"

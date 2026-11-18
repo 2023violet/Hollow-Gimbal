@@ -81,6 +81,100 @@ if (output.output_enable != 0U) {
 }
 ```
 
+## Single-axis mechanical impedance
+
+`include/foc_impedance.h` exposes the stateless `foc_impedance_step()` for
+motor-shaft requests. Supply signed, continuous reference-minus-measurement
+position error computed in a common coordinate system before Float32 rounding.
+The calculation accepts multi-turn errors as supplied. Reference and measured
+speed are in rad/s. Stiffness is in N*m/rad, damping in N*m*s/rad, and
+feedforward and torque requests in N*m.
+
+Supply positive motor-shaft `Kt` in N*m/A and the live q current limit in A
+on every call. With the Core phase convention, positive q current produces
+positive motor torque. The ideal PMSM model at `Id = 0` uses
+`Kt = 1.5 * pole_pairs * flux_linkage_wb`. R/L candidates do not determine Kt.
+The tighter torque or current limit determines the torque cap. Both caps allow
+zero, which gives zero torque and current. The final q current is capped again
+after Float32 conversion to enforce the original live current bound.
+`limited_torque_nm` is the torque request before q conversion. Multiplying
+the final Float32 q target by `Kt` can differ slightly due to rounding and the
+final current clamp.
+
+Use the return status and `output.valid` before handing the request downstream.
+Errors clear the output. The caller handles sample freshness and downstream
+Current, voltage, PWM and Safety admission. Run the standalone
+`test-foc-impedance` and Simulation's `test-foc-impedance-virtual` through CTest.
+The latter exercises the existing Runtime Current entry with an external Host
+controller and has a `--trace` option for per-sample CSV records.
+
+### Model-based gain candidates
+
+`foc_impedance_tuning_design()` in `include/foc_impedance_tuning.h` computes
+`K = J * omega_n^2` and `D = 2 * zeta * J * omega_n - B` for an unsaturated
+motor-shaft model. Supply a nonzero model identity, qualified inertia and Kt,
+explicit viscous damping or the assumed-zero marker, target natural angular
+frequency and damping ratio, configured gain ceilings, and current and timing
+budgets. The API rejects negative D, gains beyond the supplied ceilings,
+nonrepresentable arithmetic, and requested or predicted
+`omega_n * (period + extra_delay) > 0.25`.
+
+On success, `valid` covers the ideal model design and static gain bounds. The
+ideal frequencies are predicted from the published Float32 gains. The reported
+`Kt * Iq_limit` is a current-derived torque budget. Runtime still owns its
+independent torque cap and all command admission. Sampled stability, noise
+limits, and saturated behavior need closed-loop validation. Review a candidate
+before explicitly transferring the gains to an impedance command. The tuning
+function has no Runtime side effects and is intended for offline or cold-path use.
+
+Use `test-foc-impedance-tuning` for the standalone numerical contract.
+The Simulation test `test-foc-impedance-robustness` runs the frozen holdout
+and reports separate per-scenario quality verdicts. Use `--train` for the
+design matrix and `--trace` to export individual samples.
+
+### Static actuator feasibility
+
+The cold-path `foc_impedance_feasibility_evaluate()` in
+`include/foc_impedance_feasibility.h` uses the same motor-axis impedance
+configuration. Supply the admitted q-current limit, qualified Kt and signed
+net static load identities, feedforward, and the allowed position error.
+Confirm a fixed target, accounted static support torques, and qualified
+current tracking. Unknown provenance returns UNKNOWN. A moving target has
+its own verdict. Neither case produces a torque budget or position estimate.
+
+The symmetric capacity is `min(torque_limit, Kt * Iq_limit)`. Capacity and
+signed reserve are evaluated and returned in Double so a Float32 round-up
+cannot create a feasible balance. For an interior load and positive K, the
+equilibrium error is `(load - feedforward) / K`. At the capacity boundary,
+saturation may allow a range of equilibrium errors with zero reserve. The
+result gives its nearest error and marks position as unconstrained. With
+K=0, limited feedforward must balance the load, and the model gives no
+position-restoring term. D is validated as a controller setting and has zero
+contribution at rest.
+
+This static model does not certify convergence, dynamic stability, trajectory
+tracking, or hardware safety. The diagnostic has no Runtime side effects.
+Run `test-foc-impedance-feasibility` for the numerical contract and
+`test-foc-impedance-static-hold` in Simulation for formal Runtime closed-loop
+witnesses.
+
+### Model motion feedforward
+
+`foc_impedance_feedforward_evaluate()` in `include/foc_impedance_feedforward.h`
+computes the signed motor-shaft term `J * acceleration + B * velocity`.
+The caller supplies a qualified mechanical model with matching reference
+and model frame IDs, coherent velocity and acceleration from one point of a
+continuous, bounded trajectory, and a symmetric feedforward torque budget.
+The result is a complete candidate with model and frame provenance. Rejection
+clears the result, including when the model term exceeds its budget.
+
+Pass a usable candidate explicitly through the existing IMPEDANCE command
+feedforward member. The term accounts for inertia and viscous motion. Any
+separately confirmed external load remains a caller contribution. Allocate
+budget for feedback and any load compensation, then respect the existing
+Runtime torque and current limits. The calculation owns no controller state.
+Run `test-foc-impedance-feedforward` for the numerical contract.
+
 ## Error and safety behavior
 
 Every public operation validates pointers before dereferencing them. Transform and SVPWM functions calculate into local values and publish the result only after validation, so their input structures are not modified.

@@ -106,6 +106,44 @@ duty constraints and control schedule. The bounds define design policy for
 the ideal model. Apply candidates explicitly to an offline configuration and
 validate the closed-loop response before using them in another context.
 
+## Equivalent mechanical inertia and viscous damping
+
+Include `foc_mechanical_id.h` and link `falconfoc-calibration`. Initialize a
+caller-owned capture with `foc_mechanical_id_init()`, feed endpoints with
+`foc_mechanical_id_push()`, and obtain a candidate with
+`foc_mechanical_id_finish()`. Use `foc_mechanical_id_reset()` with a fresh
+capture ID. An invalid session rejects subsequent samples and exports zero
+coefficients. The returned setup, torque model, acquisition and load classes
+scope the candidate to the qualified mechanical assembly.
+
+All signals share the signed motor-shaft mechanical frame and one source clock.
+Qualify the measured dq current and independent Kt over the admitted Id range,
+or supply an independently qualified full electromagnetic torque observation.
+Use actual observation apertures and confirm that the speed, torque and any
+signed opposing load represent each interval. Time labels alone cannot qualify
+LPF lag, acquisition delay, or the output and current association. Confirm a
+negligible load or supply measured load. Undeclared friction, unobserved load
+and incorrect Kt can bias the model. The acquisition owner must keep speed and
+torque sufficiently resolved across every interval, including variation faster
+than the mechanical time constant. Configuration bounds require
+`max_B * max_interval_s / min_J <= 0.3`. For fixed-step trapezoidal
+quadrature on the linear model this limits the integration error associated
+with that pole. It does not guarantee accuracy for arbitrary intersample
+waveforms or timing errors.
+
+Complete windows use
+`mean(tau_e - tau_load) = J * delta(omega)/T + B * mean(omega)`.
+Trapezoidal integration uses actual intervals. Six Double statistics support
+an online two-column fit with bounded work and fixed storage. Both
+acceleration signs, speed and acceleration RMS floors, column independence,
+physical parameter limits and a residual upper bound on the published
+Float32 coefficients gate a usable result. The damping term represents
+viscous damping within the acquisition conditions. Each usable J/B pair
+can be supplied explicitly to `foc_impedance_tuning_design()` using the same
+frame and Kt assumptions. Confirm the design against an independent closed
+loop before use. No capture, mode switch, gain application or persistence
+runs automatically.
+
 ## Offline encoder LUT generation
 
 The encoder calibrator lives in `foc_encoder_calibration.h`. It fits the

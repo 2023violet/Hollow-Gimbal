@@ -109,6 +109,47 @@ Select a different mode using `FOC_RUNTIME_ACTION_SET_MODE` only in DISABLED wit
 
 Run `test-foc-motion-model` for direct and Runtime PMSM dynamics, including `100 µs` H0, `500 µs` H1, `1 ms` supervision, reversible speed and position steps, and load transients. Run `test-foc-motion-runtime` for fault, timeout and mode-transition assertions. The model consumes confirmed compare updates and stops at INHIBIT.
 
+## Runtime IMPEDANCE mode
+
+For a C API integration, enable `motion.impedance` alongside `motion.enabled`
+at initialization. Supply the qualified positive motor-shaft Kt in N*m/A,
+positive torque cap, nonnegative ceilings for stiffness, damping and absolute
+feedforward, and a nonzero mechanical frame identity. The copied policy is
+immutable. The existing `motion.iq_limit_a` is the configured q limit and must
+fit the Current limit. A separate live thermal or power derating input is
+outside this interface.
+
+In DISABLED with confirmed INHIBIT, publish a lifecycle SET_MODE request for
+`FOC_RUNTIME_MODE_IMPEDANCE`. After the H0 acknowledgement, read the current
+Session and publish `target.impedance` through
+`foc_runtime_publish_impedance_command()`. Send the original producer time
+and an advancing sequence across modes and Sessions. For opt-in instances,
+revocation preserves this producer watermark. While IMPEDANCE is selected,
+the legacy current and cascade publication APIs cannot replace its command.
+After a mode change or recovery, both source times must follow the boundary
+before H0 accepts a target.
+
+Use the same mechanical zero, sign and motor axis for command and H1 sample.
+Set the sample's matching `mechanical_frame_id` only for valid same-capture
+position and velocity. Both positions must lie in the inclusive
+`[-1024, 1024]` rad domain. With binary32 and round-to-nearest, the conservative
+absolute bound for input rounding and the subtraction together is 0.000245 rad,
+exclusive of upstream position errors. The controller uses a continuous error
+without angular wrap. A source frame mismatch or a position outside the domain
+produces no q target. Electrical phase continues to use the existing independent
+phase input.
+
+After successful Core validation, H1 publishes zero q for ARM and START
+readiness, then computes q from `foc_impedance_step()` during RUNNING. H0
+checks the target's mode, Session and original command and sensor timing,
+then uses the existing guarded Pipeline. UART V1 does not admit IMPEDANCE
+setpoints. Zero-initialized policy leaves the mode disabled, including Board1.
+The Runtime public structs have grown and binary consumers must recompile.
+
+Run `test-foc-runtime-impedance` and
+`test-foc-runtime-impedance-virtual` for the transaction and virtual motor
+contracts. The simulation test accepts `--trace` for the six Host scenarios.
+
 ## NEXT-SYSTEM-01 full-chain Host stability
 
 `test-foc-system` is the deterministic system-level Host lane. It enables the

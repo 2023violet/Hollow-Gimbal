@@ -36,6 +36,11 @@
 
 #include <stdatomic.h>
 
+/* Public Macros --------------------------------------------------------------- */
+
+/** Inclusive absolute Float32 mechanical position limit for impedance, in rad. */
+#define FOC_RUNTIME_IMPEDANCE_POSITION_LIMIT_RAD (1024.0f)
+
 /* Public Types ---------------------------------------------------------------- */
 
 /** Runtime service and snapshot outcomes. */
@@ -84,6 +89,26 @@ enum foc_runtime_mode {
     FOC_RUNTIME_MODE_VELOCITY,
     /** H1 cascades continuous mechanical rad to speed and q current. */
     FOC_RUNTIME_MODE_POSITION,
+    /** H1 maps a coherent mechanical observation to a bounded torque request. */
+    FOC_RUNTIME_MODE_IMPEDANCE,
+};
+
+/** Impedance reference for one motion session and continuous mechanical frame. */
+struct foc_runtime_impedance_command {
+    /** Continuous motor-shaft reference in rad, with the source's zero and sign. */
+    float position_rad;
+    /** Motor-shaft reference speed in rad/s. */
+    float velocity_rad_s;
+    /** Nonnegative stiffness in N*m/rad. */
+    float stiffness_nm_per_rad;
+    /** Nonnegative damping in N*m*s/rad. */
+    float damping_nm_s_per_rad;
+    /** Signed feedforward in N*m. */
+    float torque_feedforward_nm;
+    /** Nonzero identity of the shared mechanical zero, sign, and axis. */
+    uint32_t mechanical_frame_id;
+    /** Current motion session from the Runtime snapshot. */
+    uint32_t source_session;
 };
 
 /** Outcome of the single Foreground-requested command-timeout recovery. */
@@ -126,6 +151,8 @@ struct foc_runtime_command {
         struct foc_vector_dq current_a;
         /** Mechanical rad/s for VELOCITY or continuous rad for POSITION. */
         float motion_ref;
+        /** Continuous mechanical impedance reference for IMPEDANCE. */
+        struct foc_runtime_impedance_command impedance;
     } target;
 };
 
@@ -198,9 +225,27 @@ struct foc_runtime_lane_config {
     uint32_t budget_us;
 };
 
+/** Optional immutable admission policy for the motor-shaft impedance mode. */
+struct foc_runtime_impedance_config {
+    /** True only for a configured mechanical-feedback producer. */
+    bool enabled;
+    /** Expected nonzero identity of the shared continuous mechanical frame. */
+    uint32_t mechanical_frame_id;
+    /** Caller-qualified positive motor torque constant, in N*m/A. */
+    float torque_constant_nm_per_a;
+    /** Positive symmetric torque cap, in N*m. */
+    float torque_limit_nm;
+    /** Maximum command stiffness in N*m/rad, nonnegative. */
+    float max_stiffness_nm_per_rad;
+    /** Maximum command damping in N*m*s/rad, nonnegative. */
+    float max_damping_nm_s_per_rad;
+    /** Maximum absolute feedforward torque in N*m, nonnegative. */
+    float max_feedforward_nm;
+};
+
 /** Optional mechanical-feedback and outer-loop policy, copied at initialization. */
 struct foc_runtime_motion_config {
-    /** True selects mechanical feedback and enables the two outer modes. */
+    /** True selects mechanical feedback and enables Velocity and Position. */
     bool enabled;
     /** Mechanical/electrical mapping for this motor. */
     struct foc_rotor_config rotor;
@@ -214,6 +259,8 @@ struct foc_runtime_motion_config {
     float iq_limit_a;
     /** Optional velocity/position trajectory shaping, disabled by default. */
     struct foc_trajectory_config trajectory;
+    /** Optional impedance policy. Zero initialization keeps the mode disabled. */
+    struct foc_runtime_impedance_config impedance;
 };
 
 /** Caller-selected schedules and Host injection configuration. */
@@ -263,6 +310,12 @@ struct foc_runtime_sensor {
      * not a valid zero angle. No fallback to accumulated mechanical position.
      */
     bool electrical_phase_valid;
+    /**
+     * Mechanical frame identity for impedance. Supply a nonzero value only for
+     * a coherent, valid continuous position and valid velocity at captured_us.
+     * Leave zero for other producers or until velocity is established.
+     */
+    uint32_t mechanical_frame_id;
 };
 
 /** One complete H1 publication. Its sensor timestamp dates angle, speed, and any derived target. */
@@ -452,6 +505,8 @@ struct foc_runtime {
     struct foc_runtime_sensor_slot sensor_slots[2];
     /** Foreground-written slots. H0 reads only the published slot. */
     struct foc_runtime_command command_slots[2];
+    /** Foreground publication watermark retained across slot revocation. */
+    struct foc_pipeline_watermark published_command;
     /** Sensor slot index or the unpublished sentinel. */
     atomic_uint sensor_slot;
     /** Command slot index or the unpublished sentinel. */
@@ -508,6 +563,16 @@ int foc_runtime_publish_command(struct foc_runtime *runtime,
 int foc_runtime_publish_motion_command(struct foc_runtime *runtime,
                                        const struct foc_runtime_command *command,
                                        uint32_t now_us);
+
+/**
+ * Publish an IMPEDANCE command for the active motion session and configured frame.
+ * Use a newer sequence across modes and sessions, with original producer time.
+ * A concurrent session change makes a published old-session command ineligible.
+ * This reports mailbox publication, before H1 and H0 acceptance.
+ */
+int foc_runtime_publish_impedance_command(struct foc_runtime *runtime,
+                                          const struct foc_runtime_command *command,
+                                          uint32_t now_us);
 
 /** Publish one bounded ARM, START, or SET_MODE request for the next due H0. */
 int foc_runtime_publish_lifecycle_request(struct foc_runtime *runtime,

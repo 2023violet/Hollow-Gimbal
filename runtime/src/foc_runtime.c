@@ -15,6 +15,8 @@
 
 #include "foc_runtime.h"
 
+#include "foc_impedance.h"
+
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
@@ -286,9 +288,22 @@ static void foc_runtime_import_command(
     }
 }
 
-static bool foc_runtime_outer_mode(enum foc_runtime_mode mode)
+static bool foc_runtime_cascade_mode(enum foc_runtime_mode mode)
 {
     return mode == FOC_RUNTIME_MODE_VELOCITY || mode == FOC_RUNTIME_MODE_POSITION;
+}
+
+static bool foc_runtime_outer_mode(enum foc_runtime_mode mode)
+{
+    return foc_runtime_cascade_mode(mode) || mode == FOC_RUNTIME_MODE_IMPEDANCE;
+}
+
+static bool foc_runtime_mode_enabled(const struct foc_runtime *runtime, enum foc_runtime_mode mode)
+{
+    return mode == FOC_RUNTIME_MODE_CURRENT ||
+        (runtime->config.motion.enabled &&
+         (foc_runtime_cascade_mode(mode) ||
+          (mode == FOC_RUNTIME_MODE_IMPEDANCE && runtime->config.motion.impedance.enabled)));
 }
 
 static int
@@ -297,8 +312,7 @@ foc_runtime_set_mode(struct foc_runtime *runtime, enum foc_runtime_mode mode, ui
     const struct foc_pipeline *pipeline = &runtime->pipeline;
     if (pipeline->safety.state != FOC_SAFE_STATE_DISABLED || !pipeline->mock.output_confirmed ||
         pipeline->mock.last_request.action != FOC_DEVICE_OUTPUT_INHIBIT ||
-        (mode != FOC_RUNTIME_MODE_CURRENT &&
-         (!runtime->config.motion.enabled || !foc_runtime_outer_mode(mode)))) {
+        !foc_runtime_mode_enabled(runtime, mode)) {
         runtime->pipeline_status = FOC_PIPELINE_ERR_STATE;
         return FOC_RUNTIME_ERR_CONTROL;
     }
@@ -413,8 +427,7 @@ static bool foc_runtime_lifecycle_shape_valid(const struct foc_runtime_lifecycle
     }
     if (request->action == FOC_RUNTIME_ACTION_SET_MODE) {
         return request->requested_mode == FOC_RUNTIME_MODE_CURRENT ||
-            request->requested_mode == FOC_RUNTIME_MODE_VELOCITY ||
-            request->requested_mode == FOC_RUNTIME_MODE_POSITION;
+            foc_runtime_outer_mode(request->requested_mode);
     }
     return request->action == FOC_RUNTIME_ACTION_ARM || request->action == FOC_RUNTIME_ACTION_START;
 }
@@ -525,8 +538,7 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     if (input->action == FOC_RUNTIME_ACTION_SET_MODE &&
         pipeline->safety.state == FOC_SAFE_STATE_DISABLED && pipeline->mock.output_confirmed &&
         pipeline->mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT &&
-        (input->requested_mode == FOC_RUNTIME_MODE_CURRENT ||
-         (runtime->config.motion.enabled && foc_runtime_outer_mode(input->requested_mode)))) {
+        foc_runtime_mode_enabled(runtime, input->requested_mode)) {
         return foc_runtime_set_mode(runtime, input->requested_mode, now_us);
     }
     if (!foc_safe_sequence_newer(adc->sample_seq, runtime->adc.seq, runtime->adc.seen) ||
@@ -550,7 +562,10 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
         sensor.mode == runtime->mode && sensor.session == runtime->motion_session &&
         foc_safe_timestamp_fresh(now_us,
                                  sensor.target.produced_us,
-                                 pipeline->safety.config.command_timeout_us);
+                                 pipeline->safety.config.command_timeout_us) &&
+        (runtime->mode != FOC_RUNTIME_MODE_IMPEDANCE || !pipeline->rearm_boundary_seen ||
+         (foc_safe_sequence_newer(sensor.target.produced_us, pipeline->rearm_after_us, true) &&
+          foc_safe_sequence_newer(sensor.sample.captured_us, pipeline->rearm_after_us, true)));
     const struct foc_pipeline_input step = {
         .adc = *adc,
         .theta_elec_rad = aligned,
@@ -575,9 +590,9 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
             atomic_load_explicit(&runtime->command_slot, memory_order_acquire);
         if (command_index != FOC_RUNTIME_UNPUBLISHED &&
             runtime->command_slots[command_index].mode == FOC_RUNTIME_MODE_CURRENT) {
-            const struct foc_runtime_command command = runtime->command_slots[command_index];
+            const struct foc_runtime_command *command = &runtime->command_slots[command_index];
             const struct foc_pipeline_command source =
-                {command.target.current_a, command.seq, command.produced_us};
+                {command->target.current_a, command->seq, command->produced_us};
             foc_runtime_import_command(runtime, &source, now_us);
         }
     }
@@ -702,6 +717,41 @@ static int foc_runtime_supervise(
     return FOC_RUNTIME_OK;
 }
 
+static bool foc_runtime_impedance_target(
+    const struct foc_runtime_motion_config *motion,
+    const struct foc_runtime_impedance_command *reference,
+    const struct foc_runtime_sensor *sample,
+    uint32_t session,
+    float *iq
+)
+{
+    const struct foc_runtime_impedance_config *policy = &motion->impedance;
+    if (reference->source_session != session ||
+        sample->mechanical_frame_id != policy->mechanical_frame_id ||
+        fabsf(sample->mechanical_rad) > FOC_RUNTIME_IMPEDANCE_POSITION_LIMIT_RAD) {
+        return false;
+    }
+    const struct foc_impedance_config config = {
+        .stiffness_nm_per_rad = reference->stiffness_nm_per_rad,
+        .damping_nm_s_per_rad = reference->damping_nm_s_per_rad,
+        .torque_constant_nm_per_a = policy->torque_constant_nm_per_a,
+        .torque_limit_nm = policy->torque_limit_nm,
+    };
+    const struct foc_impedance_input input = {
+        .position_error_rad = reference->position_rad - sample->mechanical_rad,
+        .reference_velocity_rad_s = reference->velocity_rad_s,
+        .measured_velocity_rad_s = sample->mechanical_rad_s,
+        .torque_feedforward_nm = reference->torque_feedforward_nm,
+        .live_iq_limit_a = motion->iq_limit_a,
+    };
+    struct foc_impedance_output output;
+    if (foc_impedance_step(&config, &input, &output) != FOC_STATUS_OK || !output.valid) {
+        return false;
+    }
+    *iq = output.iq_ref_a;
+    return true;
+}
+
 static void foc_runtime_prepare_outer(
     struct foc_runtime *runtime,
     struct foc_runtime_sensor_slot *candidate,
@@ -737,40 +787,55 @@ static void foc_runtime_prepare_outer(
         view->state == FOC_SAFE_STATE_FAULT_LATCHED) {
         return;
     }
-    const struct foc_runtime_command command = runtime->command_slots[index];
-    if (command.mode != view->mode ||
+    /* Foreground cannot overwrite this slot while H1 is running. */
+    const struct foc_runtime_command *command = &runtime->command_slots[index];
+    if (command->mode != view->mode ||
         !foc_safe_timestamp_fresh(
             now_us,
-            command.produced_us,
+            command->produced_us,
             runtime->pipeline.safety.config.command_timeout_us
         )) {
         return;
     }
 
     float iq = 0.0f;
-    if (running) {
-        if (!same_session) {
+    if (running && !same_session) {
+        return;
+    }
+    if (view->mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+        if (!foc_runtime_impedance_target(
+                &runtime->config.motion,
+                &command->target.impedance,
+                &candidate->sample,
+                view->motion_session,
+                &iq
+            )) {
             return;
         }
+        /* Inactive proposals establish readiness without requesting torque. */
+        if (!running) {
+            iq = 0.0f;
+        }
+    } else if (running) {
         const struct foc_runtime_motion_config *policy = &runtime->config.motion;
         const float speed_limit = policy->position.velocity_limit_rad_s;
-        float speed = fmaxf(-speed_limit, fminf(command.target.motion_ref, speed_limit));
+        float speed = fmaxf(-speed_limit, fminf(command->target.motion_ref, speed_limit));
         const float dt_s =
             (float)(candidate->sample.captured_us - previous->sample.captured_us) * 1.0e-6f;
         if (trajectory_enabled) {
             struct foc_trajectory_output trajectory_output;
             struct foc_trajectory_context trajectory_trial = runtime->trajectory;
-            const int trajectory_status = command.mode == FOC_RUNTIME_MODE_POSITION
+            const int trajectory_status = command->mode == FOC_RUNTIME_MODE_POSITION
                 ? foc_trajectory_position_step(
                       &trajectory_trial,
-                      command.target.motion_ref,
+                      command->target.motion_ref,
                       candidate->sample.mechanical_rad,
                       dt_s,
                       &trajectory_output
                   )
                 : foc_trajectory_velocity_step(
                       &trajectory_trial,
-                      command.target.motion_ref,
+                      command->target.motion_ref,
                       dt_s,
                       &trajectory_output
                   );
@@ -779,11 +844,11 @@ static void foc_runtime_prepare_outer(
             }
             runtime->trajectory_trial = trajectory_trial;
             speed = trajectory_output.velocity_ref_rad_s;
-        } else if (command.mode == FOC_RUNTIME_MODE_POSITION) {
+        } else if (command->mode == FOC_RUNTIME_MODE_POSITION) {
             struct foc_position_output output;
             if (foc_position_step(
                     &policy->position,
-                    command.target.motion_ref,
+                    command->target.motion_ref,
                     candidate->sample.mechanical_rad,
                     &output
                 ) != FOC_STATUS_OK) {
@@ -807,7 +872,8 @@ static void foc_runtime_prepare_outer(
         runtime->outer_trial_seen = true;
         iq = output.iq_ref_a;
     }
-    candidate->target = (struct foc_pipeline_command){{0.0f, iq}, command.seq, command.produced_us};
+    candidate->target =
+        (struct foc_pipeline_command){{0.0f, iq}, command->seq, command->produced_us};
     candidate->target_valid = true;
 }
 
@@ -817,6 +883,25 @@ static int foc_runtime_publish_reference(
     uint32_t now_us
 )
 {
+    if (runtime->config.motion.impedance.enabled) {
+        if (command->mode != FOC_RUNTIME_MODE_IMPEDANCE) {
+            struct foc_runtime_snapshot snapshot;
+            const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
+            if (status != FOC_RUNTIME_OK) {
+                return status;
+            }
+            if (snapshot.mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+                return FOC_RUNTIME_ERR_CONTROL;
+            }
+        }
+        /* Opt-in instances keep source order across modes and slot revocation. */
+        const struct foc_pipeline_watermark *published = &runtime->published_command;
+        if (published->seen &&
+            (!foc_safe_sequence_newer(command->seq, published->seq, true) ||
+             !foc_safe_timestamp_fresh(command->produced_us, published->produced_us, UINT32_MAX))) {
+            return FOC_RUNTIME_ERR_ORDER;
+        }
+    }
     const unsigned int index = atomic_load_explicit(&runtime->command_slot, memory_order_relaxed);
     if (!foc_safe_timestamp_fresh(
             now_us,
@@ -836,8 +921,23 @@ static int foc_runtime_publish_reference(
     runtime->command_slots[next].target = command->target;
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_COMMAND_WRITING);
     runtime->command_slots[next] = *command;
+    runtime->published_command =
+        (struct foc_pipeline_watermark){command->seq, command->produced_us, true};
     atomic_store_explicit(&runtime->command_slot, next, memory_order_release);
     return FOC_RUNTIME_OK;
+}
+
+static bool foc_runtime_impedance_policy_valid(const struct foc_runtime_motion_config *motion)
+{
+    const struct foc_runtime_impedance_config *policy = &motion->impedance;
+    return !policy->enabled ||
+        (motion->enabled && policy->mechanical_frame_id != 0U &&
+         isfinite(policy->torque_constant_nm_per_a) && policy->torque_constant_nm_per_a > 0.0f &&
+         isfinite(policy->torque_limit_nm) && policy->torque_limit_nm > 0.0f &&
+         isfinite(policy->max_stiffness_nm_per_rad) && policy->max_stiffness_nm_per_rad >= 0.0f &&
+         isfinite(policy->max_damping_nm_s_per_rad) && policy->max_damping_nm_s_per_rad >= 0.0f &&
+         isfinite(policy->max_feedforward_nm) && policy->max_feedforward_nm >= 0.0f &&
+         isfinite(policy->torque_constant_nm_per_a * motion->iq_limit_a));
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -857,7 +957,8 @@ int foc_runtime_init(
         !foc_runtime_lane_valid(&config->telemetry) ||
         config->foreground_budget_us < config->supervision.budget_us ||
         config->foreground_budget_us >= FOC_RUNTIME_HALF_RANGE || config->angle_timeout_us == 0U ||
-        config->angle_timeout_us >= FOC_RUNTIME_HALF_RANGE) {
+        config->angle_timeout_us >= FOC_RUNTIME_HALF_RANGE ||
+        !foc_runtime_impedance_policy_valid(&config->motion)) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     struct foc_pipeline pipeline;
@@ -951,9 +1052,50 @@ int foc_runtime_publish_motion_command(
 )
 {
     if (runtime == NULL || !runtime->initialized || !runtime->config.motion.enabled ||
-        command == NULL || !foc_runtime_outer_mode(command->mode) ||
+        command == NULL || !foc_runtime_cascade_mode(command->mode) ||
         !isfinite(command->target.motion_ref)) {
         return FOC_RUNTIME_ERR_INPUT;
+    }
+    return foc_runtime_publish_reference(runtime, command, now_us);
+}
+
+int foc_runtime_publish_impedance_command(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_command *command,
+    uint32_t now_us
+)
+{
+    if (runtime == NULL || !runtime->initialized || command == NULL ||
+        command->mode != FOC_RUNTIME_MODE_IMPEDANCE || !runtime->config.motion.impedance.enabled) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const struct foc_runtime_impedance_config *policy = &runtime->config.motion.impedance;
+    const struct foc_runtime_impedance_command *reference = &command->target.impedance;
+    if (reference->mechanical_frame_id != policy->mechanical_frame_id ||
+        !isfinite(reference->position_rad) ||
+        fabsf(reference->position_rad) > FOC_RUNTIME_IMPEDANCE_POSITION_LIMIT_RAD ||
+        !isfinite(reference->velocity_rad_s) || !isfinite(reference->stiffness_nm_per_rad) ||
+        reference->stiffness_nm_per_rad < 0.0f ||
+        reference->stiffness_nm_per_rad > policy->max_stiffness_nm_per_rad ||
+        !isfinite(reference->damping_nm_s_per_rad) || reference->damping_nm_s_per_rad < 0.0f ||
+        reference->damping_nm_s_per_rad > policy->max_damping_nm_s_per_rad ||
+        !isfinite(reference->torque_feedforward_nm) ||
+        fabsf(reference->torque_feedforward_nm) > policy->max_feedforward_nm) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    struct foc_runtime_snapshot snapshot;
+    const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
+    if (status != FOC_RUNTIME_OK) {
+        return status;
+    }
+    if (snapshot.mode != FOC_RUNTIME_MODE_IMPEDANCE || snapshot.inhibit_pending ||
+        snapshot.state == FOC_SAFE_STATE_FAULT_LATCHED) {
+        return FOC_RUNTIME_ERR_CONTROL;
+    }
+    if (reference->source_session != snapshot.motion_session ||
+        (snapshot.command_seen &&
+         !foc_safe_sequence_newer(command->seq, snapshot.command_seq, true))) {
+        return FOC_RUNTIME_ERR_ORDER;
     }
     return foc_runtime_publish_reference(runtime, command, now_us);
 }

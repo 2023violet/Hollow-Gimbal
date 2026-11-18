@@ -22,6 +22,7 @@ add_library(
   src/foc_runtime.c
   ../core/src/foc_core.c
   ../core/src/foc_current.c
+  ../core/src/foc_impedance.c
   ../core/src/foc_motion.c
   ../core/src/foc_trajectory.c
   ../g3/np/src/foc_device.c
@@ -59,6 +60,9 @@ add_test(NAME test-foc-motion-model COMMAND test-foc-motion-model)
 add_executable(test-foc-motion-runtime tests/test_foc_motion_runtime.c)
 target_link_libraries(test-foc-motion-runtime PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-motion-runtime COMMAND test-foc-motion-runtime)
+add_executable(test-foc-runtime-impedance tests/test_foc_runtime_impedance.c)
+target_link_libraries(test-foc-runtime-impedance PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-runtime-impedance COMMAND test-foc-runtime-impedance)
 add_executable(test-foc-remote tests/test_foc_remote.c)
 target_link_libraries(test-foc-remote PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-remote COMMAND test-foc-remote)

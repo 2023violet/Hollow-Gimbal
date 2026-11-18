@@ -243,3 +243,27 @@ class. The request-rejected arm submits an unverified class and admits zero
 voltage intervals. Virtual Motor defaults and the original `--trace`
 experiment retain their behavior. See the
 [calibration assumptions](../calibration/README.md#standstill-motor-rl-and-pi-design).
+
+## Impedance diagnostics and Host damping study
+
+The production Core feasibility API has a formal Runtime IMPEDANCE witness
+under CTest. Run `test-foc-runtime-impedance-virtual --static-hold --trace`
+to export the hold, exact-capacity, overload, tolerance and feedforward data.
+
+`test-foc-impedance-robustness --damping-noise-holdout --trace` exports the
+frozen A/B/C comparison. It exercises the production Runtime with a
+Host-only damping candidate. It uses a separate experiment entry so the
+original 01C and 02A modes remain reproducible. The executable reports
+metrics and asserts transaction contracts; the release-quality verdict is
+calculated against the frozen gates in the evidence archive.
+
+## Motion-model feedforward experiments
+
+`test-foc-impedance-robustness --motion-feedforward-holdout --trace` compares
+one continuous trajectory under identical constraints, with no model term,
+qualified reference J/B, and the independent 02A identified model. It uses
+the existing IMPEDANCE command and includes STOP, adapter rejection and
+sample age witnesses. Use `--motion-feedforward-train` to reproduce training
+or `--motion-feedforward-legacy` for the fixed 02B cubic tracking diagnostic.
+The legacy probe has a separate result stream. Historical CTest and frozen
+quality verdicts retain their original scope.

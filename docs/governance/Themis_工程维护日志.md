@@ -2934,3 +2934,42 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - Tracker 复用 LUT 校正后的每帧整数增量，偏移锚定在上一接受位置。保留原增益、LPF 默认 H1、整数相位、Sensor 质量和状态提交契约。
 - 正式 RED 复现长圈数退化。GREEN 的普通与 ±100 万圈逐样本相同，冻结 EST-01 长多圈爬行 RMS 165.424823 → 0.06704485 rad/s，普通工况 T90 和默认控制链回放一致。
 - 全模块 Host、ASan/UBSan、独立固件 Host、严格 Scope all 通过。ARM Flash +8 B，Encoder Context、静态栈和固件 RAM 持平。独立复核无未关闭 P0/P1/P2。见 `docs/evidence/2026-11-18-next-sensor-est-02.md`。功率输出锁定，实机与 WCET 待证。
+
+
+## 2026-11-18 NEXT-SERVO-01A 可移植单轴阻抗控制 Core
+
+- 新增无状态 C11 阻抗计算。输入连续机械误差、显式 Kt、实时 q 上限，输出 SI 力矩与限幅后的 q 请求。错误清零输出，现有 Runtime 模式与硬件输出权限保持原样。
+- Host 经现有 Current 命令、H0、Pipeline 与 Virtual Motor 完成六组冻结场景。0.039 N·m 负载时偏差 0.05998 rad，卸载后 142.5 ms 恢复。降额限幅 180 ms，STOP 和 Sensor Fault 均 INHIBIT。
+- 全量回归、ASan/UBSan 和严格 Scope all 通过，无未关闭 P0/P1/P2。独立 ARM 对象 text 864 B，静态栈 56 B，锁定镜像无增量。证据见 `docs/evidence/2026-11-18-next-servo-01a.md`。实机与 WCET 待证，功率保持锁定。
+
+
+## 2026-11-18 NEXT-SERVO-01B Runtime IMPEDANCE 生产集成
+
+- 生产 Runtime C API 接入 IMPEDANCE。复用命令槽、Session 和 SET_MODE→ARM→START，H1 在同源观测上调用 01A Core，H0 保持既有 Current、Pipeline 和 Safety。
+- 六组冻结正式模式闭环和 01A 对照通过。0.039 N·m 负载偏移 0.05997983 rad，卸载恢复 142.5 ms。STOP、超时、失效观测和适配器拒绝均保留 INHIBIT 与更新事务。
+- Core、Runtime、Simulation、Sensors、Calibration、Sanitizer、UART Host 和严格 Scope all 全部通过，独立复核无未关闭 P0/P1/P2。锁定镜像 Flash/RAM +1,532/+96 B。见 `docs/evidence/2026-11-18-next-servo-01b.md`。Board1 功率输出保持锁定，实机与 WCET 待证。
+
+
+## 2026-11-18 NEXT-SERVO-01C 阻抗参数整定与鲁棒性闭环
+
+- 新增 Core 冷路径 `foc_impedance_tuning_design()`。从 J/B、目标自然频率和阻尼比生成 K/D，校验模型来源、时序预算和静态上界，候选由调用方显式使用。
+- 正式 Runtime Holdout 为 7 PASS、3 QUALITY_FAIL、1 预期时序拒绝。12 rad/s 候选通过静止噪声，18 rad/s 两组 q 请求纹波超门槛。0.25 A 遇 0.039 N·m 外负载连续饱和 762.5 ms，已保留失败标签。
+- 01A/01B 冻结回放一致，Host、Sanitizer、严格 Scope all 通过，无未关闭 P0/P1/P2。锁定固件 BIN 与 01B 一致。见 `docs/evidence/2026-11-18-next-servo-01c.md`。功率锁定，实机与 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-02A 等效惯量与粘性阻尼辨识
+
+- 新增离线 C11 J/B 会话。观测 dq/等效电磁转矩、机械速度和已知或确认可忽略的外载经质量准入后生成单一候选。统计使用固定实例空间。
+- 五个主辨识场景和独立激励预测通过。4× 惯量下正式 IMPEDANCE 的辨识候选将超调从 0.123 降至 0.00854 rad，噪声及强限流品质失败保留，同步复现 01C 历史品质裁决。
+- ARM 独立对象 text 3,600 B、实例 288 B，锁定参考镜像字节一致。证据见 `docs/evidence/2026-11-18-next-servo-02a.md`。功率输出锁定，实机与 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-02B 阻抗噪声鲁棒性与目标可达性
+
+- 新增独立静态可达性诊断，覆盖转矩容量、位置容差、零刚度、负载和 Kt 来源。正式 IMPEDANCE 八组对照证实 0.25 A 对 0.039 N·m 持续外载能力不足，等容量零余量。
+- 隔离 48 Hz 阻尼支路候选通过冻结噪声和可恢复限流检查，1.3× 反向速度 RMS 0.29249 rad/s 超过 0.25 rad/s。裁决 KEEP EXISTING IMPEDANCE；历史 QUALITY_FAIL 保留。
+- 见 `docs/evidence/2026-11-18-next-servo-02b.md`。功率输出锁定，实机及 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-02C 反向跟踪归因与模型运动前馈
+
+- 精确复现 02B 三臂反向数据。原三次参考位置和速度连续，入口加速度发生有限阶跃，反向峰值需求 40.11 mN·m、三臂无电流限幅。零时延理想反馈仍复现主要误差，制动段占原平方误差约 63%。
+- 新增显式 C11 J/B 运动前馈。相同 C2 轨迹下真值和 02A 识别模型明显改善反向；噪声和低电流预算边界保留。例程通过既有 IMPEDANCE 命令，不引入自动 Runtime 策略。
+- 见 `docs/evidence/2026-11-18-next-servo-02c.md`。功率输出锁定，实机及 WCET 待证。

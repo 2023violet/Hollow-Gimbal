@@ -85,3 +85,41 @@ add_test(NAME test-foc-motor-id-virtual COMMAND test-foc-motor-id-virtual)
 add_executable(test-foc-sensor-est tests/test_foc_sensor_est.c tests/foc_sensor_pll_experiment.c)
 target_link_libraries(test-foc-sensor-est PRIVATE falconfoc-virtual-motor)
 add_test(NAME test-foc-sensor-est COMMAND test-foc-sensor-est)
+
+add_executable(test-foc-impedance-virtual tests/test_foc_impedance_virtual.c)
+target_link_libraries(test-foc-impedance-virtual PRIVATE falconfoc-virtual-motor)
+add_test(NAME test-foc-impedance-virtual COMMAND test-foc-impedance-virtual)
+
+add_executable(
+  test-foc-runtime-impedance-virtual tests/test_foc_runtime_impedance_virtual.c
+                                     ../core/src/foc_impedance_feasibility.c
+)
+target_link_libraries(test-foc-runtime-impedance-virtual PRIVATE falconfoc-virtual-motor)
+add_test(NAME test-foc-runtime-impedance-virtual COMMAND test-foc-runtime-impedance-virtual)
+add_test(NAME test-foc-impedance-static-hold COMMAND test-foc-runtime-impedance-virtual
+                                                     --static-hold
+)
+
+add_executable(
+  test-foc-impedance-robustness
+  tests/test_foc_impedance_robustness.c ../core/src/foc_impedance_tuning.c
+  ../core/src/foc_impedance_feedforward.c
+)
+target_link_libraries(test-foc-impedance-robustness PRIVATE falconfoc-virtual-motor)
+add_test(NAME test-foc-impedance-robustness COMMAND test-foc-impedance-robustness)
+add_test(NAME test-foc-impedance-damping-noise COMMAND test-foc-impedance-robustness
+                                                       --damping-noise-holdout
+)
+
+add_test(NAME test-foc-impedance-motion-feedforward COMMAND test-foc-impedance-robustness
+                                                            --motion-feedforward-holdout
+)
+add_test(NAME test-foc-impedance-motion-reference-probe COMMAND test-foc-impedance-robustness
+                                                                --motion-feedforward-legacy
+)
+
+add_executable(test-foc-mechanical-id-virtual tests/test_foc_mechanical_id_virtual.c)
+target_link_libraries(
+  test-foc-mechanical-id-virtual PRIVATE falconfoc-virtual-motor falconfoc-calibration
+)
+add_test(NAME test-foc-mechanical-id-virtual COMMAND test-foc-mechanical-id-virtual)

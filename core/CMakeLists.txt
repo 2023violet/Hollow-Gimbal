@@ -1,7 +1,7 @@
 # Themis FalconFOC Core standalone host project. Role: build the portable Core
 # without the root firmware graph. Responsibilities: define the Core static
 # library, expose its public include boundary, and register Host tests for
-# transforms, SVPWM, voltage open loop, d/q current control, and motion loops.
+# transforms, SVPWM, voltage open loop, d/q current, motion, and impedance.
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -18,7 +18,15 @@ set(CMAKE_C_EXTENSIONS OFF)
 enable_testing()
 
 add_library(
-  falconfoc-core STATIC src/foc_core.c src/foc_current.c src/foc_motion.c src/foc_trajectory.c
+  falconfoc-core STATIC
+  src/foc_core.c
+  src/foc_current.c
+  src/foc_motion.c
+  src/foc_trajectory.c
+  src/foc_impedance.c
+  src/foc_impedance_tuning.c
+  src/foc_impedance_feasibility.c
+  src/foc_impedance_feedforward.c
 )
 target_include_directories(falconfoc-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -46,6 +54,10 @@ themis_add_falconfoc_test(test-foc-pmsm-reference tests/test_foc_pmsm_reference.
 themis_add_falconfoc_test(test-foc-motion tests/test_foc_motion.c)
 themis_add_falconfoc_test(test-foc-motion-reference tests/test_foc_motion_reference.c)
 themis_add_falconfoc_test(test-foc-periodic-phase tests/test_foc_periodic_phase.c)
+themis_add_falconfoc_test(test-foc-impedance tests/test_foc_impedance.c)
+themis_add_falconfoc_test(test-foc-impedance-tuning tests/test_foc_impedance_tuning.c)
+themis_add_falconfoc_test(test-foc-impedance-feasibility tests/test_foc_impedance_feasibility.c)
+themis_add_falconfoc_test(test-foc-impedance-feedforward tests/test_foc_impedance_feedforward.c)
 
 add_executable(test-foc-baseline tests/test_foc_baseline.c ../g3/np/src/foc_device.c)
 target_link_libraries(test-foc-baseline PRIVATE falconfoc-core)

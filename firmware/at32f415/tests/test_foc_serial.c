@@ -228,11 +228,16 @@ static int test_host_policy_keeps_output_locked(void)
     h0(&test);
     request.sequence = 1U;
     request.type = FOC_MSG_SETPOINT;
+    request.length = 5U;
+    request.payload[0] = FOC_RUNTIME_MODE_IMPEDANCE;
+    test.time = 1U;
+    CHECK(transact(&test, request, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+    CHECK(atomic_load(&test.runtime.command_slot) >= 2U && test.serial.publication_seq == 0U);
+    request.sequence++;
     request.length = 9U;
     request.payload[0] = FOC_RUNTIME_MODE_CURRENT;
     foc_protocol_write_u32(request.payload + 1U, 0U);
     foc_protocol_write_u32(request.payload + 5U, 0x3f000000U);
-    test.time = 1U;
     CHECK(transact(&test, request, &response, FOC_PROTO_ACCEPTED) == 0);
 
     request.sequence++;

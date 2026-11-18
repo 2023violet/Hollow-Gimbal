@@ -201,6 +201,9 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
         .mechanical_rad = feedback.mechanical_rad,
         .mechanical_rad_s = velocity,
         .electrical_phase_valid = phase_valid,
+        .mechanical_frame_id = position_valid && feedback.speed_valid
+            ? context->profile.runtime.motion.impedance.mechanical_frame_id
+            : 0U,
     };
     const int status =
         foc_runtime_h1_step(&context->runtime, &sample, context->virtual_time_us, 0U);

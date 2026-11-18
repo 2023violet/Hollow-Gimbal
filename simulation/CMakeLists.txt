@@ -81,3 +81,7 @@ target_link_libraries(
   test-foc-motor-id-virtual PRIVATE falconfoc-virtual-motor falconfoc-calibration
 )
 add_test(NAME test-foc-motor-id-virtual COMMAND test-foc-motor-id-virtual)
+
+add_executable(test-foc-sensor-est tests/test_foc_sensor_est.c tests/foc_sensor_pll_experiment.c)
+target_link_libraries(test-foc-sensor-est PRIVATE falconfoc-virtual-motor)
+add_test(NAME test-foc-sensor-est COMMAND test-foc-sensor-est)

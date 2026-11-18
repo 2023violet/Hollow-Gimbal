@@ -2921,3 +2921,16 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 新增纯 C11 离线逆向拟合、逐段覆盖和参考零位准入。冻结整数表后由另一采集会话使用生产 Sensor 校验，导出结果可显式试装。
 - 五组拆分采集生成六张表，三个 64 节点控制链的 Holdout RMS 为 0.049–0.180 mrad。低速专题观测到输入量化及输出舍入占主要速度扰动，保留 16,384 CPR 爬行速度 RMS 上升。
 - Core 15/15、Sensors 2/2、Calibration 5/5、Runtime 11/11、Simulation 21/21、Sanitizer 和严格 Scope all 通过。01A、Motor-ID 与锁定固件哈希基线复现。证据见 `docs/evidence/2026-11-27-next-encoder-linear-01b.md`。实机与 WCET 待证，功率输出锁定。
+
+## 2026-11-27 NEXT-SENSOR-EST-01 速度估计对照与实验 PLL
+
+- 同原码、同 LUT、同一源时钟对照差分/LPF/Alpha-Beta/PLL。采用 800 rad/s 实验 PLL，爬行 RMS 下降 41.39%，加减速 RMS 恶化 20.67%/21.79%，超过预定 15% 上限，裁决 KEEP EXISTING ESTIMATORS。
+- 完成 Velocity/Position 隔离闭环、H0 预测速度项及 STOP/FAULT 对照。修复实验 PLL 丢失端点后的错误续算，独立复核无剩余 P0/P1/P2。生产 Sensor、Runtime 与锁定固件哈希一致。
+- Simulation Clang/GNU 22/22、Sensors/Core/Runtime/Calibration、Sanitizer、Source Contract 和严格 Scope all 通过。证据见 `docs/evidence/2026-11-27-next-sensor-est-01.md`。功率输出保持锁定，实机与 WCET 待证。
+
+
+## 2026-11-18 NEXT-SENSOR-EST-02 Alpha-Beta 局部残差精度修复
+
+- Tracker 复用 LUT 校正后的每帧整数增量，偏移锚定在上一接受位置。保留原增益、LPF 默认 H1、整数相位、Sensor 质量和状态提交契约。
+- 正式 RED 复现长圈数退化。GREEN 的普通与 ±100 万圈逐样本相同，冻结 EST-01 长多圈爬行 RMS 165.424823 → 0.06704485 rad/s，普通工况 T90 和默认控制链回放一致。
+- 全模块 Host、ASan/UBSan、独立固件 Host、严格 Scope all 通过。ARM Flash +8 B，Encoder Context、静态栈和固件 RAM 持平。独立复核无未关闭 P0/P1/P2。见 `docs/evidence/2026-11-18-next-sensor-est-02.md`。功率输出锁定，实机与 WCET 待证。

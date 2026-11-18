@@ -16,6 +16,7 @@
 
 #include "foc_encoder.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -540,22 +541,187 @@ static int test_phase_at_count_overflow(void)
         struct foc_encoder_context encoder;
         struct foc_encoder_feedback frame;
         const struct foc_encoder_config policy = test_config();
-        const uint32_t first = negative ? 0U : 65535U;
+        const uint32_t first = negative ? 3U : 65532U;
+        const uint32_t second = negative ? 2U : 65533U;
+        const uint32_t edge = negative ? 0U : 65535U;
         const uint32_t next = negative ? 65535U : 0U;
         const int64_t limit = negative ? INT64_MIN : INT64_MAX;
         TEST_ASSERT(foc_encoder_init(&encoder, &policy) == 0);
         TEST_ASSERT(foc_encoder_update(&encoder, 0U, first, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
-        /* Isolated internal-state boundary test; raw code agrees with limit modulo CPR.
-         * Long-chain tests separately reach their counts using only legal updates. */
-        encoder.position_counts = limit;
+        /* Seed complete turns, then reach the exact limit using valid updates. */
+        encoder.position_counts = negative ? limit + 3 : limit - 3;
         TEST_ASSERT(
-            foc_encoder_update(&encoder, 500U, next, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+            foc_encoder_update(&encoder, 1000U, second, FOC_ENCODER_TRANSPORT_OK, &frame) == 0
+        );
+        TEST_ASSERT(
+            foc_encoder_update(&encoder, 2000U, edge, FOC_ENCODER_TRANSPORT_OK, &frame) == 0
+        );
+        TEST_ASSERT(encoder.position_counts == limit && frame.speed_valid && encoder.tracker_seen);
+        TEST_ASSERT(
+            frame.mechanical_phase_count == edge && encoder.tracker_local_offset_rad != 0.0f
+        );
+        const struct foc_encoder_context accepted = encoder;
+        TEST_ASSERT(
+            foc_encoder_update(&encoder, 2500U, next, FOC_ENCODER_TRANSPORT_OK, &frame) ==
             FOC_ENCODER_STATUS_ERR_SAMPLE
         );
         TEST_ASSERT(
-            encoder.position_counts == limit && encoder.previous_us == 0U &&
-            encoder.previous_code == first && !frame.valid && !frame.speed_valid &&
+            encoder.position_counts == limit && encoder.previous_us == 2000U &&
+            encoder.previous_code == edge && !frame.valid && !frame.speed_valid &&
             frame.mechanical_phase_count == 0U && frame.quality == FOC_ENCODER_QUALITY_NUMERIC_ERROR
+        );
+        TEST_ASSERT(encoder.previous_corrected_code == edge && !encoder.continuity_lost);
+        TEST_ASSERT(encoder.tracker_local_offset_rad == accepted.tracker_local_offset_rad);
+        TEST_ASSERT(encoder.tracker_velocity_rad_s == accepted.tracker_velocity_rad_s);
+        TEST_ASSERT(encoder.lpf_velocity_rad_s == accepted.lpf_velocity_rad_s);
+        TEST_ASSERT(encoder.invalid_count == 1U && frame.invalid_count == 1U);
+    }
+    return 0;
+}
+
+static int test_tracker_rejection_and_reset(void)
+{
+    static const struct {
+        uint32_t us;
+        uint32_t code;
+        enum foc_encoder_transport transport;
+        enum foc_encoder_quality quality;
+        int status;
+    } rejected[] = {
+        {2000U,
+         6U,
+         FOC_ENCODER_TRANSPORT_OK,
+         FOC_ENCODER_QUALITY_DUPLICATE,
+         FOC_ENCODER_STATUS_ERR_ORDER},
+        {2050U,
+         6U,
+         FOC_ENCODER_TRANSPORT_OK,
+         FOC_ENCODER_QUALITY_INVALID_INTERVAL,
+         FOC_ENCODER_STATUS_ERR_ORDER},
+        {2300U,
+         6U,
+         FOC_ENCODER_TRANSPORT_TIMEOUT,
+         FOC_ENCODER_QUALITY_TIMEOUT,
+         FOC_ENCODER_STATUS_ERR_TRANSPORT},
+        {2600U,
+         6U,
+         FOC_ENCODER_TRANSPORT_FRAME_ERROR,
+         FOC_ENCODER_QUALITY_TRANSPORT_ERROR,
+         FOC_ENCODER_STATUS_ERR_TRANSPORT},
+        {2800U,
+         65536U,
+         FOC_ENCODER_TRANSPORT_OK,
+         FOC_ENCODER_QUALITY_INVALID_SAMPLE,
+         FOC_ENCODER_STATUS_ERR_SAMPLE},
+        {3000U,
+         5000U,
+         FOC_ENCODER_TRANSPORT_OK,
+         FOC_ENCODER_QUALITY_SPEED_OUT_OF_RANGE,
+         FOC_ENCODER_STATUS_ERR_SPEED},
+        {4000U,
+         6U,
+         FOC_ENCODER_TRANSPORT_OK,
+         FOC_ENCODER_QUALITY_DISCONTINUITY,
+         FOC_ENCODER_STATUS_ERR_DISCONTINUITY},
+    };
+    const struct foc_encoder_config config = test_config();
+    struct foc_encoder_context encoder;
+    struct foc_encoder_feedback frame;
+    TEST_ASSERT(foc_encoder_init(&encoder, &config) == 0);
+    TEST_ASSERT(foc_encoder_update(&encoder, 0U, 0U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+    TEST_ASSERT(foc_encoder_update(&encoder, 1000U, 1U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+    TEST_ASSERT(foc_encoder_update(&encoder, 2000U, 4U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+    TEST_ASSERT(encoder.tracker_seen && encoder.tracker_local_offset_rad != 0.0f);
+    const struct foc_encoder_context accepted = encoder;
+    for (unsigned i = 0U; i < sizeof rejected / sizeof rejected[0]; ++i) {
+        TEST_ASSERT(
+            foc_encoder_update(
+                &encoder,
+                rejected[i].us,
+                rejected[i].code,
+                rejected[i].transport,
+                &frame
+            ) == rejected[i].status
+        );
+        TEST_ASSERT(!frame.valid && !frame.speed_valid && frame.quality == rejected[i].quality);
+        TEST_ASSERT(
+            frame.continuity_lost == (i >= 5U) && encoder.continuity_lost == frame.continuity_lost
+        );
+        TEST_ASSERT(
+            encoder.invalid_count == i + 1U && encoder.invalid_count == frame.invalid_count
+        );
+        TEST_ASSERT(
+            encoder.position_counts == accepted.position_counts &&
+            encoder.previous_us == accepted.previous_us
+        );
+        TEST_ASSERT(
+            encoder.previous_code == accepted.previous_code &&
+            encoder.previous_corrected_code == accepted.previous_corrected_code
+        );
+        TEST_ASSERT(encoder.tracker_seen && encoder.velocity_seen);
+        TEST_ASSERT(encoder.tracker_local_offset_rad == accepted.tracker_local_offset_rad);
+        TEST_ASSERT(
+            encoder.tracker_velocity_rad_s == accepted.tracker_velocity_rad_s &&
+            frame.tracked_velocity_rad_s == accepted.tracker_velocity_rad_s
+        );
+        TEST_ASSERT(encoder.lpf_velocity_rad_s == accepted.lpf_velocity_rad_s);
+    }
+    TEST_ASSERT(foc_encoder_reset(&encoder) == 0);
+    TEST_ASSERT(!encoder.tracker_seen && !encoder.continuity_lost && encoder.invalid_count == 0U);
+    TEST_ASSERT(encoder.tracker_velocity_rad_s == 0.0f && encoder.tracker_local_offset_rad == 0.0f);
+    TEST_ASSERT(foc_encoder_update(&encoder, 5000U, 300U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+    TEST_ASSERT(!frame.valid && !frame.speed_valid && !encoder.tracker_seen);
+    TEST_ASSERT(foc_encoder_update(&encoder, 6000U, 310U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+    TEST_ASSERT(
+        frame.speed_valid && encoder.tracker_seen && encoder.tracker_local_offset_rad == 0.0f
+    );
+    TEST_ASSERT(frame.tracked_velocity_rad_s == frame.raw_velocity_rad_s);
+    return 0;
+}
+
+static int test_tracker_numeric_rejection(void)
+{
+    struct foc_encoder_config config = test_config();
+    config.max_speed_rad_s = 1.5f;
+    config.max_dt_us = 2000000U;
+    for (unsigned i = 0U; i < 3U; ++i) {
+        struct foc_encoder_context encoder;
+        struct foc_encoder_feedback frame;
+        TEST_ASSERT(foc_encoder_init(&encoder, &config) == 0);
+        TEST_ASSERT(foc_encoder_update(&encoder, 0U, 100U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0);
+        TEST_ASSERT(
+            foc_encoder_update(&encoder, 1000000U, 101U, FOC_ENCODER_TRANSPORT_OK, &frame) == 0
+        );
+        TEST_ASSERT(encoder.tracker_seen);
+        /* Inject terminal values only after establishing an accepted anchor. */
+        if (i == 0U) {
+            encoder.tracker_local_offset_rad = NAN;
+        } else {
+            encoder.tracker_velocity_rad_s = i == 1U ? INFINITY : FLT_MAX;
+        }
+        const struct foc_encoder_context accepted = encoder;
+        TEST_ASSERT(
+            foc_encoder_update(&encoder, 2500000U, 102U, FOC_ENCODER_TRANSPORT_OK, &frame) ==
+            FOC_ENCODER_STATUS_ERR_SAMPLE
+        );
+        TEST_ASSERT(
+            frame.quality == FOC_ENCODER_QUALITY_NUMERIC_ERROR && !frame.valid && !frame.speed_valid
+        );
+        TEST_ASSERT(!frame.continuity_lost && !encoder.continuity_lost && encoder.tracker_seen);
+        TEST_ASSERT(frame.invalid_count == 1U && encoder.invalid_count == 1U);
+        TEST_ASSERT(
+            encoder.position_counts == accepted.position_counts &&
+            encoder.previous_us == accepted.previous_us
+        );
+        TEST_ASSERT(
+            encoder.previous_code == accepted.previous_code &&
+            encoder.previous_corrected_code == accepted.previous_corrected_code
+        );
+        TEST_ASSERT(encoder.lpf_velocity_rad_s == accepted.lpf_velocity_rad_s);
+        TEST_ASSERT(encoder.tracker_velocity_rad_s == accepted.tracker_velocity_rad_s);
+        TEST_ASSERT(
+            i == 0U ? isnan(encoder.tracker_local_offset_rad)
+                    : encoder.tracker_local_offset_rad == accepted.tracker_local_offset_rad
         );
     }
     return 0;
@@ -722,7 +888,9 @@ int main(void)
     return test_lifecycle_and_single_turn() || test_wrap_direction_and_multiturn() ||
         test_timestamps_and_continuity() || test_transport_and_invalid_samples() ||
         test_speed_filters_and_deterministic_dataset() || test_algorithm_comparison_metrics() ||
-        test_instances_and_reset() || test_integer_phase_source() || test_phase_at_count_overflow();
+        test_instances_and_reset() || test_integer_phase_source() ||
+        test_phase_at_count_overflow() || test_tracker_rejection_and_reset() ||
+        test_tracker_numeric_rejection();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

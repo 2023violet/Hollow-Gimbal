@@ -206,7 +206,8 @@ struct foc_encoder_context {
     uint32_t previous_code;
     /** Cached filter states. */
     float lpf_velocity_rad_s;
-    float tracker_position_rad;
+    /** Tracker estimate minus measurement at the last accepted timestamp, in radians. */
+    float tracker_local_offset_rad;
     float tracker_velocity_rad_s;
     /** Lifecycle and quality state. */
     uint32_t invalid_count;

@@ -534,22 +534,19 @@ int foc_encoder_update(
     const float filtered_velocity = context->velocity_seen
         ? context->lpf_velocity_rad_s + alpha * (raw_velocity - context->lpf_velocity_rad_s)
         : raw_velocity;
-    float tracker_position;
-    float tracker_velocity;
-    if (!context->tracker_seen) {
-        tracker_position = position_rad;
-        tracker_velocity = raw_velocity;
-    } else {
+    float tracker_offset = 0.0f;
+    float tracker_velocity = raw_velocity;
+    if (context->tracker_seen) {
         const float predicted =
-            context->tracker_position_rad + context->tracker_velocity_rad_s * dt_s;
-        const float residual = position_rad - predicted;
-        tracker_position = predicted + context->config.tracker_alpha * residual;
+            context->tracker_local_offset_rad + context->tracker_velocity_rad_s * dt_s;
+        const float residual = delta_rad - predicted;
+        /* Re-anchor the estimate to the current measurement. */
+        tracker_offset = (context->config.tracker_alpha - 1.0f) * residual;
         tracker_velocity =
             context->tracker_velocity_rad_s + context->config.tracker_beta / dt_s * residual;
     }
     if (!foc_encoder_float_finite(position_rad) || !foc_encoder_float_finite(filtered_velocity) ||
-        !foc_encoder_float_finite(tracker_position) ||
-        !foc_encoder_float_finite(tracker_velocity)) {
+        !foc_encoder_float_finite(tracker_offset) || !foc_encoder_float_finite(tracker_velocity)) {
         return foc_encoder_reject(
             context,
             captured_us,
@@ -564,7 +561,7 @@ int foc_encoder_update(
     context->previous_corrected_code = corrected;
     context->position_counts = next_position;
     context->lpf_velocity_rad_s = filtered_velocity;
-    context->tracker_position_rad = tracker_position;
+    context->tracker_local_offset_rad = tracker_offset;
     context->tracker_velocity_rad_s = tracker_velocity;
     context->velocity_seen = true;
     context->tracker_seen = true;

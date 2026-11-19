@@ -860,7 +860,7 @@ static int noise_trial_offer(
 )
 {
     const struct foc_runtime *runtime = &vm->runtime;
-    if (runtime->motion_session != session ||
+    if (runtime->motion_session != session || runtime->mode != FOC_RUNTIME_MODE_IMPEDANCE ||
         runtime->pipeline.safety.state != FOC_SAFE_STATE_RUNNING) {
         *state = (struct noise_trial){0};
         return 0;
@@ -1253,7 +1253,8 @@ enum noise_boundary {
     NOISE_INVALID_SENSOR
 };
 
-static int test_noise_boundary(enum noise_boundary kind, float cutoff_hz, float motion_ff)
+static int
+test_noise_boundary(enum noise_boundary kind, float cutoff_hz, float motion_ff, bool joint)
 {
     const struct foc_virtual_current_profile profile = noise_profile(1.0, 2.2f);
     const struct foc_impedance_config gains = {
@@ -1297,10 +1298,31 @@ static int test_noise_boundary(enum noise_boundary kind, float cutoff_hz, float 
         filter.proposed_us == 2499U && filter.pending &&
         filter.proposed.velocity_rad_s != filter.accepted.velocity_rad_s
     );
-    const float correction = motion_ff != 0.0f
-        ? motion_ff
-        : gains.damping_nm_s_per_rad * (sample.mechanical_rad_s - filter.proposed.velocity_rad_s);
-    CHECK(publish(&vm, &gains, -0.02f, 0.0f, correction) == FOC_RUNTIME_OK);
+    if (joint && kind == NOISE_STOP) {
+        /* Exercise the Host state seam with two proposals before any H0 ack. */
+        struct noise_trial later = filter;
+        struct foc_runtime_sensor newer = sample;
+        newer.seq++;
+        newer.captured_us += 125U;
+        newer.mechanical_rad_s += 0.35f;
+        struct damping_noise_filter expected = filter.accepted;
+        const uint32_t dt = newer.captured_us - filter.accepted_us;
+        CHECK(damping_noise_filter_step(&expected, newer.mechanical_rad_s, cutoff_hz, dt));
+        CHECK(noise_trial_offer(&later, &vm, &newer, session, cutoff_hz) == 0);
+        CHECK(
+            later.accepted_us == filter.accepted_us &&
+            later.accepted.velocity_rad_s == accepted_speed && later.proposed_seq == newer.seq &&
+            later.proposed_us == newer.captured_us &&
+            later.proposed.velocity_rad_s == expected.velocity_rad_s
+        );
+        printf("JOINT_TRIAL,%u,%u,%u,%u\n", session, vm.runtime.accepted_outer_seq, newer.seq, dt);
+    }
+    const float correction =
+        gains.damping_nm_s_per_rad * (sample.mechanical_rad_s - filter.proposed.velocity_rad_s);
+    const float published = joint ? motion_ff + correction
+        : motion_ff != 0.0f       ? motion_ff
+                                  : correction;
+    CHECK(publish(&vm, &gains, -0.02f, 0.0f, published) == FOC_RUNTIME_OK);
     struct foc_runtime_command old_command =
         vm.runtime.command_slots[atomic_load(&vm.runtime.command_slot)];
     const uint32_t updates = vm.output.accepted_updates;
@@ -1374,7 +1396,9 @@ static int test_noise_boundary(enum noise_boundary kind, float cutoff_hz, float 
     CHECK(foc_virtual_current_run_until(&vm, 4200U) == 0 && vm.output.accepted_updates == updates);
     printf(
         "%s,%u,%u,%u,%u,%u,%u,%u",
-        motion_ff == 0.0f ? "NOISE_BOUNDARY" : "MOTION_BOUNDARY",
+        joint                   ? "JOINT_BOUNDARY"
+            : motion_ff == 0.0f ? "NOISE_BOUNDARY"
+                                : "MOTION_BOUNDARY",
         (unsigned)kind,
         updates,
         vm.output.accepted_updates,
@@ -1386,7 +1410,32 @@ static int test_noise_boundary(enum noise_boundary kind, float cutoff_hz, float 
     if (motion_ff != 0.0f) {
         printf(",%.9g", motion_ff);
     }
+    if (joint) {
+        printf(",%.9g,%.9g", correction, published);
+    }
     putchar('\n');
+    if (joint && kind == NOISE_STOP) {
+        const uint32_t prior = vm.runtime.motion_session;
+        CHECK(
+            foc_virtual_current_publish_lifecycle(
+                &vm,
+                FOC_RUNTIME_ACTION_SET_MODE,
+                FOC_RUNTIME_MODE_CURRENT
+            ) == FOC_RUNTIME_OK
+        );
+        CHECK(foc_virtual_current_run_until(&vm, 4400U) == 0);
+        CHECK(
+            vm.runtime.mode == FOC_RUNTIME_MODE_CURRENT && vm.runtime.motion_session != prior &&
+            !vm.runtime.accepted_outer_seen && vm.output.accepted_updates == updates
+        );
+        printf(
+            "JOINT_MODE,%u,%u,%u,%u\n",
+            (unsigned)vm.runtime.mode,
+            prior,
+            vm.runtime.motion_session,
+            updates
+        );
+    }
     return 0;
 }
 
@@ -1446,9 +1495,9 @@ static int run_damping_noise_study(bool training, bool trace)
             "NOISE_BOUNDARY,kind,updates_before,updates_after,rejected,old_session,new_session,"
             "faults"
         );
-        CHECK(test_noise_boundary(NOISE_STOP, frozen_cutoff_hz, 0.0f) == 0);
-        CHECK(test_noise_boundary(NOISE_ADAPTER_REJECT, frozen_cutoff_hz, 0.0f) == 0);
-        CHECK(test_noise_boundary(NOISE_INVALID_SENSOR, frozen_cutoff_hz, 0.0f) == 0);
+        CHECK(test_noise_boundary(NOISE_STOP, frozen_cutoff_hz, 0.0f, false) == 0);
+        CHECK(test_noise_boundary(NOISE_ADAPTER_REJECT, frozen_cutoff_hz, 0.0f, false) == 0);
+        CHECK(test_noise_boundary(NOISE_INVALID_SENSOR, frozen_cutoff_hz, 0.0f, false) == 0);
     }
     return 0;
 }
@@ -1501,6 +1550,8 @@ struct motion_case {
     double load_nm;
     bool expect_gate;
     bool legacy_02b;
+    bool joint;
+    bool identified_model;
 };
 
 static struct motion_reference motion_segment_at(
@@ -1642,6 +1693,7 @@ struct motion_metrics {
     uint32_t stage_count[MOTION_STAGE_COUNT];
     uint32_t frames;
     uint32_t tail_count;
+    uint32_t tail_limited;
     uint32_t reverse_count;
     uint32_t crossed_us;
     uint32_t settle_us;
@@ -1702,6 +1754,7 @@ static void record_motion(
         m->tail_q_hp2 += q_hp * q_hp;
         m->tail_iq_hp2 += iq_hp * iq_hp;
         m->tail_count++;
+        m->tail_limited += torque->limited;
     }
     if (ref->stage == MOTION_REVERSE_ACCEL || ref->stage == MOTION_REVERSE_DECEL) {
         const double residual = required_nm - electromechanical_nm;
@@ -1747,6 +1800,10 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
     const uint32_t base_updates = vm.output.accepted_updates;
     const float kt = gains.torque_constant_nm_per_a;
     const double capacity = fmin(gains.torque_limit_nm, kt * test->cap_a);
+    const bool filtered = test->joint && (variant == 'B' || variant == 'D');
+    const bool has_feedforward = test->joint ? variant == 'C' || variant == 'D' : variant != 'B';
+    const char model_arm = test->joint ? (test->identified_model ? 'D' : 'C') : variant;
+    struct noise_trial filter = {0};
     uint32_t random = test->seed;
     struct motion_metrics m = {.crossed_us = UINT32_MAX};
     for (uint32_t t = 0U; t < test->program->end_us; t += period_us) {
@@ -1771,23 +1828,40 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
             fabsf(ref.velocity_rad_s) <= 2.0f && fabsf(ref.acceleration_rad_s2) <= 20.0f &&
             isfinite(ref.position_rad)
         );
-        float torque_ff;
-        CHECK(
-            motion_request_ff(
-                variant,
-                &profile.motor,
-                &ref,
-                profile.runtime.motion.impedance.max_feedforward_nm,
-                test->legacy_02b,
-                &torque_ff
-            ) == 0
-        );
+        float torque_ff = 0.0f;
+        /* The old profile steps from zero to crawl speed on its first frame.
+         * Feedforward qualification begins after that unqualified startup sample. */
+        if (has_feedforward && !(test->joint && test->legacy_02b && t == 0U)) {
+            CHECK(
+                motion_request_ff(
+                    model_arm,
+                    &profile.motor,
+                    &ref,
+                    profile.runtime.motion.impedance.max_feedforward_nm,
+                    test->legacy_02b && !test->joint,
+                    &torque_ff
+                ) == 0
+            );
+        }
+        float damping_speed = sample.mechanical_rad_s;
+        if (filtered) {
+            CHECK(noise_trial_offer(&filter, &vm, &sample, session, 48.0f) == 0 && filter.pending);
+            damping_speed = filter.proposed.velocity_rad_s;
+        }
+        const uint32_t filter_dt =
+            filtered ? (filter.accepted.ready ? capture - filter.accepted_us : period_us) : 0U;
+        const float correction =
+            gains.damping_nm_s_per_rad * (sample.mechanical_rad_s - damping_speed);
+        /* Host-only algebraic seam: leave the real H1/H0 observation intact.
+         * Published FF carries the motion term plus the equivalent change in D*v. */
+        const float published_ff = filtered ? torque_ff + correction : torque_ff;
         CHECK(advance(&output, delivery - 1U) == 0);
         if (output.inhibited) {
             break;
         }
         CHECK(
-            publish(&vm, &gains, ref.position_rad, ref.velocity_rad_s, torque_ff) == FOC_RUNTIME_OK
+            publish(&vm, &gains, ref.position_rad, ref.velocity_rad_s, published_ff) ==
+            FOC_RUNTIME_OK
         );
         CHECK(foc_runtime_h1_step(&vm.runtime, &sample, delivery, 0U) == FOC_RUNTIME_OK);
         const struct foc_runtime_sensor_slot *slot =
@@ -1804,12 +1878,21 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
             .position_error_rad = ref.position_rad - sample.mechanical_rad,
             .reference_velocity_rad_s = ref.velocity_rad_s,
             .measured_velocity_rad_s = sample.mechanical_rad_s,
-            .torque_feedforward_nm = torque_ff,
+            .torque_feedforward_nm = published_ff,
             .live_iq_limit_a = test->cap_a,
         };
         struct foc_impedance_output torque;
         CHECK(foc_impedance_step(&gains, &input, &torque) == FOC_STATUS_OK && torque.valid);
         CHECK(slot->target.target_a.d == 0.0f && slot->target.target_a.q == torque.iq_ref_a);
+        if (filtered) {
+            struct foc_impedance_input oracle_input = input;
+            oracle_input.measured_velocity_rad_s = damping_speed;
+            oracle_input.torque_feedforward_nm = torque_ff;
+            struct foc_impedance_output oracle_torque;
+            CHECK(foc_impedance_step(&gains, &oracle_input, &oracle_torque) == FOC_STATUS_OK);
+            CHECK(fabsf(oracle_torque.iq_ref_a - torque.iq_ref_a) <= 5.0e-7f);
+            CHECK(fabsf(oracle_torque.requested_torque_nm - torque.requested_torque_nm) <= 8.0e-8f);
+        }
         const uint32_t h0 = vm.next_h0_us;
         CHECK(advance(&output, h0) == 0);
         if (output.inhibited) {
@@ -1820,6 +1903,8 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
             vm.runtime.pipeline.safety.latched_faults == 0U &&
             vm.runtime.motion_session == session && vm.runtime.accepted_outer_seq == sample.seq &&
             vm.runtime.angle_prediction_us == h0 - capture &&
+            vm.runtime.observed_sensor.theta_elec_rad == sample.theta_elec_rad &&
+            vm.runtime.observed_sensor.mechanical_rad_s == sample.mechanical_rad_s &&
             vm.runtime.pipeline.target_a.q == torque.iq_ref_a &&
             fabsf(torque.iq_ref_a) <= test->cap_a &&
             vm.output.accepted_updates == vm.runtime.pipeline.mock.updates &&
@@ -1851,7 +1936,8 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
         );
         if (trace) {
             printf(
-                "MOTION_TRACE,%s,%c,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+                "%s_TRACE,%s,%c,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+                test->joint ? "JOINT" : "MOTION",
                 test->name,
                 variant,
                 t,
@@ -1880,10 +1966,9 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
                 sample.theta_elec_rad
             );
             printf(
-                ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.12g,%.12g,%.12g,%.12g,%.9g,%u,%u,%u\n",
+                ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.12g,%.12g,%.12g,%.12g,%.9g,%u,%u,%u",
                 gains.stiffness_nm_per_rad * input.position_error_rad,
-                gains.damping_nm_s_per_rad *
-                    (input.reference_velocity_rad_s - input.measured_velocity_rad_s),
+                gains.damping_nm_s_per_rad * (input.reference_velocity_rad_s - damping_speed),
                 torque_ff,
                 torque.requested_torque_nm,
                 torque.limited_torque_nm,
@@ -1897,6 +1982,10 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
                 (unsigned)(fabs(required) > capacity),
                 (unsigned)output.inhibited
             );
+            if (test->joint) {
+                printf(",%.9g,%u,%.9g,%.9g", damping_speed, filter_dt, correction, published_ff);
+            }
+            putchar('\n');
         }
         if (test->load_on_us != 0U && (t == test->load_on_us || t == test->load_off_us)) {
             CHECK(
@@ -1920,7 +2009,8 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
             (vm.runtime.pipeline.safety.latched_faults & FOC_SAFE_FAULT_SAMPLE_INVALID) != 0U
         );
         printf(
-            "MOTION_GATE,%s,%c,%u,%d,%u,%u,%u,%u,%u,%.9g\n",
+            "%s_GATE,%s,%c,%u,%d,%u,%u,%u,%u,%u,%.9g\n",
+            test->joint ? "JOINT" : "MOTION",
             test->name,
             variant,
             output.inhibit_us,
@@ -1938,7 +2028,7 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
         !output.inhibited && m.frames == test->program->end_us / period_us && m.tail_count == 600U
     );
     CHECK(m.reverse_count == test->program->reverse.duration_us / period_us);
-    CHECK(variant == 'B' || (m.positive_ff_count > 0U && m.negative_ff_count > 0U));
+    CHECK(!has_feedforward || (m.positive_ff_count > 0U && m.negative_ff_count > 0U));
     if (test->cap_a < 1.0f) {
         CHECK(m.limited_us > 0U && m.over_budget_us > 0U);
     }
@@ -1950,7 +2040,8 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
     const double reverse_error2 =
         m.velocity_error2[MOTION_REVERSE_ACCEL] + m.velocity_error2[MOTION_REVERSE_DECEL];
     printf(
-        "MOTION_RESULT,%s,%c,%u,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%.9g",
+        "%s_RESULT,%s,%c,%u,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%.9g",
+        test->joint ? "JOINT" : "MOTION",
         test->name,
         variant,
         test->seed,
@@ -1967,7 +2058,7 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
         printf(",%.9g", sqrt(m.velocity_error2[i] / m.stage_count[i]));
     }
     printf(
-        ",%u,%u,%u,%u,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%u\n",
+        ",%u,%u,%u,%u,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%u",
         m.crossed_us,
         m.settle_us,
         m.recover_us,
@@ -1989,7 +2080,56 @@ static int run_motion_case(const struct motion_case *test, char variant, bool tr
         vm.output.accepted_updates - base_updates,
         output.max_source_age_us
     );
+    if (test->joint) {
+        printf(
+            ",%u,%u,%u,%.9g,%.9g",
+            has_feedforward ? (test->identified_model ? 100U : 101U) : 0U,
+            filtered ? 48U : 0U,
+            m.tail_limited,
+            gains.stiffness_nm_per_rad,
+            gains.damping_nm_s_per_rad
+        );
+    }
+    putchar('\n');
     return 0;
+}
+
+static void print_motion_headers(bool joint, bool trace)
+{
+    printf(
+        "%s_RESULT,case,variant,seed,plant_j,plant_b,iq_limit_a,capacity_nm,frames,"
+        "velocity_rms_rad_s,position_rms_rad,reversal_rms_rad_s,still_rms_rad_s,crawl_rms_rad_s,"
+        "forward_accel_rms_rad_s,forward_decel_rms_rad_s,reverse_accel_rms_rad_s,reverse_decel_rms_"
+        "rad_s,"
+        "crossed_us,settle_us,recover_us,over_budget_us,limited_us,peak_limit_run_us,peak_required_"
+        "nm,"
+        "peak_ff_nm,peak_feedback_nm,peak_request_a,peak_model_a,tail_peak_position_error_rad,"
+        "tail_request_hp_a,tail_model_hp_a,reverse_request_hp_a,reversal_torque_residual_rms_nm,"
+        "positive_ff_frames,negative_ff_frames,updates,max_accepted_source_age_us%s\n",
+        joint ? "JOINT" : "MOTION",
+        joint ? ",ff_model_id,cutoff_hz,tail_limited_frames,k_nm_per_rad,d_nm_s_per_rad" : ""
+    );
+    printf(
+        "%s_GATE,case,variant,inhibit_us,reason,updates_before,updates_after,old_session,"
+        "new_session,max_accepted_source_age_us,peak_ff_nm\n",
+        joint ? "JOINT" : "MOTION"
+    );
+    if (trace) {
+        printf(
+            "%s_TRACE,case,variant,t_us,capture_us,h1_us,h0_us,prediction_age_us,"
+            "latest_submit_us,latest_applied_us,sample_seq,session,updates,stage,encoder_raw,"
+            "ref_position_rad,ref_velocity_rad_s,ref_acceleration_rad_s2,model_position_rad,"
+            "model_velocity_rad_s,model_acceleration_rad_s2,velocity_error_rad_s,sensor_velocity_"
+            "rad_s,"
+            "sensor_phase_rad,k_nm,d_nm,feedforward_nm,request_nm,limited_nm,iq_request_a,model_iq_"
+            "a,"
+            "model_id_a,electromagnetic_nm,reference_required_nm,load_nm,limited,reference_over_"
+            "budget,inhibit%s\n",
+            joint ? "JOINT" : "MOTION",
+            joint ? ",damping_velocity_rad_s,filter_source_dt_us,host_correction_nm,published_ff_nm"
+                  : ""
+        );
+    }
 }
 
 enum motion_dataset {
@@ -2103,34 +2243,7 @@ static int run_motion_feedforward_study(enum motion_dataset dataset, bool trace)
         .load_nm = 0.039,
         .legacy_02b = true,
     };
-    puts(
-        "MOTION_RESULT,case,variant,seed,plant_j,plant_b,iq_limit_a,capacity_nm,frames,"
-        "velocity_rms_rad_s,position_rms_rad,reversal_rms_rad_s,still_rms_rad_s,crawl_rms_rad_s,"
-        "forward_accel_rms_rad_s,forward_decel_rms_rad_s,reverse_accel_rms_rad_s,reverse_decel_rms_"
-        "rad_s,"
-        "crossed_us,settle_us,recover_us,over_budget_us,limited_us,peak_limit_run_us,peak_required_"
-        "nm,"
-        "peak_ff_nm,peak_feedback_nm,peak_request_a,peak_model_a,tail_peak_position_error_rad,"
-        "tail_request_hp_a,tail_model_hp_a,reverse_request_hp_a,reversal_torque_residual_rms_nm,"
-        "positive_ff_frames,negative_ff_frames,updates,max_accepted_source_age_us"
-    );
-    puts(
-        "MOTION_GATE,case,variant,inhibit_us,reason,updates_before,updates_after,old_session,"
-        "new_session,max_accepted_source_age_us,peak_ff_nm"
-    );
-    if (trace) {
-        puts(
-            "MOTION_TRACE,case,variant,t_us,capture_us,h1_us,h0_us,prediction_age_us,"
-            "latest_submit_us,latest_applied_us,sample_seq,session,updates,stage,encoder_raw,"
-            "ref_position_rad,ref_velocity_rad_s,ref_acceleration_rad_s2,model_position_rad,"
-            "model_velocity_rad_s,model_acceleration_rad_s2,velocity_error_rad_s,sensor_velocity_"
-            "rad_s,"
-            "sensor_phase_rad,k_nm,d_nm,feedforward_nm,request_nm,limited_nm,iq_request_a,model_iq_"
-            "a,"
-            "model_id_a,electromagnetic_nm,reference_required_nm,load_nm,limited,reference_over_"
-            "budget,inhibit"
-        );
-    }
+    print_motion_headers(false, trace);
     if (dataset == MOTION_LEGACY) {
         CHECK(run_motion_case(&legacy_case, 'B', trace) == 0);
         CHECK(run_motion_case(&legacy_case, 'C', trace) == 0);
@@ -2157,10 +2270,147 @@ static int run_motion_feedforward_study(enum motion_dataset dataset, bool trace)
             "MOTION_BOUNDARY,kind,updates_before,updates_after,rejected,old_session,new_session,"
             "faults,feedforward_nm"
         );
-        CHECK(test_noise_boundary(NOISE_STOP, 48.0f, motion_ff) == 0);
-        CHECK(test_noise_boundary(NOISE_ADAPTER_REJECT, 48.0f, motion_ff) == 0);
-        CHECK(test_noise_boundary(NOISE_INVALID_SENSOR, 48.0f, motion_ff) == 0);
+        CHECK(test_noise_boundary(NOISE_STOP, 48.0f, motion_ff, false) == 0);
+        CHECK(test_noise_boundary(NOISE_ADAPTER_REJECT, 48.0f, motion_ff, false) == 0);
+        CHECK(test_noise_boundary(NOISE_INVALID_SENSOR, 48.0f, motion_ff, false) == 0);
     }
+    return 0;
+}
+
+static int run_joint_characterization(bool trace)
+{
+    static const struct motion_program program = {
+        .reverse = {1120000U, 330000U, -0.28},
+        .end_us = 3000000U,
+    };
+    static const struct motion_case study = {
+        .name = "02b-02c-reference",
+        .program = &program,
+        .inertia_scale = 1.3,
+        .cap_a = 2.2f,
+        .sensor = NOISY,
+        .seed = 956311U,
+        .load_on_us = 1800000U,
+        .load_off_us = 2260000U,
+        .load_nm = 0.039,
+        .legacy_02b = true,
+        .joint = true,
+    };
+    print_motion_headers(true, trace);
+    for (char arm = 'A'; arm <= 'D'; ++arm) {
+        CHECK(run_motion_case(&study, arm, trace) == 0);
+    }
+    return 0;
+}
+
+static int run_joint_holdout(bool trace)
+{
+    static const struct motion_program held = {
+        .crawl = {30000U, 420000U, 0.013},
+        .forward = {525000U, 400000U, 0.194},
+        .reverse = {1140000U, 340000U, -0.29},
+        .end_us = 3000000U,
+    };
+    static const struct motion_case cases[] = {
+        {
+            .name = "hold-joint-1x-id",
+            .program = &held,
+            .inertia_scale = 1.0,
+            .cap_a = 2.2f,
+            .sensor = NOISY,
+            .seed = 155791U,
+            .joint = true,
+            .identified_model = true,
+        },
+        {
+            .name = "hold-joint-1p3x-true",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 2.2f,
+            .sensor = NOISY,
+            .seed = 690571U,
+            .joint = true,
+        },
+        {
+            .name = "hold-joint-1p3x-id",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 2.2f,
+            .sensor = NOISY,
+            .seed = 690571U,
+            .joint = true,
+            .identified_model = true,
+        },
+        {
+            .name = "hold-joint-1p3x-clean",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 2.2f,
+            .sensor = QUANTIZED,
+            .joint = true,
+        },
+        {
+            .name = "hold-joint-legal-load",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 2.2f,
+            .sensor = NOISY,
+            .seed = 811152U,
+            .capture_delay_us = 99U,
+            .wait_us = 80U,
+            .plant_delay_us = 120U,
+            .load_on_us = 1830000U,
+            .load_off_us = 2250000U,
+            .load_nm = 0.039,
+            .joint = true,
+            .identified_model = true,
+        },
+        {
+            .name = "hold-joint-lowcap",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 0.16f,
+            .sensor = QUANTIZED,
+            .joint = true,
+            .identified_model = true,
+        },
+        {
+            .name = "hold-joint-over-age",
+            .program = &held,
+            .inertia_scale = 1.3,
+            .cap_a = 2.2f,
+            .sensor = NOISY,
+            .seed = 436873U,
+            .capture_delay_us = 299U,
+            .wait_us = 80U,
+            .plant_delay_us = 120U,
+            .delay_from_us = 1220000U,
+            .expect_gate = true,
+            .joint = true,
+            .identified_model = true,
+        },
+    };
+    print_motion_headers(true, trace);
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+        for (char arm = 'A'; arm <= 'D'; ++arm) {
+            CHECK(run_motion_case(&cases[i], arm, trace) == 0);
+        }
+    }
+    const struct foc_virtual_current_profile profile = noise_profile(1.3, 2.2f);
+    const struct motion_reference ref =
+        motion_reference_at(&held, held.reverse.start_us + held.reverse.duration_us / 4U);
+    float torque_ff;
+    CHECK(motion_request_ff('D', &profile.motor, &ref, 0.315f, false, &torque_ff) == 0);
+    CHECK(torque_ff < -0.01f);
+    puts(
+        "JOINT_BOUNDARY,kind,updates_before,updates_after,rejected,old_session,new_session,"
+        "faults,motion_ff_nm,correction_nm,published_ff_nm"
+    );
+    puts("JOINT_TRIAL,session,accepted_seq,new_proposal_seq,source_dt_us");
+    puts("JOINT_MODE,mode,prior_session,new_session,accepted_updates");
+    CHECK(test_noise_boundary(NOISE_STOP, 48.0f, torque_ff, true) == 0);
+    CHECK(test_noise_boundary(NOISE_ADAPTER_REJECT, 48.0f, torque_ff, true) == 0);
+    CHECK(test_noise_boundary(NOISE_INVALID_SENSOR, 48.0f, torque_ff, true) == 0);
     return 0;
 }
 
@@ -2244,6 +2494,17 @@ static int run_mechanical_id_comparison(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+    if (argc > 1 &&
+        (strcmp(argv[1], "--joint-control-characterization") == 0 ||
+         strcmp(argv[1], "--joint-control-holdout") == 0)) {
+        const bool trace = argc == 3 && strcmp(argv[2], "--trace") == 0;
+        if (argc != 2 && !trace) {
+            return 2;
+        }
+        return strcmp(argv[1], "--joint-control-characterization") == 0
+            ? run_joint_characterization(trace)
+            : run_joint_holdout(trace);
+    }
     if (argc > 1 &&
         (strcmp(argv[1], "--motion-feedforward-train") == 0 ||
          strcmp(argv[1], "--motion-feedforward-holdout") == 0 ||

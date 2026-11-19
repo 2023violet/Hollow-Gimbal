@@ -1,0 +1,454 @@
+{
+  "schema": 1,
+  "version": "0.1.0-rc.1",
+  "files": [
+    {
+      "source": "scripts/sdk/package/CMakeLists.txt",
+      "path": "CMakeLists.txt",
+      "module": "sdk",
+      "kind": "build",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "scripts/sdk/package/NOTICE-REVIEW.md",
+      "path": "NOTICE-REVIEW.md",
+      "module": "sdk",
+      "kind": "documentation",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "scripts/sdk/package/README.md",
+      "path": "README.md",
+      "module": "sdk",
+      "kind": "documentation",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/include/foc_calibration.h",
+      "path": "calibration/include/foc_calibration.h",
+      "module": "calibration",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/include/foc_encoder_calibration.h",
+      "path": "calibration/include/foc_encoder_calibration.h",
+      "module": "calibration",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/include/foc_mechanical_id.h",
+      "path": "calibration/include/foc_mechanical_id.h",
+      "module": "calibration",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/include/foc_motor_id.h",
+      "path": "calibration/include/foc_motor_id.h",
+      "module": "calibration",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/src/foc_calibration.c",
+      "path": "calibration/src/foc_calibration.c",
+      "module": "calibration",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/src/foc_encoder_calibration.c",
+      "path": "calibration/src/foc_encoder_calibration.c",
+      "module": "calibration",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/src/foc_mechanical_id.c",
+      "path": "calibration/src/foc_mechanical_id.c",
+      "module": "calibration",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/src/foc_motor_id.c",
+      "path": "calibration/src/foc_motor_id.c",
+      "module": "calibration",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/tests/test_foc_mechanical_id.c",
+      "path": "calibration/tests/test_foc_mechanical_id.c",
+      "module": "calibration",
+      "kind": "test",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "scripts/sdk/package/core/CMakeLists.txt",
+      "path": "core/CMakeLists.txt",
+      "module": "sdk",
+      "kind": "build",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_core.h",
+      "path": "core/include/foc_core.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/include/foc_current.h",
+      "path": "core/include/foc_current.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/include/foc_impedance.h",
+      "path": "core/include/foc_impedance.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_impedance_feasibility.h",
+      "path": "core/include/foc_impedance_feasibility.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_impedance_feedforward.h",
+      "path": "core/include/foc_impedance_feedforward.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_impedance_tuning.h",
+      "path": "core/include/foc_impedance_tuning.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_motion.h",
+      "path": "core/include/foc_motion.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/include/foc_trajectory.h",
+      "path": "core/include/foc_trajectory.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_core.c",
+      "path": "core/src/foc_core.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/src/foc_core_internal.h",
+      "path": "core/src/foc_core_internal.h",
+      "module": "core",
+      "kind": "private_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_current.c",
+      "path": "core/src/foc_current.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/src/foc_impedance.c",
+      "path": "core/src/foc_impedance.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_impedance_feasibility.c",
+      "path": "core/src/foc_impedance_feasibility.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_impedance_feedforward.c",
+      "path": "core/src/foc_impedance_feedforward.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_impedance_tuning.c",
+      "path": "core/src/foc_impedance_tuning.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_motion.c",
+      "path": "core/src/foc_motion.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "core/src/foc_trajectory.c",
+      "path": "core/src/foc_trajectory.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "docs/servo/quickstart.md",
+      "path": "docs/servo/quickstart.md",
+      "module": "servo_example",
+      "kind": "documentation",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "examples/servo/CMakeLists.txt",
+      "path": "examples/servo/CMakeLists.txt",
+      "module": "servo_example",
+      "kind": "build",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "examples/servo/README.md",
+      "path": "examples/servo/README.md",
+      "module": "servo_example",
+      "kind": "documentation",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "examples/servo/main.c",
+      "path": "examples/servo/main.c",
+      "module": "servo_example",
+      "kind": "example",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "g3/np/include/foc_device.h",
+      "path": "g3/np/include/foc_device.h",
+      "module": "device",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/np/include/foc_device_sim.h",
+      "path": "g3/np/include/foc_device_sim.h",
+      "module": "device",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/np/src/foc_device.c",
+      "path": "g3/np/src/foc_device.c",
+      "module": "device",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/np/src/foc_device_sim.c",
+      "path": "g3/np/src/foc_device_sim.c",
+      "module": "device",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/safe/include/foc_safe.h",
+      "path": "g3/safe/include/foc_safe.h",
+      "module": "safety",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/safe/src/foc_safe.c",
+      "path": "g3/safe/src/foc_safe.c",
+      "module": "safety",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "runtime/include/foc_pipeline.h",
+      "path": "runtime/include/foc_pipeline.h",
+      "module": "runtime",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "runtime/include/foc_runtime.h",
+      "path": "runtime/include/foc_runtime.h",
+      "module": "runtime",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "runtime/src/foc_pipeline.c",
+      "path": "runtime/src/foc_pipeline.c",
+      "module": "runtime",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "runtime/src/foc_runtime.c",
+      "path": "runtime/src/foc_runtime.c",
+      "module": "runtime",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "sensors/include/foc_encoder.h",
+      "path": "sensors/include/foc_encoder.h",
+      "module": "sensor",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "sensors/src/foc_encoder.c",
+      "path": "sensors/src/foc_encoder.c",
+      "module": "sensor",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "scripts/sdk/package/simulation/CMakeLists.txt",
+      "path": "simulation/CMakeLists.txt",
+      "module": "sdk",
+      "kind": "build",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/include/foc_virtual_current.h",
+      "path": "simulation/include/foc_virtual_current.h",
+      "module": "virtual_motor",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/include/foc_virtual_motor.h",
+      "path": "simulation/include/foc_virtual_motor.h",
+      "module": "virtual_motor",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/src/foc_virtual_current.c",
+      "path": "simulation/src/foc_virtual_current.c",
+      "module": "virtual_motor",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/src/foc_virtual_motor.c",
+      "path": "simulation/src/foc_virtual_motor.c",
+      "module": "virtual_motor",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/tests/test_foc_runtime_impedance_virtual.c",
+      "path": "simulation/tests/test_foc_runtime_impedance_virtual.c",
+      "module": "virtual_motor",
+      "kind": "test",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    }
+  ],
+  "excluded": [
+    {
+      "scope": "applications/, bsp/, firmware/, protocol/",
+      "classification": "out_of_scope",
+      "reason": "Legacy, Board1, UART and device protocol are outside the portable C11/Host closure."
+    },
+    {
+      "scope": "platform/at/at32f415/vendor/cmsis/",
+      "classification": "licensed_third_party",
+      "reason": "Upstream CMSIS and CMSIS-DSP have independent notices and are outside the build closure."
+    },
+    {
+      "scope": "platform/at/at32f415/vendor/drivers/, platform/at/at32f415/generated/",
+      "classification": "vendor_restricted",
+      "reason": "Artery vendor/custom terms require separate review and these files are not needed."
+    },
+    {
+      "scope": "kernel/freertos/",
+      "classification": "licensed_third_party",
+      "reason": "FreeRTOS MIT kernel outside the build closure."
+    },
+    {
+      "scope": "work/, tools/, docs/evidence/, simulation/tests except package test",
+      "classification": "out_of_scope",
+      "reason": "Tool binaries, prior archives, research and out-of-package tests are excluded."
+    },
+    {
+      "scope": ".git/, build/, debug logs, caches and environment files",
+      "classification": "local_or_generated",
+      "reason": "Source-only allowlist. Manifest and SDK metadata are separately generated."
+    }
+  ]
+}

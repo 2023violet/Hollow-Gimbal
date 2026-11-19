@@ -2973,3 +2973,63 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 精确复现 02B 三臂反向数据。原三次参考位置和速度连续，入口加速度发生有限阶跃，反向峰值需求 40.11 mN·m、三臂无电流限幅。零时延理想反馈仍复现主要误差，制动段占原平方误差约 63%。
 - 新增显式 C11 J/B 运动前馈。相同 C2 轨迹下真值和 02A 识别模型明显改善反向；噪声和低电流预算边界保留。例程通过既有 IMPEDANCE 命令，不引入自动 Runtime 策略。
 - 见 `docs/evidence/2026-11-18-next-servo-02c.md`。功率输出锁定，实机及 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-02D 前馈与阻尼滤波协同控制
+
+- 复用 02C 运动前馈 API 和 02B 的 48 Hz 滤波算子，完成原三次参考四臂及独立五次 Holdout。普通噪声组组合 q 请求高频 RMS 7.14–7.75 mA，三组相对反向及加减速门槛失败，裁决 KEEP EXISTING IMPEDANCE。
+- 0.16 A 场景保留能力不足，限幅恢复门槛通过。Host 实验通过 STOP/FAULT、Adapter 拒绝、超龄与未确认提案替换检查，生产 Runtime 和锁定固件不接入候选。
+- 证据见 `docs/evidence/2026-11-18-next-servo-02d.md`。功率输出保持锁定，实机及 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-03A 独立 Host Servo 应用
+
+- 新增独立 C11 Servo 示例与 Quickstart。调用方通过公开入口组织 IMPEDANCE 生命周期、同源反馈、显式 J/B 前馈及静态可达性诊断。
+- 仓库内及仓库外 Clang/GCC 示例运行通过。STOP、拒绝与 Fault 路径保持 Host 输出契约。02D 冻结回放与锁定 ARM 镜像逐字节一致。
+- 证据见 `docs/evidence/2026-11-18-next-servo-03a.md`。实机与 WCET 待证。
+
+## 2026-11-18 NEXT-SERVO-03B Servo SDK 打包与发布门禁
+
+- 按显式清单交付可复现的内部 Servo SDK `0.1.0-rc.1`，包含 Core-only 和 Servo Host 两个消费入口。
+- 解包后的 Clang、GCC 和 ASan/UBSan 验收通过，锁定 ARM 镜像和 02D 冻结轨迹保持一致。来源、许可及公开发布批准待确认，裁决 SDK TECHNICAL PASS — RELEASE BLOCKED。
+- 证据见 `docs/evidence/2026-11-18-next-servo-03b.md`。实机与 WCET 待证。
+
+## 2026-11-18 NEXT-RELEASE-02A Servo SDK 来源取证
+
+- 核验原 `0.1.0-rc.1` ZIP、Manifest 和 52 个文件，补齐逐文件来源与权利矩阵。16 个早期文件首入库均可追溯，入库前权利链仍待确认。
+- 整理许可决策、版权和 NOTICE 审查草案、所有者审批模板供内部评估。发布状态为 RELEASE_BLOCKED。
+- 见 `docs/evidence/2026-11-18-next-release-02a.md`。本轮复用原技术证据，保留实机与 WCET 的验证边界。
+
+## 2026-11-18 NEXT-SOFT-01 设备参数、准入与诊断
+
+- 新增可选 C11 Foreground 参数模块，提供 30 项参数及诊断、5 个现有 Runtime 动作。静态配置暂存为独立候选，IMPEDANCE 命令沿用已有发布和 H0 接纳。
+- Host 示例和独立 Clang/GCC/ASan 消费通过。UART V1、冻结 02D 轨迹及锁定 ARM 固件保持基线。
+- 见 `docs/evidence/2026-11-18-next-soft-01.md`。原 SDK 归档保持独立，实机与 WCET 待证。
+
+## 2026-11-18 NEXT-SOFT-02 软件位置限位与持续跟随误差
+
+- 新增默认关闭的连续机械坐标软限位及跟随误差监控。POSITION、VELOCITY、IMPEDANCE 通过正式 H1/H0，软限位启用时 CURRENT 明确不支持。持续超差走既有 STOP/INHIBIT 和重新 ARM 路径。
+- Control Plane 增加 9 项静态配置和 2 项只读诊断。Host 全量回归与独立 Clang/GCC/ASan 消费通过。AT32F415 锁定固件静态 Flash 增加 2,212 B，链接 RAM 增加 112 B。
+- 见 `docs/evidence/2026-11-18-next-soft-02.md`。保留高速惯性越界证据，功率输出锁定，实机及 WCET 待证。
+
+## 2026-11-18 NEXT-SOFT-03 版本化配置存储
+
+- 新增独立 C11 ID-keyed TLV、CRC-32 与双槽事务。保存 14 项可选静态设置，在同一事务恢复运动保护整组。旧 Schema 缺失保护字段时须显式复核。
+- Host 逐步骤覆盖 330 次断电，恢复 326 次完整旧记录和 4 次已提交新记录。活动保存复用配置准入，恢复产生独立候选。锁定 AT32F415 镜像与 SOFT-02 完全一致。
+- 见 `docs/evidence/2026-11-18-next-soft-03.md`。实际 Flash 端口和物理断电、实机及 WCET 待证。
+
+## 2026-11-18 NEXT-SOFT-04 只读配置检查和设备诊断
+
+- 可选 C11 诊断复用正式双槽选择、Codec、参数描述表及 Runtime 一致快照。区分记录完整性、恢复适用性及 Runtime 有效值。
+- 新增 Host 离线 CLI、JSON v1 和独立 C11 消费示例。全量回归通过，SOFT-03 断电证据及锁定 ARM BIN 保持一致。
+- 见 `docs/evidence/2026-11-18-next-soft-04.md`。真实 Flash 读取、板端 WCET 和电机操作待证。
+
+## 2026-11-19 NEXT-SOFT-05 统一标定工作流
+
+- 新增可选 C11 七阶段会话与应用适配器。复用现有辨识与标定，绑定采集和设备身份，明确区分阶段质量、候选审核、新 Runtime 读回和持久化。
+- 独立 Host 消费者 Clang、GCC、ASan/UBSan 通过。冻结 LUT 后统一转子机械坐标，应用后独立电角相位 RMS 为 0.0074212 rad。新旧实例均保持 INHIBIT，锁定 ARM BIN 字节一致。
+- 见 `docs/evidence/2026-11-19-next-soft-05.md`。实机同步采集、Kt 和负载资格、板端 WCET 与实际 Flash 持久化待证。
+
+## 2026-11-19 NEXT-SOFT-06 测量记录与标定回放
+
+- 加入可选 C11 Trace Adapter、只读 Python CLI 和两个标准测量包。采样、触发与完成时间分别记录，测量来源与数字完整性独立报告。
+- 七阶段 Host 回放复现 SOFT-05。CLI 输出待审核候选，验证错位、丢样、Holdout 复用、缺 Kt 与来源失配。锁定固件 BIN 字节一致。
+- 见 `docs/evidence/2026-11-19-next-soft-06.md`。真实测量来源、板端采集吞吐量和实机标定待证。

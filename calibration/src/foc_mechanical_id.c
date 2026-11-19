@@ -41,9 +41,11 @@ static bool foc_mechanical_id_config_valid(const struct foc_mechanical_id_config
         cfg->max_interval_us < FOC_MECHANICAL_ID_HALF_RANGE && cfg->intervals_per_window >= 2U &&
         cfg->min_windows >= 3U &&
         cfg->min_windows <= (FOC_MECHANICAL_ID_MAX_SAMPLES - 1U) / cfg->intervals_per_window &&
-        foc_mechanical_id_positive(cfg->torque_constant_nm_per_a) && isfinite(cfg->max_abs_id_a) &&
-        cfg->max_abs_id_a >= 0.0f && isfinite(cfg->speed_resolution_rad_s) &&
-        cfg->speed_resolution_rad_s >= 0.0f &&
+        (foc_mechanical_id_positive(cfg->torque_constant_nm_per_a) ||
+         (cfg->torque_source == FOC_MECHANICAL_ID_TORQUE_EQUIVALENT &&
+          cfg->torque_constant_nm_per_a == 0.0f)) &&
+        isfinite(cfg->max_abs_id_a) && cfg->max_abs_id_a >= 0.0f &&
+        isfinite(cfg->speed_resolution_rad_s) && cfg->speed_resolution_rad_s >= 0.0f &&
         foc_mechanical_id_positive(cfg->max_abs_speed_rad_s) &&
         foc_mechanical_id_positive(cfg->max_abs_torque_nm) &&
         foc_mechanical_id_positive(cfg->min_accel_rms_rad_s2) &&

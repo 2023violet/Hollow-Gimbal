@@ -191,6 +191,10 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
             (float)((double)context->profile.motor.pole_pairs * (double)feedback.mechanical_rad +
                     context->profile.motor.electrical_offset_rad);
     }
+    const struct foc_runtime_motion_config *motion = &context->profile.runtime.motion;
+    const uint32_t frame = motion->limits.enabled || motion->following_error.enabled
+        ? motion->limits.mechanical_frame_id
+        : motion->impedance.mechanical_frame_id;
     const struct foc_runtime_sensor sample = {
         .theta_elec_rad = phase,
         .captured_us = context->virtual_time_us,
@@ -201,9 +205,7 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
         .mechanical_rad = feedback.mechanical_rad,
         .mechanical_rad_s = velocity,
         .electrical_phase_valid = phase_valid,
-        .mechanical_frame_id = position_valid && feedback.speed_valid
-            ? context->profile.runtime.motion.impedance.mechanical_frame_id
-            : 0U,
+        .mechanical_frame_id = position_valid && feedback.speed_valid ? frame : 0U,
     };
     const int status =
         foc_runtime_h1_step(&context->runtime, &sample, context->virtual_time_us, 0U);
@@ -352,7 +354,7 @@ int foc_virtual_current_init(
     }
     *context = (struct foc_virtual_current){0};
     context->profile = *profile;
-    if (foc_virtual_motor_init(&context->motor, &profile->motor, NULL) != 0 ||
+    if (foc_virtual_motor_init(&context->motor, &profile->motor, &profile->initial_state) != 0 ||
         foc_virtual_motor_set_load(&context->motor, profile->load_torque_nm) != 0 ||
         foc_encoder_init(&context->encoder, &profile->encoder) != FOC_ENCODER_STATUS_OK) {
         return -1;

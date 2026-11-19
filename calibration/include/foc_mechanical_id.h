@@ -65,7 +65,7 @@ struct foc_mechanical_id_config {
     uint32_t max_interval_us;
     uint32_t intervals_per_window;
     uint32_t min_windows;
-    /** Independent motor-shaft Kt in N*m/A, also retained for later tuning. */
+    /** Independent motor-shaft Kt in N*m/A. Zero when unknown and equivalent torque is measured. */
     float torque_constant_nm_per_a;
     /** Maximum |Id| for the qualified Kt*Iq model, in A. */
     float max_abs_id_a;

@@ -7,6 +7,8 @@ Current handoff entry: [code-wiki/AI-handoff-2026-11-15.md](./code-wiki/AI-hando
 
 Current V2 release-preparation entry: [evidence/2026-11-16-next-release-prep-01.md](./evidence/2026-11-16-next-release-prep-01.md). It records the independent Core consumer, source inventory, dependency boundary, license review, test matrix, and release blockers.
 
+The [Servo Quickstart](./servo/quickstart.md) covers the standalone Host Servo example and external consumer builds.
+
 Read in this order:
 
 1. [code-wiki/README.md](./code-wiki/README.md) — 当前 AT32F415 源码地图、Board1 硬件理解与无板验证

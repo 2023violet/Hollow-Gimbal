@@ -65,6 +65,8 @@ enum {
     WORD_VELOCITY,
     WORD_SENSOR_TIME,
     WORD_COMMAND_SEQ,
+    WORD_FOLLOWING_STATE,
+    WORD_MOTION_REJECTION,
     WORD_COUNT,
 };
 
@@ -167,6 +169,8 @@ static void foc_runtime_publish_snapshot(struct foc_runtime *runtime)
         [WORD_VELOCITY] = foc_runtime_float_word(runtime->observed_sensor.mechanical_rad_s),
         [WORD_SENSOR_TIME] = runtime->observed_sensor.captured_us,
         [WORD_COMMAND_SEQ] = safe->command_seq,
+        [WORD_FOLLOWING_STATE] = (unsigned int)runtime->following.status,
+        [WORD_MOTION_REJECTION] = (unsigned int)runtime->motion_rejection,
     };
     for (unsigned int index = 0U; index < WORD_COUNT; ++index) {
         atomic_store(&runtime->telemetry_words[index], words[index]);
@@ -234,6 +238,8 @@ static int foc_runtime_copy_snapshot(
         .mechanical_rad_s = foc_runtime_word_float(words[WORD_VELOCITY]),
         .sensor_us = words[WORD_SENSOR_TIME],
         .sensor_valid = (words[WORD_FLAGS] & SNAPSHOT_SENSOR_VALID) != 0U,
+        .following_state = (enum foc_following_state)words[WORD_FOLLOWING_STATE],
+        .motion_rejection = (enum foc_motion_rejection)words[WORD_MOTION_REJECTION],
     };
     return FOC_RUNTIME_OK;
 }
@@ -300,10 +306,15 @@ static bool foc_runtime_outer_mode(enum foc_runtime_mode mode)
 
 static bool foc_runtime_mode_enabled(const struct foc_runtime *runtime, enum foc_runtime_mode mode)
 {
-    return mode == FOC_RUNTIME_MODE_CURRENT ||
+    return (mode == FOC_RUNTIME_MODE_CURRENT && !runtime->config.motion.limits.enabled) ||
         (runtime->config.motion.enabled &&
          (foc_runtime_cascade_mode(mode) ||
           (mode == FOC_RUNTIME_MODE_IMPEDANCE && runtime->config.motion.impedance.enabled)));
+}
+
+static bool foc_runtime_protection_enabled(const struct foc_runtime_motion_config *motion)
+{
+    return motion->limits.enabled || motion->following_error.enabled;
 }
 
 static int
@@ -353,13 +364,26 @@ static float foc_runtime_align_angle(
     return angle;
 }
 
+struct foc_runtime_output_admission {
+    struct foc_runtime *runtime;
+    bool following_stop;
+    bool following_denied;
+};
+
 static bool foc_runtime_admit_update(void *argument)
 {
-    struct foc_runtime *runtime = argument;
+    struct foc_runtime_output_admission *admission = argument;
+    struct foc_runtime *runtime = admission->runtime;
 
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_BEFORE_SUBMIT);
-    /* Linearize serial admission against the independent software stop. */
-    return atomic_load(&runtime->stop_requests) == 0U;
+    /* Retain independent STOP priority at the original linearization point. */
+    if (atomic_load(&runtime->stop_requests) != 0U) {
+        return false;
+    }
+    /* Pipeline has accepted the current sample and Safety gate here. Its
+     * existing denial path emits INHIBIT before the trial can commit. */
+    admission->following_denied = admission->following_stop;
+    return !admission->following_denied;
 }
 
 static bool foc_runtime_timeout_clear_ready(
@@ -527,6 +551,56 @@ static void foc_runtime_lifecycle_finish(
     );
 }
 
+/* H0 reads the same complete publication that supplies the actual Pipeline target. */
+static enum foc_motion_rejection foc_runtime_motion_admission(
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_sensor_slot *sensor,
+    bool aligned,
+    bool target_valid
+)
+{
+    if (!aligned) {
+        return FOC_MOTION_REJECT_FEEDBACK;
+    }
+    if (sensor->mode != runtime->mode || sensor->session != runtime->motion_session) {
+        return FOC_MOTION_REJECT_NONE;
+    }
+    if (sensor->motion_rejection != FOC_MOTION_REJECT_NONE) {
+        return sensor->motion_rejection;
+    }
+    if (!target_valid) {
+        return FOC_MOTION_REJECT_NONE;
+    }
+    const struct foc_motion_limits_config *limits = &runtime->config.motion.limits;
+    if (sensor->sample.mechanical_frame_id != limits->mechanical_frame_id) {
+        return FOC_MOTION_REJECT_FRAME;
+    }
+    struct foc_motion_limits_request request = sensor->motion_request;
+    request.iq_ref_a = sensor->target.target_a.q;
+    return foc_motion_limits_check(limits, sensor->sample.mechanical_rad, &request);
+}
+
+static enum foc_following_state foc_runtime_following_trial(
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_sensor_slot *sensor,
+    bool target_valid,
+    bool sensor_valid,
+    struct foc_following_error_state *trial
+)
+{
+    *trial = runtime->following;
+    const struct foc_following_error_input sample = {
+        .reference_rad = sensor->motion_request.position_ref_rad,
+        .measured_rad = sensor->sample.mechanical_rad,
+        .captured_us = sensor->sample.captured_us,
+        .applicable = runtime->mode == FOC_RUNTIME_MODE_POSITION ||
+            runtime->mode == FOC_RUNTIME_MODE_IMPEDANCE,
+        .reference_valid = target_valid && sensor->motion_request.has_position,
+        .sensor_valid = sensor_valid,
+    };
+    return foc_following_error_step(&runtime->config.motion.following_error, trial, &sample);
+}
+
 static int
 foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_input *input)
 {
@@ -558,14 +632,28 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     runtime->observed_sensor = sensor.sample;
     runtime->observed_sensor.valid = isfinite(aligned) && runtime->config.motion.enabled;
     const bool outer = foc_runtime_outer_mode(runtime->mode);
-    const bool target_valid = outer && isfinite(aligned) && sensor.target_valid &&
+    const bool protection = outer && foc_runtime_protection_enabled(&runtime->config.motion);
+    bool target_valid = outer && isfinite(aligned) && sensor.target_valid &&
         sensor.mode == runtime->mode && sensor.session == runtime->motion_session &&
-        foc_safe_timestamp_fresh(now_us,
-                                 sensor.target.produced_us,
-                                 pipeline->safety.config.command_timeout_us) &&
-        (runtime->mode != FOC_RUNTIME_MODE_IMPEDANCE || !pipeline->rearm_boundary_seen ||
+        foc_safe_timestamp_fresh(
+                            now_us,
+                            sensor.target.produced_us,
+                            pipeline->safety.config.command_timeout_us
+        ) &&
+        ((!protection && runtime->mode != FOC_RUNTIME_MODE_IMPEDANCE) ||
+         !pipeline->rearm_boundary_seen ||
          (foc_safe_sequence_newer(sensor.target.produced_us, pipeline->rearm_after_us, true) &&
           foc_safe_sequence_newer(sensor.sample.captured_us, pipeline->rearm_after_us, true)));
+    const bool running = pipeline->safety.state == FOC_SAFE_STATE_RUNNING;
+    const bool monitor = protection && running && runtime->config.motion.following_error.enabled;
+    enum foc_motion_rejection motion_refusal = FOC_MOTION_REJECT_NONE;
+    if (protection) {
+        motion_refusal =
+            foc_runtime_motion_admission(runtime, &sensor, isfinite(aligned), target_valid);
+        if (motion_refusal != FOC_MOTION_REJECT_NONE) {
+            target_valid = false;
+        }
+    }
     const struct foc_pipeline_input step = {
         .adc = *adc,
         .theta_elec_rad = aligned,
@@ -600,12 +688,35 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     if (foc_runtime_drain_stop(runtime, now_us)) {
         return FOC_RUNTIME_ERR_STOP;
     }
+    if (motion_refusal != FOC_MOTION_REJECT_NONE &&
+        (running || input->action == FOC_RUNTIME_ACTION_ARM ||
+         input->action == FOC_RUNTIME_ACTION_START)) {
+        runtime->motion_rejection = motion_refusal;
+    }
+    struct foc_runtime_output_admission admission = {.runtime = runtime};
+    struct foc_following_error_state following_trial = {0};
+    if (monitor) {
+        const enum foc_following_state following = foc_runtime_following_trial(
+            runtime,
+            &sensor,
+            target_valid,
+            isfinite(aligned) &&
+                sensor.sample.mechanical_frame_id ==
+                    runtime->config.motion.limits.mechanical_frame_id,
+            &following_trial
+        );
+        admission.following_stop = following == FOC_FOLLOWING_TRIGGERED && target_valid;
+        if (!target_valid) {
+            /* Record missing evidence, but do not accrue time for a rejected proposal. */
+            runtime->following = following_trial;
+        }
+    }
     /* Decide before observation can disable/fault the controller. Never reinterpret
      * a rejected ARM as eligible after an invalid sample changes RUNNING to DISABLED. */
     const bool action_valid = foc_runtime_action_valid(input->action, pipeline->safety.state);
 
     const int status =
-        foc_pipeline_step_guarded(pipeline, &step, foc_runtime_admit_update, runtime);
+        foc_pipeline_step_guarded(pipeline, &step, foc_runtime_admit_update, &admission);
     runtime->pipeline_status = status;
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_AFTER_CONTROL);
     const bool stopped = foc_runtime_drain_stop(runtime, now_us);
@@ -616,10 +727,17 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
         if (target_valid && !stopped) {
             runtime->accepted_outer_seq = sensor.sample.seq;
             runtime->accepted_outer_seen = true;
+            if (monitor) {
+                runtime->following = following_trial;
+            }
         }
         return action_valid ? FOC_RUNTIME_OK : FOC_RUNTIME_ERR_CONTROL;
     }
-    if (stopped || status == FOC_PIPELINE_ERR_STOP) {
+    if (admission.following_denied) {
+        runtime->following = following_trial;
+        runtime->motion_rejection = FOC_MOTION_REJECT_FOLLOWING;
+    }
+    if (stopped || admission.following_denied || status == FOC_PIPELINE_ERR_STOP) {
         runtime->pipeline_status = status;
         return FOC_RUNTIME_ERR_STOP;
     }
@@ -629,6 +747,10 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     if (input->action == FOC_RUNTIME_ACTION_CLEAR_FAULT ||
         (input->action != FOC_RUNTIME_ACTION_NONE && status == FOC_PIPELINE_ERR_STATE)) {
         if (input->action != FOC_RUNTIME_ACTION_CLEAR_FAULT) {
+            if (!foc_runtime_mode_enabled(runtime, runtime->mode)) {
+                runtime->motion_rejection = FOC_MOTION_REJECT_UNSUPPORTED_MODE;
+                return FOC_RUNTIME_ERR_MOTION_MODE;
+            }
             /* A valid projection of a pre-stop angle still belongs to the old session. */
             if (runtime->config.motion.enabled && pipeline->rearm_boundary_seen &&
                 !foc_safe_sequence_newer(
@@ -798,6 +920,26 @@ static void foc_runtime_prepare_outer(
         return;
     }
 
+    const struct foc_runtime_motion_config *policy = &runtime->config.motion;
+    const bool protection = foc_runtime_protection_enabled(policy);
+    if (protection) {
+        if (runtime->command_sessions[index] != view->motion_session) {
+            return;
+        }
+        if (candidate->sample.mechanical_frame_id != policy->limits.mechanical_frame_id) {
+            candidate->motion_rejection = FOC_MOTION_REJECT_FRAME;
+            return;
+        }
+        candidate->motion_request.has_position = command->mode != FOC_RUNTIME_MODE_VELOCITY;
+        if (command->mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+            candidate->motion_request.position_ref_rad = command->target.impedance.position_rad;
+            candidate->motion_request.velocity_ref_rad_s = command->target.impedance.velocity_rad_s;
+        } else if (command->mode == FOC_RUNTIME_MODE_POSITION) {
+            candidate->motion_request.position_ref_rad = command->target.motion_ref;
+        } else {
+            candidate->motion_request.requested_velocity_rad_s = command->target.motion_ref;
+        }
+    }
     float iq = 0.0f;
     if (running && !same_session) {
         return;
@@ -812,12 +954,11 @@ static void foc_runtime_prepare_outer(
             )) {
             return;
         }
-        /* Inactive proposals establish readiness without requesting torque. */
-        if (!running) {
+        /* A protected inactive proposal must first pass the direction check. */
+        if (!running && !protection) {
             iq = 0.0f;
         }
     } else if (running) {
-        const struct foc_runtime_motion_config *policy = &runtime->config.motion;
         const float speed_limit = policy->position.velocity_limit_rad_s;
         float speed = fmaxf(-speed_limit, fminf(command->target.motion_ref, speed_limit));
         const float dt_s =
@@ -871,6 +1012,24 @@ static void foc_runtime_prepare_outer(
         runtime->outer_trial_a = trial.integral_a;
         runtime->outer_trial_seen = true;
         iq = output.iq_ref_a;
+        if (protection) {
+            candidate->motion_request.velocity_ref_rad_s = speed;
+        }
+    }
+    if (protection) {
+        candidate->motion_request.iq_ref_a = iq;
+        candidate->motion_rejection = foc_motion_limits_check(
+            &policy->limits,
+            candidate->sample.mechanical_rad,
+            &candidate->motion_request
+        );
+        if (candidate->motion_rejection != FOC_MOTION_REJECT_NONE) {
+            runtime->outer_trial_seen = false;
+            return;
+        }
+        if (!running) {
+            iq = 0.0f;
+        }
     }
     candidate->target =
         (struct foc_pipeline_command){{0.0f, iq}, command->seq, command->produced_us};
@@ -883,17 +1042,31 @@ static int foc_runtime_publish_reference(
     uint32_t now_us
 )
 {
-    if (runtime->config.motion.impedance.enabled) {
-        if (command->mode != FOC_RUNTIME_MODE_IMPEDANCE) {
-            struct foc_runtime_snapshot snapshot;
-            const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
-            if (status != FOC_RUNTIME_OK) {
-                return status;
-            }
-            if (snapshot.mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+    const struct foc_runtime_motion_config *motion = &runtime->config.motion;
+    const bool protection =
+        foc_runtime_outer_mode(command->mode) && foc_runtime_protection_enabled(motion);
+    uint32_t source_session = 0U;
+    if (protection || (motion->impedance.enabled && command->mode != FOC_RUNTIME_MODE_IMPEDANCE)) {
+        struct foc_runtime_snapshot snapshot;
+        const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
+        if (status != FOC_RUNTIME_OK) {
+            return status;
+        }
+        if (protection) {
+            if (command->mode != snapshot.mode || snapshot.inhibit_pending ||
+                snapshot.state == FOC_SAFE_STATE_FAULT_LATCHED) {
                 return FOC_RUNTIME_ERR_CONTROL;
             }
+            source_session = snapshot.motion_session;
+            if (command->mode == FOC_RUNTIME_MODE_IMPEDANCE &&
+                command->target.impedance.source_session != source_session) {
+                return FOC_RUNTIME_ERR_ORDER;
+            }
+        } else if (snapshot.mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+            return FOC_RUNTIME_ERR_CONTROL;
         }
+    }
+    if (motion->impedance.enabled || protection) {
         /* Opt-in instances keep source order across modes and slot revocation. */
         const struct foc_pipeline_watermark *published = &runtime->published_command;
         if (published->seen &&
@@ -921,6 +1094,9 @@ static int foc_runtime_publish_reference(
     runtime->command_slots[next].target = command->target;
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_COMMAND_WRITING);
     runtime->command_slots[next] = *command;
+    if (protection) {
+        runtime->command_sessions[next] = source_session;
+    }
     runtime->published_command =
         (struct foc_pipeline_watermark){command->seq, command->produced_us, true};
     atomic_store_explicit(&runtime->command_slot, next, memory_order_release);
@@ -938,6 +1114,18 @@ static bool foc_runtime_impedance_policy_valid(const struct foc_runtime_motion_c
          isfinite(policy->max_damping_nm_s_per_rad) && policy->max_damping_nm_s_per_rad >= 0.0f &&
          isfinite(policy->max_feedforward_nm) && policy->max_feedforward_nm >= 0.0f &&
          isfinite(policy->torque_constant_nm_per_a * motion->iq_limit_a));
+}
+
+static bool foc_runtime_protection_valid(const struct foc_runtime_motion_config *motion)
+{
+    if (!foc_runtime_protection_enabled(motion)) {
+        return true;
+    }
+    return motion->enabled && motion->limits.mechanical_frame_id != 0U &&
+        foc_motion_limits_validate(&motion->limits) &&
+        foc_following_error_validate(&motion->following_error) &&
+        (!motion->impedance.enabled ||
+         motion->impedance.mechanical_frame_id == motion->limits.mechanical_frame_id);
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -958,7 +1146,11 @@ int foc_runtime_init(
         config->foreground_budget_us < config->supervision.budget_us ||
         config->foreground_budget_us >= FOC_RUNTIME_HALF_RANGE || config->angle_timeout_us == 0U ||
         config->angle_timeout_us >= FOC_RUNTIME_HALF_RANGE ||
-        !foc_runtime_impedance_policy_valid(&config->motion)) {
+        !foc_runtime_impedance_policy_valid(&config->motion) ||
+        !foc_runtime_protection_valid(&config->motion) ||
+        (config->motion.following_error.enabled &&
+         (config->motion.following_error.max_gap_us < config->h0.period_us ||
+          config->motion.following_error.max_gap_us < config->h1.period_us))) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     struct foc_pipeline pipeline;
@@ -1036,6 +1228,9 @@ int foc_runtime_publish_command(
         !isfinite(command->target_a.d) || !isfinite(command->target_a.q)) {
         return FOC_RUNTIME_ERR_INPUT;
     }
+    if (runtime->config.motion.limits.enabled) {
+        return FOC_RUNTIME_ERR_MOTION_MODE;
+    }
     const struct foc_runtime_command source = {
         .mode = FOC_RUNTIME_MODE_CURRENT,
         .seq = command->seq,
@@ -1055,6 +1250,11 @@ int foc_runtime_publish_motion_command(
         command == NULL || !foc_runtime_cascade_mode(command->mode) ||
         !isfinite(command->target.motion_ref)) {
         return FOC_RUNTIME_ERR_INPUT;
+    }
+    if (command->mode == FOC_RUNTIME_MODE_POSITION && runtime->config.motion.limits.enabled &&
+        foc_motion_limits_reference(&runtime->config.motion.limits, command->target.motion_ref) !=
+            FOC_MOTION_REJECT_NONE) {
+        return FOC_RUNTIME_ERR_MOTION_LIMIT;
     }
     return foc_runtime_publish_reference(runtime, command, now_us);
 }
@@ -1083,6 +1283,11 @@ int foc_runtime_publish_impedance_command(
         fabsf(reference->torque_feedforward_nm) > policy->max_feedforward_nm) {
         return FOC_RUNTIME_ERR_INPUT;
     }
+    if (runtime->config.motion.limits.enabled &&
+        foc_motion_limits_reference(&runtime->config.motion.limits, reference->position_rad) !=
+            FOC_MOTION_REJECT_NONE) {
+        return FOC_RUNTIME_ERR_MOTION_LIMIT;
+    }
     struct foc_runtime_snapshot snapshot;
     const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
     if (status != FOC_RUNTIME_OK) {
@@ -1108,6 +1313,11 @@ int foc_runtime_publish_lifecycle_request(
 {
     if (runtime == NULL || !runtime->initialized || !foc_runtime_lifecycle_shape_valid(request)) {
         return FOC_RUNTIME_ERR_INPUT;
+    }
+    if (request->action == FOC_RUNTIME_ACTION_SET_MODE &&
+        request->requested_mode == FOC_RUNTIME_MODE_CURRENT &&
+        runtime->config.motion.limits.enabled) {
+        return FOC_RUNTIME_ERR_MOTION_MODE;
     }
     if (!foc_safe_timestamp_fresh(
             now_us,
@@ -1363,6 +1573,19 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
          previous_state != FOC_SAFE_STATE_FAULT_LATCHED)) {
         runtime->motion_session++;
         runtime->accepted_outer_seen = false;
+        if (runtime->config.motion.following_error.enabled) {
+            const enum foc_following_state observed = runtime->following.status;
+            const enum foc_following_state retained =
+                (observed == FOC_FOLLOWING_TRACKING || observed == FOC_FOLLOWING_PENDING)
+                ? FOC_FOLLOWING_INACTIVE
+                : observed;
+            runtime->following = (struct foc_following_error_state){.status = retained};
+        }
+    }
+    if (runtime->config.motion.following_error.enabled &&
+        previous_state != FOC_SAFE_STATE_RUNNING &&
+        runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING) {
+        runtime->following = (struct foc_following_error_state){0};
     }
     if (lifecycle_claimed) {
         foc_runtime_lifecycle_finish(

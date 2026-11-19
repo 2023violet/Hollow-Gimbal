@@ -30,7 +30,9 @@
  */
 #pragma once
 
+#include "foc_following_error.h"
 #include "foc_motion.h"
+#include "foc_motion_limits.h"
 #include "foc_pipeline.h"
 #include "foc_trajectory.h"
 
@@ -65,6 +67,10 @@ enum foc_runtime_status {
     FOC_RUNTIME_ERR_CONFIG = -7,
     /** Sensed angle quality, source time, or prediction policy blocked a cycle. */
     FOC_RUNTIME_ERR_ALIGNMENT = -8,
+    /** A position reference violates the configured command interval. */
+    FOC_RUNTIME_ERR_MOTION_LIMIT = -9,
+    /** This mode cannot provide the enabled position protection. */
+    FOC_RUNTIME_ERR_MOTION_MODE = -10,
 };
 
 /** One lifecycle request executed by the H0 owner on a current event. */
@@ -261,6 +267,10 @@ struct foc_runtime_motion_config {
     struct foc_trajectory_config trajectory;
     /** Optional impedance policy. Zero initialization keeps the mode disabled. */
     struct foc_runtime_impedance_config impedance;
+    /** Optional software position boundaries. The frame also identifies following feedback. */
+    struct foc_motion_limits_config limits;
+    /** Optional H0-owned position following monitor. */
+    struct foc_following_error_config following_error;
 };
 
 /** Caller-selected schedules and Host injection configuration. */
@@ -332,6 +342,10 @@ struct foc_runtime_sensor_slot {
     uint32_t session;
     /** True only when this publication carries an eligible derived target. */
     bool target_valid;
+    /** Position and velocity used by this proposal plus the final q current request. */
+    struct foc_motion_limits_request motion_request;
+    /** H1 refusal for this sensor, mode and session. */
+    enum foc_motion_rejection motion_rejection;
 };
 
 /** Caller snapshot of one H0 trigger. */
@@ -418,6 +432,10 @@ struct foc_runtime_snapshot {
     uint32_t sensor_us;
     /** Valid at H0 publication. A consumer must also check its current age. */
     bool sensor_valid;
+    /** Following monitor state, independent of Safety fault bits. */
+    enum foc_following_state following_state;
+    /** Latest H0-observed motion refusal, retained across STOP. */
+    enum foc_motion_rejection motion_rejection;
 };
 
 /** Diagnostic counters for one domain. Inspect its non-atomic fields when quiescent. */
@@ -444,7 +462,7 @@ struct foc_runtime_lane {
 
 /** Number of atomic payload words in the fixed telemetry publication. */
 enum {
-    FOC_RUNTIME_TELEMETRY_WORDS = 23
+    FOC_RUNTIME_TELEMETRY_WORDS = 25
 };
 
 /** Caller-owned instance. Internal fields are read-only outside their owners. */
@@ -505,6 +523,11 @@ struct foc_runtime {
     struct foc_runtime_sensor_slot sensor_slots[2];
     /** Foreground-written slots. H0 reads only the published slot. */
     struct foc_runtime_command command_slots[2];
+    /** The protected command's Session, published together with its slot. */
+    uint32_t command_sessions[2];
+    /** H0-owned following interval and latest motion refusal. */
+    struct foc_following_error_state following;
+    enum foc_motion_rejection motion_rejection;
     /** Foreground publication watermark retained across slot revocation. */
     struct foc_pipeline_watermark published_command;
     /** Sensor slot index or the unpublished sentinel. */

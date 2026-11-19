@@ -42,6 +42,8 @@
 /** Generic Host-only research profile; it is not Board1 calibration data. */
 struct foc_virtual_current_profile {
     struct foc_virtual_motor_params motor;
+    /** Initial Host plant state. Zero initialization preserves the original start. */
+    struct foc_virtual_motor_state initial_state;
     double load_torque_nm;
     float vbus_v;
     struct foc_device_adc_config adc;

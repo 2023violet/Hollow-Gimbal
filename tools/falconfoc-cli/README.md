@@ -4,6 +4,10 @@ The codec, JSON CLI, shared-vector tests and simulated connection use Python's
 standard library. A selected physical port uses the existing pyserial package.
 No project dependency manifest is changed.
 
+The [offline configuration inspector](../falconfoc-config-inspector/README.md)
+opens Host storage images. UART V1 continues to expose its existing observable
+device state and fixed parameter set.
+
 Run from the repository root.
 
 ```powershell

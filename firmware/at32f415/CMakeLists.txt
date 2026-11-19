@@ -29,6 +29,8 @@ add_library(
   "${repo}/core/src/foc_current.c"
   "${repo}/core/src/foc_impedance.c"
   "${repo}/core/src/foc_motion.c"
+  "${repo}/core/src/foc_motion_limits.c"
+  "${repo}/core/src/foc_following_error.c"
   "${repo}/core/src/foc_trajectory.c"
   "${repo}/calibration/src/foc_calibration.c"
   "${repo}/sensors/src/foc_encoder.c"

@@ -118,6 +118,13 @@ add_test(NAME test-foc-impedance-motion-reference-probe COMMAND test-foc-impedan
                                                                 --motion-feedforward-legacy
 )
 
+add_test(NAME test-foc-impedance-joint-characterization COMMAND test-foc-impedance-robustness
+                                                                --joint-control-characterization
+)
+add_test(NAME test-foc-impedance-joint-holdout COMMAND test-foc-impedance-robustness
+                                                       --joint-control-holdout
+)
+
 add_executable(test-foc-mechanical-id-virtual tests/test_foc_mechanical_id_virtual.c)
 target_link_libraries(
   test-foc-mechanical-id-virtual PRIVATE falconfoc-virtual-motor falconfoc-calibration

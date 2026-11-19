@@ -267,3 +267,14 @@ sample age witnesses. Use `--motion-feedforward-train` to reproduce training
 or `--motion-feedforward-legacy` for the fixed 02B cubic tracking diagnostic.
 The legacy probe has a separate result stream. Historical CTest and frozen
 quality verdicts retain their original scope.
+
+## Joint motion feedforward and damping experiment
+
+`test-foc-impedance-robustness --joint-control-characterization --trace`
+exports the four arms on the frozen cubic reference. Use
+`--joint-control-holdout --trace` for the independently frozen cases.
+The model term uses the public motion feedforward API. The isolated 48 Hz
+operator affects the tested damping term through the existing Host fixture.
+The runtime acceptance and output paths still run for every arm. CTest
+checks execution and transaction assertions; the evidence tools evaluate
+noise and dynamic admission separately.

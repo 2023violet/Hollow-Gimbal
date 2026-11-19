@@ -1,0 +1,4 @@
+stage,capture,sequence,source_us,completion_us,trigger_us,reference_us,clock_id,reference_clock_id,unit,channel,flags,evidence,p1,p2,p3,p4,p5,p6
+4,12,0,40000,40003,,39980,1,1,4,101,9,4,0,0.31,,,,
+4,12,1,40010,40013,,40010,1,1,4,101,9,4,4,0.33536340906078099,,,,
+7,13,0,60000,60003,,60000,1,1,4,101,9,4,1,0.31632767075002827,,,,

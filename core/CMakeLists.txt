@@ -22,6 +22,8 @@ add_library(
   src/foc_core.c
   src/foc_current.c
   src/foc_motion.c
+  src/foc_motion_limits.c
+  src/foc_following_error.c
   src/foc_trajectory.c
   src/foc_impedance.c
   src/foc_impedance_tuning.c
@@ -52,6 +54,7 @@ themis_add_falconfoc_test(test-foc-current tests/test_foc_current.c)
 themis_add_falconfoc_test(test-foc-current-reference tests/test_foc_current_reference.c)
 themis_add_falconfoc_test(test-foc-pmsm-reference tests/test_foc_pmsm_reference.c)
 themis_add_falconfoc_test(test-foc-motion tests/test_foc_motion.c)
+themis_add_falconfoc_test(test-foc-motion-protection tests/test_foc_motion_protection.c)
 themis_add_falconfoc_test(test-foc-motion-reference tests/test_foc_motion_reference.c)
 themis_add_falconfoc_test(test-foc-periodic-phase tests/test_foc_periodic_phase.c)
 themis_add_falconfoc_test(test-foc-impedance tests/test_foc_impedance.c)

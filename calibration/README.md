@@ -28,6 +28,13 @@ statistics, no dynamic allocation, and explicit failure states. Rotor and
 electrical-offset fitting require timestamped, ordered, valid paired references;
 passive mechanical angle alone is intentionally reported as unidentifiable.
 
+The optional [unified calibration workflow](WORKFLOW.md) orchestrates these
+estimators and supports explicit, reviewed initialization of a new Host
+Runtime through the Control Plane application adapter.
+
+[Measurement Trace v1](MEASUREMENT_TRACE.md) validates recorded observations before
+offline replay through the same workflow. The Host CLI loads and hashes the pack.
+
 ## Standstill motor R/L and PI design
 
 Include `foc_motor_id.h` and link `falconfoc-calibration`. A capture belongs to

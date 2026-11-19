@@ -115,6 +115,12 @@ $sourceRoots = @(
     (Join-Path $resolvedRoot "g3\np"),
     (Join-Path $resolvedRoot "g3\safe"),
     (Join-Path $resolvedRoot "runtime"),
+    (Join-Path $resolvedRoot "control_plane"),
+    (Join-Path $resolvedRoot "examples\parameters"),
+    (Join-Path $resolvedRoot "examples\config-diagnostics"),
+    (Join-Path $resolvedRoot "examples\calibration-workflow"),
+    (Join-Path $resolvedRoot "tools\falconfoc-config-inspector"),
+    (Join-Path $resolvedRoot "tools\falconfoc-calibration-replay"),
     (Join-Path $resolvedRoot "simulation"),
     (Join-Path $resolvedRoot "firmware\at32f415"),
     (Join-Path $resolvedRoot "protocol")

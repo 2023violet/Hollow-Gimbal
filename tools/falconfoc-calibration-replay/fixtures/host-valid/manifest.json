@@ -1,0 +1,115 @@
+{
+  "format_version": 1,
+  "source": "HOST_SYNTHETIC",
+  "host_synthetic": true,
+  "session": 3,
+  "recorder": {
+    "name": "falconfoc-calibration-workflow-demo",
+    "version": "0.1.0-trace-v1"
+  },
+  "identity": {
+    "device_id": 1,
+    "motor_id": 201,
+    "encoder_id": 101,
+    "frame_id": 71
+  },
+  "profile": "FULL_PROFILE",
+  "stage_mask": 127,
+  "stage_rows": [
+    64,
+    321,
+    40,
+    40,
+    256,
+    2401,
+    1,
+    171
+  ],
+  "time": {
+    "unit": "us",
+    "clock_id": 1,
+    "max_age_us": 50,
+    "max_skew_us": 5,
+    "allow_wrap": false,
+    "alignment": "SAME_CLOCK_PAIR"
+  },
+  "adc": {
+    "max_count": 4095,
+    "amp_per_count": 0.001,
+    "channel_map": [
+      1,
+      2,
+      3
+    ]
+  },
+  "encoder": {
+    "cpr": 1024,
+    "raw_direction": -1,
+    "phase_order": 0,
+    "pole_pairs": 4
+  },
+  "reference": {
+    "id": 41,
+    "zero_rad": 0.31,
+    "frame_direction": 1
+  },
+  "torque_model_id": 13,
+  "units": {
+    "adc": "count",
+    "current": "A",
+    "voltage": "V",
+    "angle": "rad",
+    "encoder": "count",
+    "speed": "rad/s",
+    "torque": "N*m",
+    "kt": "N*m/A"
+  },
+  "instruments": [
+    {
+      "id": "soft05-analytic-fixture",
+      "model": "Deterministic C11 capture producers and shared simulated clock",
+      "calibration": "Synthetic counts, terminal voltage, angle references, load and Kt"
+    }
+  ],
+  "preconditions": {
+    "adc_zero_current": "Zero current by construction, independent of ADC values",
+    "output_confirmation": "Simulated held terminal voltage and observed d/q currents",
+    "independent_reference": "Analytic angular reference with separate LUT holdout capture",
+    "load_condition": "Signed external load observed by synthetic fixture",
+    "independent_kt": "Qualified synthetic input in dedicated capture 9"
+  },
+  "files": {
+    "samples.csv": {
+      "sha256": "f45c1e7d5f13f32405f94cba989f921f2c431db50bd9b3291966e492623e1c53",
+      "rows": 3294
+    }
+  },
+  "generator": {
+    "seed": 0,
+    "sample_rates_hz": {
+      "adc": 100000,
+      "electrical": 25000,
+      "lut_train": 100000,
+      "lut_holdout": 100000,
+      "rotor": 1000,
+      "offset": 1000,
+      "mechanical_mean": 1000
+    },
+    "parameters": {
+      "rs_ohm": 0.57,
+      "inductance_h": 0.00135,
+      "inertia_kg_m2": 0.0024,
+      "damping_nm_s_per_rad": 0.007,
+      "kt_nm_per_a": 0.15,
+      "electrical_offset_rad": 1.2,
+      "voltage_hold_samples": 19,
+      "mechanical_odd_interval_us": 940,
+      "mechanical_even_interval_us": 1060,
+      "lut_nodes": 8,
+      "lut_training_stride_counts": 4,
+      "lut_holdout_stride_counts": 6,
+      "rotor_increment_counts": 40,
+      "sample_availability_delay_us": 3
+    }
+  }
+}

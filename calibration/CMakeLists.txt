@@ -50,3 +50,29 @@ add_test(NAME test-foc-encoder-calibration COMMAND test-foc-encoder-calibration)
 add_executable(test-foc-mechanical-id tests/test_foc_mechanical_id.c)
 target_link_libraries(test-foc-mechanical-id PRIVATE falconfoc-calibration)
 add_test(NAME test-foc-mechanical-id COMMAND test-foc-mechanical-id)
+
+add_library(
+  falconfoc-calibration-workflow STATIC EXCLUDE_FROM_ALL src/foc_calibration_workflow.c
+                                                         ../core/src/foc_impedance_tuning.c
+)
+target_include_directories(falconfoc-calibration-workflow PUBLIC ../core/include)
+target_link_libraries(falconfoc-calibration-workflow PUBLIC falconfoc-calibration)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(falconfoc-calibration-workflow PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_library(falconfoc-measurement-trace STATIC EXCLUDE_FROM_ALL src/foc_measurement_trace.c)
+target_link_libraries(falconfoc-measurement-trace PUBLIC falconfoc-calibration-workflow)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(falconfoc-measurement-trace PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(PROJECT_IS_TOP_LEVEL)
+  add_executable(test-foc-calibration-workflow tests/test_foc_calibration_workflow.c)
+  target_link_libraries(test-foc-calibration-workflow PRIVATE falconfoc-calibration-workflow)
+  add_test(NAME test-foc-calibration-workflow COMMAND test-foc-calibration-workflow)
+
+  add_executable(test-foc-measurement-trace tests/test_foc_measurement_trace.c)
+  target_link_libraries(test-foc-measurement-trace PRIVATE falconfoc-measurement-trace)
+  add_test(NAME test-foc-measurement-trace COMMAND test-foc-measurement-trace)
+endif()

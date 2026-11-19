@@ -110,6 +110,7 @@ static int test_analytic_and_quality(void)
     struct foc_mechanical_id_context first, second;
     struct foc_mechanical_id_config other = config;
     other.torque_source = FOC_MECHANICAL_ID_TORQUE_EQUIVALENT;
+    other.torque_constant_nm_per_a = 0.0f;
     CHECK(foc_mechanical_id_init(&first, &config, 21U) == 0);
     CHECK(foc_mechanical_id_init(&second, &other, 22U) == 0);
     CHECK(analytic(&first, 0.002, 0.006, false) == 0);
@@ -117,6 +118,7 @@ static int test_analytic_and_quality(void)
     struct foc_mechanical_id_result a, b;
     CHECK(foc_mechanical_id_finish(&first, &a) == 0 && a.usable);
     CHECK(foc_mechanical_id_finish(&second, &b) == 0 && b.usable);
+    CHECK(b.torque_constant_nm_per_a == 0.0f);
     CHECK(
         a.capture_id == 21U && b.capture_id == 22U && a.torque_model_id == config.torque_model_id
     );

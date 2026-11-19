@@ -72,6 +72,7 @@ not written to Board1 defaults.
 - [Simulation README](simulation/README.md)
 - [Protocol README](protocol/README.md)
 - [Host Virtual Quickstart](docs/code-wiki/FalconFOC_VM_virtual_quickstart.md)
+- [Servo Quickstart](docs/servo/quickstart.md)
 - [Release-preparation evidence](docs/evidence/2026-11-16-next-release-prep-01.md)
 - [Current software handoff](docs/code-wiki/AI-handoff-2026-11-15.md)
 

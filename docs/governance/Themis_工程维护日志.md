@@ -3033,3 +3033,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 加入可选 C11 Trace Adapter、只读 Python CLI 和两个标准测量包。采样、触发与完成时间分别记录，测量来源与数字完整性独立报告。
 - 七阶段 Host 回放复现 SOFT-05。CLI 输出待审核候选，验证错位、丢样、Holdout 复用、缺 Kt 与来源失配。锁定固件 BIN 字节一致。
 - 见 `docs/evidence/2026-11-19-next-soft-06.md`。真实测量来源、板端采集吞吐量和实机标定待证。
+
+## 2026-11-19 ARCH-001 架构决策与变更规则
+
+- 在项目纲领写入产品目标、成熟工程方法和可验证证据共同决定架构的原则，并将 ADR 纳入 AGENTS.md 接手顺序。
+- V2 以独立 C11 Core 和 H0/H1/Foreground 为评审基线，规定变更证据、同条件对照、验收与回退。独立记录 Legacy 漏边沿反例，PWM 同步和 20/20 kHz 留作待验目标。
+- 见 [ARCH-001](../architecture/FalconFOC_BareMetal_Execution_ADR.md)。本次交付为治理文档，事件模型验证属 NEXT-ARCH-00。

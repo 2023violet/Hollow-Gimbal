@@ -67,6 +67,7 @@ not written to Board1 defaults.
 
 ## Documentation
 
+- [V2 architecture decision and change gate](docs/architecture/FalconFOC_BareMetal_Execution_ADR.md)
 - [Core README](core/README.md)
 - [Runtime README](runtime/README.md)
 - [Simulation README](simulation/README.md)

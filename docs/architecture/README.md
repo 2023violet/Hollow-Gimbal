@@ -6,6 +6,7 @@ and boundary rules for the current FalconFoc Themis-lite repository.
 Read these first:
 
 0. [FalconFOC project charter](./FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md) — 产品宗旨与逐文件精修原则；历史进度以最新源码和验收记录为准。
+   - [V2 实时执行 ADR 与变更规则](./FalconFOC_BareMetal_Execution_ADR.md) — 评审基线、待验证的时序目标和替代条件。
 1. [../code-wiki/README.md](../code-wiki/README.md) — 当前 AT32F415 源码事实与调用地图
 2. [../code-wiki/hardware-and-drv8311h.md](../code-wiki/hardware-and-drv8311h.md) — Board1 与 DRV8311H 硬件边界
 - [../code-wiki/configuration-audit.md](../code-wiki/configuration-audit.md) — 原理图—外设—调用时序配置审计

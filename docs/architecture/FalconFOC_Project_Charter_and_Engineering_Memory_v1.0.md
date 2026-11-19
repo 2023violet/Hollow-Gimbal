@@ -42,6 +42,8 @@ FalconFOC 的 Legacy 固件并非完全不能运行。真正促使 V2 重构的�
 
 ## 2. 产品价值观与技术不可变条件
 
+**FalconFOC 的架构必须由产品目标、成熟工程方法和可验证证据共同决定，不能随着每一次讨论的方向反复变化。** 重大变更以证据和复验条件形成正式 ADR，由后续裁决显式替代。 [架构变更规则](FalconFOC_BareMetal_Execution_ADR.md#architecture-change-gate)
+
 | 追求 | 必须落实为具体工程条件 | 不接受的替代说法 |
 |---|---|---|
 | Portable / 可移植 | 第三方可不使用我们 Runtime；第二不同 MCU/采样组合实际移植；板卡常量局部化 | “Host GCC 能编译，所以通用” |
@@ -233,7 +235,7 @@ MOTOR PHYSICAL OPERATION UNVERIFIED
 - 普通开发进度不重写产品纲领；仅更新“实际 HEAD、模块状态、当前任务、未关闭风险、下一步”快照。
 - `NEXT-SYSTEM-ANGLE-01` 的最终结果在新证据出现之前保持 Pending；对尚未完成的工作不可预先宣称 PASS。
 - 将此文档的短版摘要用作新 Agent 的上下文入口，定期与仓库现状对齐。
-- 长期建议在获明确 Git 授权后，把审定版置于仓库 `docs/architecture/` 或 `docs/code-wiki/`，作为团队可版本化的产品纲领；当前不擅自写入远端 Git。
+- 本文件保存产品原则。具体 V2 执行基线和版本化变更过程见 [ARCH-001](FalconFOC_BareMetal_Execution_ADR.md)。
 
 ### 11.3 已达成的原则性共识与仍需做的决定
 

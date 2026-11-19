@@ -10,6 +10,7 @@ Read these first, in order:
 
 0. `docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md`
    - Product principles govern direction; current Git/source/evidence supersede its dated progress snapshot.
+   - For V2 architecture decisions, read `docs/architecture/FalconFOC_BareMetal_Execution_ADR.md` next.
 1. `README.md`
 2. `docs/README.md`
 3. `docs/architecture/README.md`
@@ -205,6 +206,12 @@ Do not:
 - restore retired overview / planning / prompt / devdrv docs to the live read path
 
 ## 9. Default Decision Rule
+
+For major V2 architecture changes, apply the Architecture Change Gate in
+`docs/architecture/FalconFOC_BareMetal_Execution_ADR.md` before implementation.
+Use product goals, mature engineering methods, and reproducible evidence to
+justify the decision. Record any superseding decision and its acceptance and
+rollback criteria in an ADR.
 
 When uncertain:
 

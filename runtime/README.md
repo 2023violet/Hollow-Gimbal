@@ -146,6 +146,21 @@ then uses the existing guarded Pipeline. UART V1 does not admit IMPEDANCE
 setpoints. Zero-initialized policy leaves the mode disabled, including Board1.
 The Runtime public structs have grown and binary consumers must recompile.
 
+`motion.impedance.damping_filter_hz` is an immutable initial policy. Zero
+keeps the original damping path. Values from 1 to 200 Hz enable a first-order
+backward-Euler low-pass on the signed speed error used by D. Using the same
+filter for the reference and feedback contributions preserves their relative
+phase during motion. H1 uses elapsed source time across wrap. The first valid
+RUNNING sample seeds the filter. A session change, invalid feedback, skipped
+capture or a source interval beyond the H1 period plus delay allowance starts
+a fresh state. STOP, FAULT and mode changes leave the filter inactive until a
+new qualified impedance target. Encoder speed and phase, H0 prediction,
+motion limits and output admission still use their original inputs.
+
+Read back the immutable policy through `foc_runtime_diagnose()` in Control
+Plane integrations. The cutoff is local Runtime configuration. UART V1,
+the configuration storage schemas and FCAL v1 do not serialize it.
+
 Run `test-foc-runtime-impedance` and
 `test-foc-runtime-impedance-virtual` for the transaction and virtual motor
 contracts. The simulation test accepts `--trace` for the six Host scenarios.

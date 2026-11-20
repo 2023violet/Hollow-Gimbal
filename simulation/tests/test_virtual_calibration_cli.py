@@ -9,6 +9,8 @@ import sys
 import tempfile
 import zlib
 
+from current_startup_quality import score
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLI = ROOT / "tools/falconfoc-cli/falconfoc_cli.py"
 SIM = pathlib.Path(sys.argv[1]).resolve()
@@ -88,11 +90,53 @@ def check_current_cycle_study(folder, review_id):
     assert all(r["h0_us"] == r["sample_us"] and r["faults"] == "0" for r in active)
 
 
+def check_startup(folder, profile, review_id, *flags):
+    trace = folder / f"startup-{profile}.csv"
+    args = [str(SIM), "--profile-id", profile, *flags, "--cq-startup-csv", str(trace)]
+    missing_review = subprocess.run(
+        args, capture_output=True, text=True, check=False, timeout=45,
+    )
+    assert missing_review.returncode == 2 and not trace.exists()
+    assert json.loads(missing_review.stdout.splitlines()[-1])["error"] == "EXPLICIT_REVIEW_REQUIRED"
+    run("--profile-id", profile, *flags, "--approve-candidate", review_id,
+        "--startup-trace", trace)
+    cases = score(trace, profile)["cases"]
+    failed = {name for name, case in cases.items()
+              if any(p["verdict"] == "CONTROL_QUALITY_FAIL" for p in case["phases"])}
+    # V1 observes the frozen Salient large-step limit as a failure, with the
+    # same time and voltage gates used for Generic. All other feasible phases pass.
+    expected = {"cold_large/negative", "cold_large/positive"} if "SALIENT" in profile else set()
+    assert failed == expected, (failed, expected)
+    phases = [phase for case in cases.values() for phase in case["phases"]]
+    verdicts = [phase["verdict"] for phase in phases]
+    assert verdicts.count("CONTROL_QUALITY_PASS") == 16 - len(expected), phases
+    assert verdicts.count("LIMITED_BY_FEASIBILITY") == 2, phases
+
+
+def reachability(package, profile, speed, target, vbus, *, torque=False):
+    query = "--reachability-torque" if torque else "--reachability"
+    rows = run("--profile-id", profile, "--load-config", package, query, speed, 0, target, vbus)
+    assert not any(row.get("event") in ("CONFIGURATION_APPLIED", "CONTROL_TRIAL") for row in rows)
+    point = event(rows, "REACHABILITY")
+    assert not point["configuration_applied"] and not point["physical_applied"]
+    assert point["assumption"] == "STEADY_STATE_ZERO_DQ_CURRENT_DERIVATIVES"
+    return point
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="falconfoc-cal-test-") as temporary:
         root = pathlib.Path(temporary)
         package = root / "motor.fcal"
         trace = root / "rl.csv"
+        capabilities = event(run("--capabilities"), "HOST_CAPABILITIES")
+        assert capabilities["output_locked_on_board1"] and capabilities["review_required_to_apply"]
+        assert not capabilities["target_wcet_verified"] and not capabilities["mcu_flash"]
+        wrong_runner = subprocess.run(
+            [sys.executable, "-B", str(CLI), "calibrate", "--simulator", sys.executable,
+             "--capabilities"], capture_output=True, text=True, check=False, timeout=45,
+        )
+        assert wrong_runner.returncode == 2
+        assert json.loads(wrong_runner.stdout)["error"] == "SIMULATOR_PROTOCOL_ERROR"
         preview = run("--cogging")
         reviewed = event(preview, "CANDIDATE_PREVIEW")["review_id"]
         approval = ("--approve-candidate", reviewed)
@@ -103,6 +147,7 @@ def main():
               "REVIEW_ID_MISMATCH")
         first = run(*approval, "--cogging", "--save-config", package, "--trace", trace)
         check_current_cycle_study(root, reviewed)
+        check_startup(root, "GENERIC_RESEARCH_MOTOR", reviewed, "--cogging")
         before = verify(first, [
             ("rs_ohm", 0.6, 0.01), ("ld_h", 0.0012, 0.00003), ("lq_h", 0.0015, 0.00003),
             ("flux_wb", 0.025, 0.0003), ("kt_nm_per_peak_q_amp", 0.15, 0.002),
@@ -138,6 +183,15 @@ def main():
             x for x in first if x.get("event") == "CONTROL_TRIAL"]
         error(run(*approval, "--load-config", package, "--profile-id",
                   "CALIBRATION_SALIENT_MOTOR", status=2), "PACKAGE_IDENTITY")
+        point = reachability(package, "GENERIC_RESEARCH_MOTOR", 0, 0.45, 12)
+        assert point["verdict"] == "MODEL_FEASIBLE" and point["review_id"] == reviewed
+        near(point["required_v"], 0.27, 0.001)
+        point = reachability(package, "GENERIC_RESEARCH_MOTOR", 0, 0.34, 12, torque=True)
+        assert point["verdict"] == "MODEL_INFEASIBLE" and point["reasons"] == ["TORQUE_LIMIT"]
+        point = reachability(package, "GENERIC_RESEARCH_MOTOR", 0, 0.15, 5.9)
+        assert point["reasons"] == ["BUS_MINIMUM"] and not point["range_valid"]
+        error(run("--load-config", package, "--reachability", 0, 0, "nan", 12, status=2),
+              "INVALID_REACHABILITY_POINT")
         original = package.read_bytes()
         corrupted = root / "corrupt.fcal"
         for offset, replacement, reason in (
@@ -160,7 +214,8 @@ def main():
         assert package.read_bytes() == original
         salient = ("--profile-id", "CALIBRATION_SALIENT_MOTOR")
         next_review = event(run(*salient), "CANDIDATE_PREVIEW")["review_id"]
-        second = run(*salient, "--approve-candidate", next_review)
+        salient_package = root / "salient.fcal"
+        second = run(*salient, "--approve-candidate", next_review, "--save-config", salient_package)
         calibrated = verify(second, [
             ("rs_ohm", 0.78, 0.012), ("ld_h", 0.0017, 0.00004), ("lq_h", 0.0022, 0.00004),
             ("flux_wb", 0.032, 0.0004), ("kt_nm_per_peak_q_amp", 0.192, 0.0025),
@@ -168,6 +223,16 @@ def main():
             ("electrical_offset_rad", 0.52, 0.002),
         ])
         assert not calibrated["cogging_enabled"]
+        check_startup(root, "CALIBRATION_SALIENT_MOTOR", next_review)
+        for sign in (-1, 1):
+            rest = reachability(salient_package, "CALIBRATION_SALIENT_MOTOR", 0, sign * 2.2, 12)
+            assert rest["verdict"] == "MODEL_FEASIBLE"
+            assert rest["iq_range_a"][0] <= sign * 2.2 <= rest["iq_range_a"][1]
+            moving = reachability(
+                salient_package, "CALIBRATION_SALIENT_MOTOR", sign * 6.9, sign * 2.2, 12,
+            )
+            assert moving["verdict"] == "MODEL_INFEASIBLE" and moving["reasons"] == ["VOLTAGE_LIMIT"]
+            near(moving["required_v"], 2.602, 0.004)
 
 
 if __name__ == "__main__":

@@ -3084,3 +3084,13 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 隔离原 36 Hz Host 整定引起的 Current 退化，两种虚拟配置按 130 Hz 重新验证四模式双向、失配及重载，最坏方向 RMS 均改善。Core 修复低调制比重构的舍入误停，保留事务和保护。
 - 裁决 `NEXT-CQ-01 PARTIAL — QUALITY FAILURES REMAIN`。历史 10 ms Current 和三项 Servo 失败仍在，48 Hz 阻尼试验保留为 Host 候选。软件回归和锁定 ARM 构建通过，实机标定和 WCET 待验。 [验收报告](../evidence/2026-11-20-next-cq-01.md)
+
+## 2026-11-20 · NEXT-CQ-02 阻尼噪声与遗留品质
+
+- H1 正式阻抗路径加入可配置的 48 Hz 速度差低通。Host 两个原噪声 Holdout、冻结动态验收和双电机 130 Hz 回归通过。保留 FCAL v1、原测试与 Board1 输出锁。
+- 历史 Current 三个超差由旧 PI 冷启动解释，原整窗仍 FAIL。Host 独立证据确认 0.039 N·m 超出 0.25 A 的静止转矩能力，近边界可行负载仍有动态超差。锁定 ARM 复建成功，实机标定和 WCET 待验。 [验收报告](../evidence/2026-11-20-next-cq-02.md)
+
+## 2026-11-20 · NEXT-CQ-03 启动与能力边界收口
+
+- Host 增加 Current Startup V1 全生命周期观测及固定评价。速度前馈与首次目标补偿完成同条件对照，保留已审核的 130 Hz 和 48 Hz。Salient 大阶跃、历史 Current、近转矩点和超载保留对应失败。
+- 复验近转矩点滑移、限幅与撤载，完成版本化控制品质验收定义。软件专项收口，锁定 ARM 镜像逐字节相同，物理标定与目标 WCET 待验。 [验收报告](../evidence/2026-11-20-next-cq-03.md)

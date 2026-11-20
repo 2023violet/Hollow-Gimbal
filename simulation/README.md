@@ -279,6 +279,12 @@ The runtime acceptance and output paths still run for every arm. CTest
 checks execution and transaction assertions; the evidence tools evaluate
 noise and dynamic admission separately.
 
+Run `test-foc-impedance-robustness --runtime-damping --trace` to repeat the
+original Holdout stimuli and gates with 48 Hz configured in the production
+H1 Runtime. Without the flag the executable uses the original bypass.
+The production-filter CTest requires all feasible original cases to pass
+and retains the original 0.039 N*m overload failure.
+
 
 ## Measured Host calibration
 
@@ -289,6 +295,11 @@ approved values in new production Runtime and Encoder instances. The model
 supports an imposed virtual reference-fixture shaft speed, standstill and an
 optional periodic disturbance. Control evaluation uses the free plant driven
 by the existing accepted-output adapter.
+
+The calibration runner selects the 48 Hz local Runtime policy for Impedance
+and reports it on preview and application, including on FCAL v1 reload.
+The FCAL fingerprint continues to identify the serialized calibration
+payload. The local cutoff is supplied by the initialized Host profile.
 
 
 ## Control quality counterfactuals
@@ -320,3 +331,25 @@ and bounds. It requires a fresh RUNNING/UPDATE receipt for each metric
 sample. `CURRENT_BENEFIT_PASS` compares the worst full-window q-current
 RMS across both polarities. Older 36 Hz FCAL v1 packages still reload
 under their admitted policy and report their own benefit verdict.
+
+## Current Startup V1
+
+Run the same native calibration runner with `--cq-startup-csv startup.csv`
+in place of `--cq-current-csv`. Use the explicit review from the same
+profile and cogging selection. The startup CSV covers complete H0 frames
+from boot through STOP and has its own stable schema. It records ingress,
+sampling, accepted output, and actual virtual model voltage application.
+
+```powershell
+& $exe --profile-id GENERIC_RESEARCH_MOTOR --cogging --approve-candidate $reviewId --cq-startup-csv startup.csv
+python simulation/tests/current_startup_quality.py GENERIC_RESEARCH_MOTOR startup.csv
+```
+
+Use `CALIBRATION_SALIENT_MOTOR` and its own review ID for the second profile.
+The V1 scorer exits 1 for a quality failure and 2 for insufficient evidence.
+The signed Salient 2.20 A sustained steps retain their V1 failures. See the
+[versioned Host quality contract](../docs/servo/host-control-quality-v1.md).
+
+The Python calibration entry adds `--startup-trace`, `--capabilities` and
+read-only Current and torque reachability queries against reviewed FCAL v1
+data. See the [Host workflow](../tools/falconfoc-cli/README.md#host-capability-and-reachability-diagnostics).

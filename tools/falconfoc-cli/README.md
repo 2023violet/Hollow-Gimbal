@@ -175,3 +175,42 @@ configuration. Archived FCAL v1 files from the 36 Hz policy may be loaded
 with their original review ID and emit their own benefit result. The
 historical `virtual-demo` verdict retains its original metrics and adds
 state-aware `tracking_error` diagnostics. See [Cycle-level A/B](../../simulation/README.md#control-quality-counterfactuals).
+
+## Host capability and reachability diagnostics
+
+The Host wrapper exposes the same versioned operations as the native calibration
+runner. Discover supported virtual profiles, modes, FCAL version and software
+limits with `--capabilities`. Add `--startup-trace startup.csv` to an approved
+calibration run to capture the existing Current Startup V1 trace.
+
+```powershell
+python -B $cli calibrate --simulator $exe --capabilities
+python -B $cli calibrate --simulator $exe --profile-id CALIBRATION_SALIENT_MOTOR --load-config salient.fcal --reachability 6.9 0 2.2 12
+python -B $cli calibrate --simulator $exe --profile-id GENERIC_RESEARCH_MOTOR --load-config motor.fcal --reachability-torque 0 0 0.30 12
+```
+
+The four arguments are signed mechanical speed in rad/s, Id in peak amperes,
+signed Iq in peak amperes or shaft torque in N·m, and measured or assumed VBUS
+in volts. The torque query uses the Impedance limit and accepts zero Id,
+matching the Runtime command contract. The Current query applies the Current
+vector cap and reports the modeled torque. A query validates profile identity,
+CRC and parameter ranges. It reads the saved model and emits one
+`REACHABILITY` V1 event without initializing an active controller. Use a
+separate approved load to run the control trials.
+
+The result reports parameter provenance, component voltages, all-angle and
+best-angle voltage bounds, named constraints and the conservative Iq and torque
+interval at the supplied Id and speed. Use the interval only when
+`range_valid` is true. `MODEL_FEASIBLE`, `MODEL_INFEASIBLE` and
+`INDETERMINATE` are steady-state verdicts for the supplied parameters.
+A successful query can report an infeasible point. The event includes the
+control mode to distinguish its current and torque policies. ADC bus admission
+and the configured software voltage or duty cap still apply.
+
+The loaded parameters estimate the virtual fixture. A different motor,
+parameter drift or load can change the result. The steady-state model uses
+zero d/q current derivatives. It leaves step timing, settling, real commutation,
+output permissions and physical calibration to their respective evidence.
+Runner start failure, timeout and malformed runner output have stable
+`HOST_RUNNER` diagnostics. FCAL, runtime control and UART V1 messages retain
+their existing formats.

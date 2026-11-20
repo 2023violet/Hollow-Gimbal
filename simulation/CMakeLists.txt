@@ -157,6 +157,7 @@ if(PROJECT_IS_TOP_LEVEL)
   add_executable(
     falconfoc-virtual-calibrate src/falconfoc_virtual_calibrate.c
                                 src/foc_virtual_calibration_package.c
+                                ../core/src/foc_pmsm_reachability.c
   )
   target_link_libraries(falconfoc-virtual-calibrate PRIVATE falconfoc-virtual-calibration)
   target_include_directories(falconfoc-virtual-calibrate PRIVATE ../components/utils/crc)

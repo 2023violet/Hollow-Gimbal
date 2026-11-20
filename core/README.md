@@ -254,6 +254,43 @@ The Host test executables cover transforms, SVPWM, voltage-open-loop stepping, d
 
 The existing `test-foc-motion` CTest entry includes positive/negative integral-trial and proportional-request overflow, poisoned-output clearing, complete logical context preservation, disabled/invalid inputs and same-instance recovery. `test-foc-motion-reference` adds the independent prediction Oracle described above to its existing rotor, PI, Position and Trajectory references. These checks extend the existing entries; they do not add a new test framework or certify physical control quality.
 
+## Installed Core
+
+Configure `core/` with `-DBUILD_TESTING=OFF`, build, and run
+`cmake --install <build-dir> --prefix <prefix>`. This works from a copy of
+`core/` alone. Configure the caller with `-DCMAKE_PREFIX_PATH=<prefix>`, use
+`find_package(FalconFOCCore CONFIG REQUIRED)`, and link `FalconFOC::Core`.
+The [external C11 consumer](../examples/external-consumer/README.md) gives the
+complete commands and the caller-owned output admission sequence.
+
 ## Integration boundary
 
 The G2 context owns voltage-open-loop configuration and electrical angle. The separate current context owns its configuration and two integrators. An adapter owns sample timing, coherent snapshots, and hardware output submission. Host validation covers the software boundary. Target timing and physical output authorization are separate acceptance steps.
+
+## Cold-path PMSM reachability
+
+`include/foc_pmsm_reachability.h` is a public experimental C11 API. It evaluates
+one steady operating point and the conservative q-current and torque interval
+at fixed speed and Id. Supply evidence-qualified Rs, Ld, Lq, flux linkage,
+pole count and model identity. The equations use the production peak-amplitude
+d/q signs with `omega_e = pole_pairs * omega_mechanical`.
+
+- `Vd = Rs * Id - omega_e * Lq * Iq`.
+- `Vq = Rs * Iq + omega_e * (Ld * Id + flux)`.
+- `T = 1.5 * pole_pairs * (flux + (Ld - Lq) * Id) * Iq`.
+
+The evaluator intersects the affine voltage line with the current-vector cap
+and optional torque limit. The Current voltage cap uses the smaller of the
+configured cap and VBUS divided by the square root of three. Centered SVPWM
+with an asymmetric duty window uses the narrower distance around 0.5. The
+conservative circle covers every angle. The interval between that circle and
+the best-angle cap has an angle-dependent, indeterminate verdict.
+The reported near-limit flag means a nonnegative voltage margin within 5%
+of the all-angle cap.
+
+The caller owns the operating assumptions and supplies a coherent configuration.
+The model uses zero current derivatives and yields steady-state evidence only.
+Dynamic voltages additionally include `Ld*dId/dt` and `Lq*dIq/dt`.
+Near the boundary account for parameter error, duty quantization, sampling,
+actuation delay and bus dynamics. The API performs no control step or output
+admission. The routine is used by the [Host CLI](../tools/falconfoc-cli/README.md#host-capability-and-reachability-diagnostics).

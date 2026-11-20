@@ -15,7 +15,8 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-enable_testing()
+include(GNUInstallDirs)
+option(BUILD_TESTING "Build FalconFOC Core tests" ON)
 
 add_library(
   falconfoc-core STATIC
@@ -29,8 +30,14 @@ add_library(
   src/foc_impedance_tuning.c
   src/foc_impedance_feasibility.c
   src/foc_impedance_feedforward.c
+  src/foc_pmsm_reachability.c
 )
-target_include_directories(falconfoc-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(falconfoc-core PROPERTIES EXPORT_NAME Core)
+target_compile_features(falconfoc-core PUBLIC c_std_11)
+target_include_directories(
+  falconfoc-core PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-core PRIVATE -Wall -Wextra -Wpedantic)
@@ -39,6 +46,29 @@ endif()
 if(NOT WIN32 AND NOT MSVC)
   target_link_libraries(falconfoc-core PUBLIC m)
 endif()
+
+install(
+  TARGETS falconfoc-core
+  EXPORT FalconFOCCoreConfig
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+install(
+  DIRECTORY include/
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+  PATTERN "*.h"
+)
+install(
+  EXPORT FalconFOCCoreConfig
+  NAMESPACE FalconFOC::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FalconFOCCore"
+)
+
+if(NOT BUILD_TESTING)
+  return()
+endif()
+
+enable_testing()
 
 function(themis_add_falconfoc_test TEST_NAME TEST_SOURCE)
   add_executable(${TEST_NAME} ${TEST_SOURCE})
@@ -53,6 +83,7 @@ themis_add_falconfoc_test(test-foc-core tests/test_foc_core.c)
 themis_add_falconfoc_test(test-foc-current tests/test_foc_current.c)
 themis_add_falconfoc_test(test-foc-current-reference tests/test_foc_current_reference.c)
 themis_add_falconfoc_test(test-foc-pmsm-reference tests/test_foc_pmsm_reference.c)
+themis_add_falconfoc_test(test-foc-pmsm-reachability tests/test_foc_pmsm_reachability.c)
 themis_add_falconfoc_test(test-foc-motion tests/test_foc_motion.c)
 themis_add_falconfoc_test(test-foc-motion-protection tests/test_foc_motion_protection.c)
 themis_add_falconfoc_test(test-foc-motion-reference tests/test_foc_motion_reference.c)

@@ -13,13 +13,16 @@
 
 /* Includes --------------------------------------------------------------------- */
 
+#include "foc_pmsm_reachability.h"
 #include "foc_virtual_calibration.h"
 #include "foc_virtual_calibration_package.h"
 #include "foc_virtual_cogging.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Private Types ---------------------------------------------------------------- */
@@ -45,6 +48,7 @@ struct cycle_trace {
     const char *group;
     const char *scenario;
     const struct current_stimulus *stimulus;
+    bool startup;
 };
 
 struct control_metrics {
@@ -357,6 +361,86 @@ static int trace_cycle(
         : 0;
 }
 
+static int startup_cycle(
+    const struct cycle_trace *trace,
+    struct foc_virtual_current *driver,
+    const struct foc_vector_dq *reference
+)
+{
+    struct foc_runtime_snapshot view;
+    struct foc_virtual_motor_observation plant;
+    if (foc_virtual_current_snapshot(driver, &view) != FOC_RUNTIME_OK ||
+        foc_virtual_motor_observe(&driver->motor, &plant) != 0) {
+        return -1;
+    }
+    const struct foc_pipeline *pipeline = &driver->runtime.pipeline;
+    const struct foc_pipeline_watermark *published = &driver->runtime.published_command;
+    const bool applied = view.state == FOC_SAFE_STATE_RUNNING && view.output_confirmed &&
+        view.action == FOC_DEVICE_OUTPUT_UPDATE && driver->fault_events.last_update_seen &&
+        driver->fault_events.last_accepted_update_us == view.trigger_us;
+    const double voltage = hypot(driver->output.v_alpha_v, driver->output.v_beta_v);
+    const double cap = fmin(
+        pipeline->current.config.pwm.voltage_limit_v,
+        driver->profile.vbus_v / sqrt(3.0)
+    );
+    /* The Host adapter applies the two voltage components in its accepted UPDATE call. */
+    return fprintf(
+               trace->output,
+               "%s,%s,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ","
+               "%u,%" PRIu32 ",%" PRIu32 ",%u,%u,%u,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ","
+               "%u,%" PRIu32 ",%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+               trace->scenario,
+               trace->group,
+               driver->virtual_time_us,
+               view.trigger_us,
+               view.sample_us,
+               driver->runtime.h1.trigger_us,
+               view.sensor_us,
+               (unsigned)published->seen,
+               published->produced_us,
+               view.command_us,
+               (unsigned)view.state,
+               (unsigned)view.action,
+               (unsigned)view.output_confirmed,
+               view.faults,
+               view.motion_session,
+               driver->output.accepted_updates,
+               (unsigned)applied,
+               applied ? driver->fault_events.last_accepted_update_us : 0U,
+               (unsigned)view.sample_seen,
+               (unsigned)(applied && voltage >= cap - 0.002),
+               (double)reference->q,
+               (double)pipeline->measured_dq_a.q,
+               plant.iq_a,
+               voltage,
+               cap,
+               (double)pipeline->current.integral_v.d,
+               (double)pipeline->current.integral_v.q,
+               plant.mechanical_velocity_rad_s,
+               driver->profile.vbus_v,
+               (double)pipeline->current.config.current_limit_a
+           ) < 0
+        ? -1
+        : 0;
+}
+
+static int advance_with_startup_trace(
+    struct foc_virtual_current *driver,
+    uint32_t through_us,
+    const struct cycle_trace *trace
+)
+{
+    if (trace != NULL && trace->startup) {
+        while (driver->next_h0_us <= through_us) {
+            if (foc_virtual_current_run_until(driver, driver->next_h0_us) != 0 ||
+                startup_cycle(trace, driver, &driver->target_a) != 0) {
+                return -1;
+            }
+        }
+    }
+    return foc_virtual_current_run_until(driver, through_us);
+}
+
 static int compare_run(
     const struct foc_virtual_current_profile *profile,
     struct calibrated_init *init,
@@ -386,12 +470,14 @@ static int compare_run(
         ) != 0 ||
         (mode != FOC_RUNTIME_MODE_CURRENT &&
          !lifecycle(&driver, FOC_RUNTIME_ACTION_SET_MODE, mode, 0U)) ||
-        foc_virtual_current_run_until(&driver, 700U) != 0 ||
+        advance_with_startup_trace(&driver, 700U, trace) != 0 ||
         publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
-        foc_virtual_current_run_until(&driver, 1300U) != 0 ||
+        advance_with_startup_trace(&driver, 1300U, trace) != 0 ||
         !lifecycle(&driver, FOC_RUNTIME_ACTION_ARM, mode, 1400U) ||
+        (trace != NULL && trace->startup &&
+         startup_cycle(trace, &driver, &driver.target_a) != 0) ||
         publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
-        foc_virtual_current_run_until(&driver, 1600U) != 0 ||
+        advance_with_startup_trace(&driver, 1600U, trace) != 0 ||
         !lifecycle(&driver, FOC_RUNTIME_ACTION_START, mode, start_us)) {
         return -1;
     }
@@ -399,7 +485,8 @@ static int compare_run(
     unsigned int tail_count = 0U;
     if (trace != NULL) {
         const struct foc_vector_dq command = {0.0f, target};
-        if (trace_cycle(trace, &driver, 0U, &command) != 0) {
+        if ((trace->startup ? startup_cycle(trace, &driver, &command)
+                            : trace_cycle(trace, &driver, 0U, &command)) != 0) {
             return -2;
         }
     }
@@ -426,7 +513,8 @@ static int compare_run(
             for (uint32_t tick = elapsed - 800U; tick <= elapsed; tick += 200U) {
                 const struct foc_vector_dq command = {0.0f, reference};
                 if (foc_virtual_current_run_until(&driver, start_us + tick) != 0 ||
-                    trace_cycle(trace, &driver, tick, &command) != 0) {
+                    (trace->startup ? startup_cycle(trace, &driver, &command)
+                                    : trace_cycle(trace, &driver, tick, &command)) != 0) {
                     return -2;
                 }
             }
@@ -475,7 +563,7 @@ static int compare_run(
     result->updates = driver.output.accepted_updates;
     result->saturated = driver.output.saturated_updates;
     if (foc_virtual_current_request_stop(&driver) != 0 ||
-        foc_virtual_current_run_until(&driver, driver.virtual_time_us + 1000U) != 0) {
+        advance_with_startup_trace(&driver, driver.virtual_time_us + 1000U, trace) != 0) {
         return -4;
     }
     struct foc_runtime_snapshot stopped;
@@ -483,7 +571,7 @@ static int compare_run(
         stopped.state == FOC_SAFE_STATE_DISABLED && stopped.output_confirmed &&
         driver.output.mode == FOC_VIRTUAL_OUTPUT_HIGH_Z &&
         driver.output.accepted_updates == result->updates;
-    if (trace != NULL) {
+    if (trace != NULL && !trace->startup) {
         const struct foc_vector_dq revoked = {0};
         if (trace_cycle(trace, &driver, duration_us + 1000U, &revoked) != 0) {
             return -4;
@@ -865,6 +953,84 @@ static int current_study(
     return current_holdout(output, profile, full, &lut);
 }
 
+static int current_startup_study(
+    FILE *output,
+    const struct foc_virtual_current_profile *original,
+    const struct foc_cal_application_candidate *approved,
+    const struct foc_virtual_calibration *session
+)
+{
+    struct foc_encoder_lut lut;
+    if (foc_encoder_cal_make_lut(&session->workflow.result.lut, &lut) != FOC_ENCODER_CAL_OK ||
+        fputs(
+            "scenario,direction,time_us,h0_us,sample_us,h1_us,encoder_us,command_seen,"
+            "published_us,consumed_us,state,action,output_confirmed,faults,session,updates,"
+            "applied,model_apply_us,adc_seen,near_voltage_cap,iq_ref_a,iq_adc_a,iq_plant_a,"
+            "voltage_v,voltage_limit_v,id_integral_v,iq_integral_v,shaft_speed_rad_s,"
+            "vbus_v,current_limit_a\n",
+            output
+        ) < 0) {
+        return -1;
+    }
+    static const struct {
+        const char *name;
+        float reference_a;
+        float reverse_a;
+    } scenarios[] = {
+        {"cold_small", 0.15f, 0.0f},
+        {"cold_nominal", 0.45f, 0.0f},
+        {"cold_large", 2.20f, 0.0f},
+        {"running_reverse", 0.45f, 0.45f},
+        {"limited_reverse", 2.20f, 0.35f},
+        {"mismatch_fast_electrical", 0.45f, 0.0f},
+        {"mismatch_slow_electrical", 0.45f, 0.0f},
+    };
+    for (unsigned int i = 0U; i < sizeof scenarios / sizeof scenarios[0]; ++i) {
+        struct foc_virtual_current_profile profile = *original;
+        struct foc_cal_application_candidate variant = *approved;
+        struct calibrated_init init = {.candidate = &variant, .restored_lut = &lut};
+        if (i == 4U) {
+            profile.vbus_v = 6.1f;
+            variant.pipeline.current.pwm.voltage_limit_v = 0.72f;
+        } else if (i == 5U) {
+            profile.motor.rs_ohm *= 1.25;
+            profile.motor.ld_h *= 0.80;
+            profile.motor.lq_h *= 0.75;
+        } else if (i == 6U) {
+            profile.motor.rs_ohm *= 0.80;
+            profile.motor.ld_h *= 1.20;
+            profile.motor.lq_h *= 1.25;
+        }
+        for (int direction = -1; direction <= 1; direction += 2) {
+            const struct current_stimulus stimulus = {
+                .change_us = scenarios[i].reverse_a > 0.0f ? 30000U : 0U,
+                .second_current_a = -scenarios[i].reverse_a * (float)direction,
+            };
+            const struct cycle_trace trace = {
+                .output = output,
+                .group = direction > 0 ? "positive" : "negative",
+                .scenario = scenarios[i].name,
+                .stimulus = &stimulus,
+                .startup = true,
+            };
+            struct control_metrics metrics;
+            if (compare_run(
+                    &profile,
+                    &init,
+                    FOC_RUNTIME_MODE_CURRENT,
+                    scenarios[i].reference_a * (float)direction,
+                    60000U,
+                    0.04,
+                    &metrics,
+                    &trace
+                ) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static void print_parameters(const struct foc_virtual_calibration *session)
 {
     const struct foc_cal_workflow_bundle *bundle = &session->workflow.result;
@@ -968,7 +1134,8 @@ static int run_control(
     struct calibrated_init *init,
     struct foc_virtual_calibration *session,
     const char *save_config,
-    const char *current_study_path
+    const char *current_study_path,
+    bool startup_study
 )
 {
     struct foc_virtual_current driver = {0};
@@ -989,7 +1156,9 @@ static int run_control(
         if (trace == NULL) {
             return error("CURRENT_STUDY_IO", "CONTROL", -1);
         }
-        const int status = current_study(trace, profile, init, session);
+        const int status = startup_study
+            ? current_startup_study(trace, profile, init->candidate, session)
+            : current_study(trace, profile, init, session);
         const int closed = fclose(trace);
         if (status != 0 || closed != 0) {
             return error("CURRENT_STUDY_FAILED", "CONTROL", status);
@@ -1072,11 +1241,143 @@ static int draft_candidate(
         : FOC_CAL_APPLICATION_ERR_REVIEW;
 }
 
+static bool read_operating_point(
+    char **fields,
+    enum foc_pmsm_target_kind kind,
+    struct foc_pmsm_operating_point *point
+)
+{
+    float values[4];
+    for (unsigned int i = 0U; i < 4U; ++i) {
+        char *end;
+        errno = 0;
+        values[i] = strtof(fields[i], &end);
+        if (end == fields[i] || *end != '\0' || errno == ERANGE || !isfinite(values[i])) {
+            return false;
+        }
+    }
+    *point = (struct foc_pmsm_operating_point){kind, values[0], values[1], values[2], values[3]};
+    return point->vbus_v > 0.0f;
+}
+
+static void report_reachability(
+    const struct foc_virtual_calibration_package *package,
+    const struct foc_pmsm_operating_point *point
+)
+{
+    const struct foc_cal_application_candidate *candidate = &package->candidate;
+    const struct foc_cal_application_gains *gains = &candidate->gains;
+    const struct foc_runtime_motion_config *motion = &candidate->runtime.config.motion;
+    const bool torque = point->kind == FOC_PMSM_TARGET_TORQUE;
+    const struct foc_pmsm_qualified_model model = {
+        .rs_ohm = gains->model.rs_ohm,
+        .ld_h = gains->model.ld_h,
+        .lq_h = gains->model.lq_h,
+        .flux_wb = package->flux_wb,
+        .pole_pairs = motion->rotor.pole_pairs,
+        .motor_id = gains->identity.motor_setup_id,
+        .review_id = package->review_id,
+        .qualified = !torque || motion->impedance.enabled,
+    };
+    struct foc_pmsm_reachability_limits limits = {
+        .pwm = candidate->pipeline.current.pwm,
+        .current_limit_a = candidate->pipeline.current.current_limit_a,
+    };
+    limits.pwm.vbus_min_v = fmaxf(limits.pwm.vbus_min_v, candidate->pipeline.adc.vbus_min_v);
+    if (torque) {
+        limits.current_limit_a = fminf(limits.current_limit_a, motion->iq_limit_a);
+        limits.torque_limit_nm = motion->impedance.torque_limit_nm;
+    }
+    struct foc_pmsm_reachability report;
+    (void)foc_pmsm_reachability_evaluate(&model, &limits, point, &report);
+    static const char *const verdicts[] = {
+        "INDETERMINATE",
+        "MODEL_FEASIBLE",
+        "MODEL_INFEASIBLE",
+    };
+    printf(
+        "{\"event\":\"REACHABILITY\",\"version\":1,\"source\":\"HOST_CONFIG_V1\","
+        "\"configuration_applied\":false,\"physical_applied\":false,"
+        "\"assumption\":\"STEADY_STATE_ZERO_DQ_CURRENT_DERIVATIVES\","
+        "\"control_mode\":\"%s\",\"verdict\":\"%s\",\"reason_bits\":%" PRIu32 ","
+        "\"motor_setup_id\":%" PRIu32 ",\"review_id\":\"%08" PRIx32 "\","
+        "\"mechanical_rad_s\":%.9g,\"electrical_rad_s\":%.9g,\"vbus_v\":%.9g,"
+        "\"target\":%.9g,\"id_a\":%.9g,\"iq_a\":%.9g,\"current_a\":%.9g,\"torque_nm\":%.9g,"
+        "\"torque_per_q_amp\":%.9g,"
+        "\"resistive_dq_v\":[%.9g,%.9g],\"coupled_dq_v\":[%.9g,%.9g],\"back_emf_q_v\":%.9g,"
+        "\"required_dq_v\":[%.9g,%.9g],\"required_v\":%.9g,\"margin_v\":%.9g,"
+        "\"all_angle_limit_v\":%.9g,\"best_angle_limit_v\":%.9g,\"near_voltage_limit\":%s,"
+        "\"configured_limits\":{\"current_a\":%.9g,\"voltage_v\":%.9g,"
+        "\"min_vbus_v\":%.9g,\"duty_min\":%.9g,\"duty_max\":%.9g,\"torque_nm\":%.9g},"
+        "\"range_valid\":%s,\"iq_range_a\":[%.9g,%.9g],\"torque_range_nm\":[%.9g,%.9g],"
+        "\"reasons\":[",
+        torque ? "impedance" : "current",
+        verdicts[report.verdict],
+        report.reasons,
+        report.motor_id,
+        report.review_id,
+        (double)point->mechanical_rad_s,
+        report.electrical_rad_s,
+        (double)point->vbus_v,
+        (double)point->target,
+        report.id_a,
+        report.iq_a,
+        report.current_a,
+        report.torque_nm,
+        report.torque_per_q_amp,
+        report.resistive_d_v,
+        report.resistive_q_v,
+        report.coupled_d_v,
+        report.coupled_q_v,
+        report.back_emf_q_v,
+        report.vd_v,
+        report.vq_v,
+        report.demanded_v,
+        report.voltage_margin_v,
+        report.all_angle_limit_v,
+        report.best_angle_limit_v,
+        report.near_voltage_limit ? "true" : "false",
+        (double)limits.current_limit_a,
+        (double)limits.pwm.voltage_limit_v,
+        (double)limits.pwm.vbus_min_v,
+        (double)limits.pwm.duty_min,
+        (double)limits.pwm.duty_max,
+        (double)limits.torque_limit_nm,
+        report.range_valid ? "true" : "false",
+        report.iq_min_a,
+        report.iq_max_a,
+        report.torque_min_nm,
+        report.torque_max_nm
+    );
+    static const struct {
+        uint32_t bit;
+        const char *name;
+    } reasons[] = {
+        {FOC_PMSM_REASON_MODEL_UNQUALIFIED, "MODEL_UNQUALIFIED"},
+        {FOC_PMSM_REASON_INVALID_INPUT, "INVALID_INPUT"},
+        {FOC_PMSM_REASON_BUS_MINIMUM, "BUS_MINIMUM"},
+        {FOC_PMSM_REASON_CURRENT_LIMIT, "CURRENT_LIMIT"},
+        {FOC_PMSM_REASON_TORQUE_LIMIT, "TORQUE_LIMIT"},
+        {FOC_PMSM_REASON_VOLTAGE_LIMIT, "VOLTAGE_LIMIT"},
+        {FOC_PMSM_REASON_ANGLE_DEPENDENT, "ANGLE_DEPENDENT"},
+        {FOC_PMSM_REASON_TORQUE_UNDEFINED, "TORQUE_UNDEFINED"},
+    };
+    const char *separator = "";
+    for (unsigned int i = 0U; i < sizeof reasons / sizeof reasons[0]; ++i) {
+        if ((report.reasons & reasons[i].bit) != 0U) {
+            printf("%s\"%s\"", separator, reasons[i].name);
+            separator = ",";
+        }
+    }
+    puts("]}");
+}
+
 static int restore(
     const char *path,
     struct foc_virtual_current_profile *profile,
     const struct foc_cal_workflow_identity *identity,
-    const char *approved
+    const char *approved,
+    const struct foc_pmsm_operating_point *diagnostic
 )
 {
     struct foc_virtual_calibration_package package;
@@ -1097,6 +1398,10 @@ static int restore(
         (double)package.inertia_kg_m2,
         (double)package.damping_nm_s
     );
+    if (diagnostic != NULL) {
+        report_reachability(&package, diagnostic);
+        return 0;
+    }
     print_candidate(&package.candidate, package.review_id);
     if (approved == NULL) {
         puts("{\"event\":\"REVIEW_REQUIRED\",\"configuration_applied\":false}");
@@ -1114,7 +1419,7 @@ static int restore(
         .candidate = &package.candidate,
         .restored_lut = &package.lut,
     };
-    return run_control(profile, &init, NULL, NULL, NULL);
+    return run_control(profile, &init, NULL, NULL, NULL, false);
 }
 
 struct endpoint_trace {
@@ -1160,6 +1465,10 @@ int main(int argc, char *argv[])
     const char *current_study_path = NULL;
     const char *approved = NULL;
     bool use_cogging = false;
+    bool startup_study = false;
+    bool capabilities = false;
+    struct foc_pmsm_operating_point point;
+    const struct foc_pmsm_operating_point *diagnostic = NULL;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--profile-id") == 0 && i + 1 < argc) {
             profile_name = argv[++i];
@@ -1171,7 +1480,26 @@ int main(int argc, char *argv[])
             save_config = argv[++i];
         } else if (strcmp(argv[i], "--load-config") == 0 && i + 1 < argc) {
             load_config = argv[++i];
-        } else if (strcmp(argv[i], "--cq-current-csv") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--capabilities") == 0) {
+            capabilities = true;
+        } else if (strcmp(argv[i], "--reachability") == 0 ||
+                   strcmp(argv[i], "--reachability-torque") == 0) {
+            const bool torque = strcmp(argv[i], "--reachability-torque") == 0;
+            if (diagnostic != NULL || argc - i <= 4 ||
+                !read_operating_point(
+                    &argv[i + 1], torque ? FOC_PMSM_TARGET_TORQUE : FOC_PMSM_TARGET_CURRENT, &point
+                )) {
+                return error("INVALID_REACHABILITY_POINT", "SETUP", -1);
+            }
+            if (torque && point.id_a != 0.0f) {
+                return error("IMPEDANCE_REQUIRES_ZERO_ID", "SETUP", -1);
+            }
+            diagnostic = &point;
+            i += 4;
+        } else if ((strcmp(argv[i], "--cq-current-csv") == 0 ||
+                    strcmp(argv[i], "--cq-startup-csv") == 0) &&
+                   i + 1 < argc && current_study_path == NULL) {
+            startup_study = strcmp(argv[i], "--cq-startup-csv") == 0;
             current_study_path = argv[++i];
         } else if (strcmp(argv[i], "--trace") == 0 && i + 1 < argc) {
             trace_path = argv[++i];
@@ -1185,6 +1513,25 @@ int main(int argc, char *argv[])
     struct foc_virtual_current_profile profile;
     struct foc_cal_workflow_request request;
     struct foc_virtual_calibration session = {0};
+    if (capabilities) {
+        if (load_config != NULL || approved != NULL || save_config != NULL ||
+            current_study_path != NULL || trace_path != NULL || cancel_after != NULL ||
+            use_cogging || diagnostic != NULL) {
+            return error("CAPABILITIES_IS_READ_ONLY", "SETUP", -1);
+        }
+        puts(
+            "{\"event\":\"HOST_CAPABILITIES\",\"version\":1,\"source\":\"HOST_VIRTUAL\","
+            "\"profiles\":[\"GENERIC_RESEARCH_MOTOR\",\"CALIBRATION_SALIENT_MOTOR\"],"
+            "\"virtual_modes\":[\"current\",\"velocity\",\"position\",\"impedance\"],"
+            "\"config_format\":\"FCAL_V1\",\"reachability_version\":1,"
+            "\"review_required_to_apply\":true,\"physical_applied\":false,"
+            "\"output_locked_on_board1\":true,\"mcu_flash\":false,\"target_wcet_verified\":false}"
+        );
+        return 0;
+    }
+    if (diagnostic != NULL && (load_config == NULL || approved != NULL)) {
+        return error("REACHABILITY_REQUIRES_LOAD_ONLY", "SETUP", -1);
+    }
     if ((save_config != NULL && approved == NULL) ||
         (current_study_path != NULL && (approved == NULL || load_config != NULL)) ||
         (load_config != NULL &&
@@ -1196,7 +1543,7 @@ int main(int argc, char *argv[])
     }
     profile.runtime.motion.impedance.damping_filter_hz = 48.0f;
     if (load_config != NULL) {
-        return restore(load_config, &profile, &request.identity, approved);
+        return restore(load_config, &profile, &request.identity, approved, diagnostic);
     }
     if (foc_virtual_calibration_start(&session, &profile, &request) != FOC_VIRTUAL_CAL_PENDING) {
         return error("INVALID_PROFILE_OR_RUNTIME", "SETUP", session.status);
@@ -1305,7 +1652,7 @@ int main(int argc, char *argv[])
         .policy = &policy,
         .candidate = &candidate,
     };
-    return run_control(&profile, &init, &session, save_config, current_study_path);
+    return run_control(&profile, &init, &session, save_config, current_study_path, startup_study);
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

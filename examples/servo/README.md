@@ -4,6 +4,8 @@
 Control Plane, Core, Runtime, Encoder, and Virtual Motor APIs. The default run
 compares the same impedance reference with explicit model feedforward enabled
 and disabled. `--inspect` lists capabilities and parameter readback.
+The Host example configures the Runtime's 48 Hz impedance damping filter.
+Inspection reports the effective cutoff in Hz.
 `--iq-limit AMPS` sets an initial candidate for inspection or normal runs.
 `--faults` exercises rejection and fault handling. `--recovery` clears a
 qualified command timeout on the same Runtime and explicitly arms and starts

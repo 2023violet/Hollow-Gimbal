@@ -740,12 +740,13 @@ def run_virtual_demo(
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
-    if args.load_config and (args.save_config or args.cancel_after or args.cogging or args.trace):
+    if args.load_config and (args.save_config or args.cancel_after or args.cogging
+                             or args.trace or args.startup_trace):
         parser.error("--load-config cannot be combined with --save-config or capture options")
     if args.save_config and not args.approve_candidate:
         parser.error("--save-config requires --approve-candidate")
     reports = [pathlib.Path(path).resolve() for path in
-               (args.json, args.save_config, args.load_config, args.trace) if path]
+               (args.json, args.save_config, args.load_config, args.trace, args.startup_trace) if path]
     if len(reports) != len(set(reports)):
         parser.error("report and configuration paths must be distinct")
     command = [str(pathlib.Path(args.simulator).resolve()), "--profile-id", args.profile_id]
@@ -753,22 +754,48 @@ def calibrate_host(args, parser):
         command.extend(("--approve-candidate", args.approve_candidate))
     if args.cogging:
         command.append("--cogging")
+    if args.capabilities:
+        command.append("--capabilities")
     for key, value in (("--save-config", args.save_config), ("--load-config", args.load_config),
-                       ("--cancel-after", args.cancel_after), ("--trace", args.trace)):
+                       ("--cancel-after", args.cancel_after), ("--trace", args.trace),
+                       ("--cq-startup-csv", args.startup_trace)):
         if value is not None:
             command.extend((key, value))
-    process = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
-    events = [json.loads(line) for line in process.stdout.splitlines()]
+    for option, point in (("--reachability", args.reachability),
+                          ("--reachability-torque", args.reachability_torque)):
+        if point is not None:
+            command.extend((option, *point))
+    stderr = ""
+    try:
+        process = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+        stderr = process.stderr
+    except OSError:
+        events = [{"error": "SIMULATOR_START_FAILED", "stage": "HOST_RUNNER"}]
+        exit_status = 2
+    except subprocess.TimeoutExpired:
+        events = [{"error": "SIMULATOR_TIMEOUT", "stage": "HOST_RUNNER"}]
+        exit_status = 2
+    else:
+        exit_status = process.returncode
+        try:
+            events = [json.loads(line) for line in process.stdout.splitlines()]
+            if not events or any(not isinstance(item, dict) or
+                                 ("event" not in item and "error" not in item) for item in events):
+                raise ValueError("missing calibration event")
+        except ValueError:
+            events = [{"error": "SIMULATOR_PROTOCOL_ERROR", "stage": "HOST_RUNNER",
+                       "runner_exit_status": process.returncode}]
+            exit_status = 2
     for event in events:
         print(json.dumps(event, allow_nan=False))
-    if process.stderr:
-        print(process.stderr, file=sys.stderr, end="")
+    if stderr:
+        print(stderr, file=sys.stderr, end="")
     if args.json:
         with pathlib.Path(args.json).open("x", encoding="utf-8") as report:
-            json.dump({"events": events, "exit_status": process.returncode},
+            json.dump({"events": events, "exit_status": exit_status},
                       report, indent=2, allow_nan=False)
             report.write("\n")
-    return process.returncode
+    return exit_status
 
 
 def main():
@@ -825,7 +852,19 @@ def main():
     parser.add_argument("--cancel-after", help="Cancel a virtual calibration after the named stage")
     parser.add_argument("--cogging", action="store_true", help="Capture and apply a virtual cogging LUT")
     parser.add_argument("--trace", help="Export the d/q terminal voltage and ADC aperture CSV")
+    parser.add_argument("--startup-trace", help="Export the approved Host Current Startup V1 CSV")
+    diagnostic = parser.add_mutually_exclusive_group()
+    diagnostic.add_argument("--capabilities", action="store_true", help="Inspect Host calibration capabilities")
+    diagnostic.add_argument("--reachability", nargs=4, metavar=("MECH_RAD_S", "ID_A", "IQ_A", "VBUS_V"),
+                            help="Evaluate a steady Current point from --load-config")
+    diagnostic.add_argument("--reachability-torque", nargs=4,
+                            metavar=("MECH_RAD_S", "ZERO_ID", "TORQUE_NM", "VBUS_V"),
+                            help="Evaluate a steady Impedance torque point from --load-config")
     args = parser.parse_args()
+    if args.action != "calibrate" and any(
+        (args.capabilities, args.reachability, args.reachability_torque, args.startup_trace)
+    ):
+        parser.error("Host calibration diagnostic options require calibrate")
     try:
         if args.action == "calibrate":
             return calibrate_host(args, parser)

@@ -112,6 +112,14 @@ int main(void)
     CHECK(fabsf(measurement.phase_current_a.a - alpha) < 0.01f);
     CHECK(fabsf(measurement.phase_current_a.b - phase_b) < 0.01f);
     CHECK(fabsf(measurement.phase_current_a.c - phase_c) < 0.01f);
+    const uint16_t abc_b = raw.rank3_raw;
+    const uint16_t abc_c = raw.rank4_raw;
+    CHECK(abc_b != abc_c);
+    CHECK(foc_virtual_motor_make_adc(&motor, &acb, 12.0f, 4U, 800U, &raw) == 0);
+    CHECK(raw.rank3_raw == abc_c && raw.rank4_raw == abc_b);
+    CHECK(foc_device_decode_sample(&raw, &acb, &measurement) == FOC_DEVICE_STATUS_OK);
+    CHECK(fabsf(measurement.phase_current_a.b - phase_b) < 0.01f);
+    CHECK(fabsf(measurement.phase_current_a.c - phase_c) < 0.01f);
     return 0;
 }
 

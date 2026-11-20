@@ -4,6 +4,14 @@
 
 [工作流公开头](include/foc_calibration_workflow.h) · [应用公开头](../control_plane/include/foc_calibration_application.h) · [独立 Host 运行示例](../examples/calibration-workflow/README.md)
 
+## Host 执行入口
+
+使用 [falconfoc-cli calibrate](../tools/falconfoc-cli/README.md#host-motor-calibration-and-foc) 启动独占虚拟采集。Foreground 每次推进一个有界阶段。采集器将实际虚拟 ADC、Encoder、端电压和独立虚拟仪器读数交给工作流。方向、机械与电角参考来自分别声明的采集通道。电气 d/q 阶段使用真实约束转子的独立窗口。Rs 一致性检查通过后合并两轴用于 PI 设计。磁链由正反转的端电压与电角速度辨识，Ke 和 Kt 按声明峰值约定派生。机械拟合使用独立的等效轴转矩与有符号负载观测。
+
+旧调用可继续提交单轴。新 Host 请求用 `require_dual_axis` 将电气阶段的通过条件扩充到两个独立 Capture 及合格的 Rs/Ld/Lq 模型。第一轴成功时返回 `PARTIAL`，仅第二轴及联合模型通过后标记阶段合格。线上协议和历史 Measurement Trace v1 的单轴数据及阶段编号沿用原契约。
+
+审核后的数据通过 `foc_cal_application_prepare_tuned()` 验证 PI 带宽、采样和更新延迟、电压与电流余量，并按 J/B、Kt 生成外环候选。应用时复算审核过的参数，通过初始化期的显式 Host 适配器绑定新实例。K/D 经正式 Impedance 指令消费。可选齿槽表在 H1 使用独立采集、Holdout 和身份检查，沿用 Motion 和 Safety 准入。FCAL v1 保存和重载属于 Host 工作流。
+
 ## 能力与获取边界
 
 | 阶段 | 已有 API | 必需观测及身份 | 候选和质量 |
@@ -49,4 +57,4 @@ flowchart TD
 4. `foc_cal_application_apply()` 复核旧快照、当前工作流和已签收的身份，在独立、清零的存储上显式初始化 Host Runtime/Encoder。新实例沿用原 Pipeline 的控制与保护政策，以关闭输出回调的 Host Mock 初始化。Encoder LUT 复制到调用方新 Sensor 存储，调用方保持该地址和内容稳定。读取新旧实例分辨 `CANDIDATE_ACCEPTED` 和 `CONFIGURATION_APPLIED`。
 5. SOFT-03 Schema 2 继续只能存现有运动保护及限制。极对数、电角零点和 Kt 用于现有记录的适用身份。校准后的这些身份字段改变时，旧策略的 Store 检查可能报身份不匹配，属于预期独立结果。ADC 偏置、Encoder LUT、Rs/L、J/B、K/D 推荐和采集质量需要单独审核的新配置版本。Workflow 和应用适配器均没有写入动作。
 
-新 Runtime 初始化保留 SOFT-02 配置。静态 K/D 上限不由整定结果更改，推荐值留给调用方评估。新实例以软件 INHIBIT 启动，运行仍需现有许可。参见 [验收和证据](../docs/evidence/2026-11-19-next-soft-05.md)。
+传统应用入口保留原 SOFT-02 控制参数。经审核的 Host 整定入口在新 Runtime 安装 d/q PI、速度和位置增益及 Kt，保留 K/D 静态上限；K/D 候选进入正式控制命令。新实例以软件 INHIBIT 启动，运行仍需现有许可。参见 [验收和证据](../docs/evidence/2026-11-19-next-soft-05.md)。

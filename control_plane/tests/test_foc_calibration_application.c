@@ -14,6 +14,7 @@
 
 #include "foc_calibration_application.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -258,6 +259,289 @@ static int explicit_apply_retains_safety(void)
     return 0;
 }
 
+static int explicit_host_adapter_must_confirm_fresh_inhibit(void)
+{
+    struct fixture fixture = {0};
+    CHECK(fixture_start(&fixture, &request, false) == 0);
+    CHECK(fixture_review(&fixture, 1) == 0);
+    struct fixture new_output = {.reject_inhibit = true};
+    struct foc_cal_application_output output = {count_inhibit, &new_output};
+    struct foc_runtime destination = {0};
+    struct foc_cal_application_sensor sensor = {0};
+    unsigned char runtime_before[sizeof(destination)];
+    unsigned char sensor_before[sizeof(sensor)];
+    memcpy(runtime_before, &destination, sizeof(destination));
+    memcpy(sensor_before, &sensor, sizeof(sensor));
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            NULL,
+            NULL,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_ERR_CONFIG
+    );
+    CHECK(memcmp(runtime_before, &destination, sizeof(destination)) == 0);
+    CHECK(memcmp(sensor_before, &sensor, sizeof(sensor)) == 0);
+    CHECK(new_output.submissions == 1U && fixture.submissions == 1U);
+
+    output.argument = &fixture;
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            NULL,
+            NULL,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_ERR_INPUT
+    );
+    CHECK(fixture.submissions == 1U);
+
+    new_output.reject_inhibit = false;
+    output.argument = &new_output;
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            NULL,
+            NULL,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_APPLIED
+    );
+    foc_runtime_request_inhibit(&destination, 0U);
+    const struct foc_runtime_fast_input stop_input = {
+        .adc = {2400U, 2048U, 2048U, 2048U, FOC_DEVICE_SAMPLE_ALL_VALID, 0U, 20U},
+        .now_us = 20U,
+    };
+    (void)foc_runtime_h0_step(&destination, &stop_input);
+    struct foc_runtime_snapshot stopped;
+    CHECK(foc_runtime_read_snapshot(&destination, &stopped) == FOC_RUNTIME_OK);
+    CHECK(stopped.state == FOC_SAFE_STATE_DISABLED && stopped.output_confirmed);
+    CHECK(new_output.submissions == 3U && fixture.submissions == 1U);
+    return 0;
+}
+
+static int reviewed_dual_axis_and_outer_gains_reach_runtime(void)
+{
+    struct foc_cal_workflow_request setup = request;
+    setup.stages |= FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ELECTRICAL) |
+        FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_MECHANICAL) |
+        FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_TUNING);
+    setup.require_dual_axis = true;
+    setup.max_rs_relative_difference = 0.05f;
+    struct fixture fixture = {0};
+    CHECK(fixture_start(&fixture, &setup, false) == 0);
+    CHECK(fixture_review(&fixture, 1) == 0);
+    struct foc_cal_workflow_bundle *bundle = &fixture.workflow.result;
+    bundle->electrical = (struct foc_motor_id_result){
+        .state = FOC_CALIBRATION_STATE_VALID,
+        .axis = FOC_MOTOR_ID_D,
+        .source = FOC_MOTOR_ID_VIRTUAL,
+        .voltage_source = FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL,
+        .setup_id = setup.identity.motor_setup_id,
+        .capture_id = 101U,
+        .rs_ohm = 0.8f,
+        .inductance_h = 0.0012f,
+        .usable = true,
+    };
+    bundle->electrical_q = bundle->electrical;
+    bundle->electrical_q.axis = FOC_MOTOR_ID_Q;
+    bundle->electrical_q.capture_id = 102U;
+    bundle->electrical_q.inductance_h = 0.0018f;
+    bundle->electrical_model = (struct foc_motor_rl_model){0.8f, 0.0012f, 0.0018f};
+    bundle->stages[FOC_CAL_WORKFLOW_ELECTRICAL].primary.id = 101U;
+    bundle->electrical_q_capture.id = 102U;
+    bundle->mechanical = (struct foc_mechanical_id_result){
+        .state = FOC_CALIBRATION_STATE_VALID,
+        .setup_id = setup.identity.motor_setup_id,
+        .torque_model_id = 301U,
+        .capture_id = 103U,
+        .torque_constant_nm_per_a = 0.2f,
+        .inertia_kg_m2 = 0.005f,
+        .damping_nm_s = 0.01f,
+        .usable = true,
+    };
+    bundle->stages[FOC_CAL_WORKFLOW_MECHANICAL].primary.id = 103U;
+    bundle->kt = (struct foc_cal_workflow_kt){
+        .identity = setup.identity,
+        .torque_model_id = 301U,
+        .nm_per_a = 0.2f,
+        .qualified = true,
+        .source = FOC_CAL_WORKFLOW_HOST_VIRTUAL_MEASUREMENT,
+        .capture = 104U,
+    };
+    const struct foc_impedance_tuning_input impedance = {
+        .model_id = 301U,
+        .damping_source = FOC_IMPEDANCE_TUNING_DAMPING_PROVIDED,
+        .inertia_kg_m2 = 0.005f,
+        .viscous_damping_nm_s_per_rad = 0.01f,
+        .target_natural_frequency_rad_s = 8.0f,
+        .target_damping_ratio = 0.75f,
+        .torque_constant_nm_per_a = 0.2f,
+        .max_stiffness_nm_per_rad = 1.0f,
+        .max_damping_nm_s_per_rad = 0.3f,
+        .iq_limit_a = 1.25f,
+        .sample_period_s = 0.00025f,
+        .extra_delay_s = 0.00005f,
+    };
+    CHECK(foc_impedance_tuning_design(&impedance, &bundle->tuning) == FOC_IMPEDANCE_TUNING_OK);
+    struct foc_cal_application_tuning_policy policy = {
+        .current = {100.0f, 0.00013f, 0.00004f, 0.2f, 0.5f},
+        .max_rs_relative_difference = 0.05f,
+        .velocity_natural_frequency_rad_s = 20.0f,
+        .velocity_damping_ratio = 0.8f,
+        .position_bandwidth_rad_s = 3.0f,
+        .outer_extra_delay_s = 0.00005f,
+        .tune_outer = true,
+    };
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    struct foc_runtime_cogging_lut cogging = {
+        .motor_id = setup.identity.motor_setup_id,
+        .mechanical_frame_id = setup.identity.mechanical_frame_id,
+        .training_capture_id = 201U,
+        .holdout_capture_id = 202U,
+        .qualified = true,
+        .torque_nm = {0.05f},
+    };
+    policy.cogging_lut = &cogging;
+    policy.cogging_iq_limit_a = 0.4f;
+#endif
+    struct foc_cal_application_candidate candidate;
+    CHECK(
+        foc_cal_application_prepare_tuned(&fixture.application, &policy, &candidate) ==
+        FOC_CAL_APPLICATION_PREPARED
+    );
+    ++bundle->electrical_q_capture.id;
+    CHECK(
+        foc_cal_application_prepare_tuned(&fixture.application, &policy, &candidate) ==
+        FOC_CAL_APPLICATION_ERR_TUNING
+    );
+    --bundle->electrical_q_capture.id;
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    ++cogging.mechanical_frame_id;
+    CHECK(
+        foc_cal_application_prepare_tuned(&fixture.application, &policy, &candidate) ==
+        FOC_CAL_APPLICATION_ERR_TUNING
+    );
+    --cogging.mechanical_frame_id;
+#endif
+    CHECK(fabsf(candidate.gains.current.kp_d_v_per_a - 0.753982f) < 0.00001f);
+    CHECK(fabsf(candidate.gains.current.kp_q_v_per_a - 1.130973f) < 0.00001f);
+    CHECK(fabsf(candidate.gains.current.ki_v_per_a_s - 502.65482f) < 0.0001f);
+    CHECK(fabsf(candidate.gains.velocity.kp_a_per_rad_s - 0.75f) < 0.00001f);
+    CHECK(fabsf(candidate.gains.velocity.ki_a_per_rad - 10.0f) < 0.00001f);
+    CHECK(fabsf(candidate.gains.impedance.stiffness_nm_per_rad - 0.32f) < 0.00001f);
+    CHECK(fabsf(candidate.gains.impedance.damping_nm_s_per_rad - 0.05f) < 0.00001f);
+    CHECK(candidate.gains.position.kp_per_s == 3.0f);
+
+    struct fixture new_output = {0};
+    const struct foc_cal_application_output output = {count_inhibit, &new_output};
+    struct foc_runtime destination = {0};
+    struct foc_cal_application_sensor sensor = {0};
+    struct foc_cal_application_gains rejected = candidate.gains;
+    rejected.current.kp_q_v_per_a = rejected.current.kp_d_v_per_a;
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            &policy,
+            &rejected,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_ERR_REVIEW
+    );
+    policy.current.available_voltage_v = 2.4f;
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            &policy,
+            &candidate.gains,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_ERR_TUNING
+    );
+    policy.current.available_voltage_v = 0.5f;
+    CHECK(new_output.submissions == 0U && !destination.initialized && !sensor.encoder.initialized);
+    CHECK(
+        foc_cal_application_apply_with_output(
+            &fixture.application,
+            &policy,
+            &candidate.gains,
+            &output,
+            &destination,
+            &sensor,
+            20U
+        ) == FOC_CAL_APPLICATION_APPLIED
+    );
+    struct foc_runtime_diagnostic diagnostic;
+    CHECK(foc_runtime_diagnose(&destination, &diagnostic) == FOC_RUNTIME_OK);
+    CHECK(destination.pipeline.current.config.kp_v_per_a.d == candidate.gains.current.kp_d_v_per_a);
+    CHECK(destination.pipeline.current.config.kp_v_per_a.q == candidate.gains.current.kp_q_v_per_a);
+    CHECK(
+        destination.pipeline.current.config.ki_v_per_a_s.d == candidate.gains.current.ki_v_per_a_s
+    );
+    CHECK(
+        destination.pipeline.current.config.ki_v_per_a_s.q == candidate.gains.current.ki_v_per_a_s
+    );
+    CHECK(
+        destination.outer_velocity.config.kp_a_per_rad_s == candidate.gains.velocity.kp_a_per_rad_s
+    );
+    CHECK(diagnostic.effective.motion.position.kp_per_s == 3.0f);
+    CHECK(diagnostic.effective.motion.impedance.torque_constant_nm_per_a == 0.2f);
+    CHECK(diagnostic.effective.motion.impedance.torque_limit_nm == 0.4f);
+    CHECK(diagnostic.effective.motion.iq_limit_a == 1.25f);
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    CHECK(diagnostic.effective.motion.cogging.enabled);
+    CHECK(diagnostic.effective.motion.cogging.lut.torque_nm[0] == 0.05f);
+    CHECK(diagnostic.effective.motion.cogging.lut.holdout_capture_id == 202U);
+#endif
+
+    struct foc_runtime restored = {0};
+    struct foc_cal_application_sensor restored_sensor = {0};
+    CHECK(
+        foc_cal_application_restore(
+            &candidate,
+            setup.identity.encoder_id,
+            NULL,
+            &output,
+            &restored,
+            &restored_sensor,
+            30U
+        ) == FOC_CAL_APPLICATION_APPLIED
+    );
+    CHECK(
+        restored.pipeline.current.config.kp_v_per_a.q ==
+        destination.pipeline.current.config.kp_v_per_a.q
+    );
+    CHECK(restored.config.motion.impedance.torque_constant_nm_per_a == 0.2f);
+    struct foc_runtime invalid_destination = {0};
+    struct foc_cal_application_sensor invalid_sensor = {0};
+    candidate.runtime.config.motion.velocity.max_dt_s = 0.0f;
+    CHECK(
+        foc_cal_application_restore(
+            &candidate,
+            setup.identity.encoder_id,
+            NULL,
+            &output,
+            &invalid_destination,
+            &invalid_sensor,
+            40U
+        ) == FOC_CAL_APPLICATION_ERR_CONFIG
+    );
+    CHECK(new_output.submissions == 2U);
+    CHECK(!invalid_destination.initialized && !invalid_sensor.encoder.initialized);
+    return 0;
+}
+
 static int installed_lut_survives_workflow_restart(void)
 {
     struct foc_cal_workflow_request setup = request;
@@ -400,6 +684,8 @@ static int rejected_apply_preserves_destinations(void)
 int main(void)
 {
     return rejects_observer_hook_without_calling_it() || explicit_apply_retains_safety() ||
+        explicit_host_adapter_must_confirm_fresh_inhibit() ||
+        reviewed_dual_axis_and_outer_gains_reach_runtime() ||
         installed_lut_survives_workflow_restart() || rejected_apply_preserves_destinations();
 }
 

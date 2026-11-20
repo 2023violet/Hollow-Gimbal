@@ -46,7 +46,16 @@ struct foc_virtual_current_profile {
     struct foc_virtual_motor_state initial_state;
     double load_torque_nm;
     float vbus_v;
+    /** Physical ADC scale and bias, independent of Runtime correction. */
     struct foc_device_adc_config adc;
+    /** Deterministic count noise, zero disables. */
+    uint16_t adc_noise_counts;
+    /** Use the shaft coordinate whose first measured point is in [-pi, pi). */
+    bool signed_mechanical_origin;
+    /** Optional Host plant disturbance, independent of the controller's LUT. */
+    double cogging_amplitude_nm;
+    unsigned int cogging_cycles_per_turn;
+    double cogging_phase_rad;
     struct foc_device_pwm_config pwm;
     struct foc_encoder_config encoder;
     struct foc_current_config current;
@@ -150,9 +159,21 @@ struct foc_virtual_current {
     float motion_ref;
     uint32_t replay_hash;
     bool fail_next_sensor;
+    bool mechanical_origin_seen;
+    float mechanical_origin_shift_rad;
     struct foc_virtual_fault_events fault_events;
     bool initialized;
 };
+
+/**
+ * Cold-path initialization using the supplied Host adapter and fresh storage.
+ * On success, a borrowed encoder LUT remains valid for the driver lifetime.
+ */
+typedef int (*foc_virtual_current_initializer_t)(void *argument,
+                                                 struct foc_runtime *runtime,
+                                                 struct foc_encoder_context *encoder,
+                                                 const struct foc_pipeline_config *pipeline,
+                                                 const struct foc_virtual_current_profile *profile);
 
 /* Public Functions ------------------------------------------------------------- */
 
@@ -162,6 +183,22 @@ struct foc_virtual_current_profile foc_virtual_current_default_profile(void);
 /** Initialize Runtime, Plant, Encoder, and an accepted initial INHIBIT. */
 int foc_virtual_current_init(struct foc_virtual_current *context,
                              const struct foc_virtual_current_profile *profile);
+
+/** Initialize zeroed fresh storage using an explicit cold-path owner. */
+int foc_virtual_current_init_with(struct foc_virtual_current *context,
+                                  const struct foc_virtual_current_profile *profile,
+                                  foc_virtual_current_initializer_t initialize,
+                                  void *argument);
+
+/** Observe the same ADC and encoder instruments used by the Runtime driver. */
+int foc_virtual_current_acquire_adc(const struct foc_virtual_current_profile *profile,
+                                    const struct foc_virtual_motor *motor,
+                                    uint32_t sequence,
+                                    uint32_t timestamp_us,
+                                    struct foc_device_adc_raw *raw);
+int foc_virtual_current_acquire_encoder(const struct foc_virtual_current_profile *profile,
+                                        const struct foc_virtual_motor *motor,
+                                        uint16_t *code);
 
 /** Publish a newer d/q current command at the current virtual time. */
 int foc_virtual_current_publish_iq(struct foc_virtual_current *context, float id_a, float iq_a);

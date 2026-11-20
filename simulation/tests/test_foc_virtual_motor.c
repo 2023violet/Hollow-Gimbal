@@ -108,12 +108,53 @@ static int test_load_changes_mechanical_trajectory(void)
     return 0;
 }
 
+static int test_speed_fixture_and_terminal_observation(void)
+{
+    const struct foc_virtual_motor_state initial = {.mechanical_velocity_rad_s = 5.0};
+    struct foc_virtual_motor motor;
+    struct foc_virtual_motor_observation observed;
+    CHECK(foc_virtual_motor_init(&motor, &params, &initial) == 0);
+    CHECK(foc_virtual_motor_set_fixture_speed(&motor, 0.0) == 0);
+    const double expected_load = 0.012;
+    CHECK(foc_virtual_motor_set_load(&motor, expected_load) == 0);
+    const double q_voltage = 1.4;
+    const double alpha = -sin(params.electrical_offset_rad) * q_voltage;
+    const double beta = cos(params.electrical_offset_rad) * q_voltage;
+    for (unsigned int step = 0U; step < 200U; ++step) {
+        CHECK(foc_virtual_motor_step(&motor, alpha, beta, 0.0001) == 0);
+    }
+    CHECK(foc_virtual_motor_observe(&motor, &observed) == 0);
+    CHECK(
+        observed.fixture_active && observed.mechanical_position_rad == 0.0 &&
+        observed.mechanical_velocity_rad_s == 0.0
+    );
+    CHECK(observed.v_alpha_v == alpha && observed.v_beta_v == beta);
+    CHECK(fabs(observed.id_a) < 1.0e-12);
+    CHECK(fabs(observed.iq_a - q_voltage / params.rs_ohm) < 0.001);
+    CHECK(
+        fabs(observed.electromagnetic_torque_nm + observed.fixture_torque_nm - expected_load) <
+        1.0e-12
+    );
+    CHECK(foc_virtual_motor_set_fixture_speed(&motor, -2.0) == 0);
+    CHECK(foc_virtual_motor_step(&motor, 0.0, 0.0, 0.0001) == 0);
+    CHECK(foc_virtual_motor_observe(&motor, &observed) == 0);
+    CHECK(fabs(observed.mechanical_position_rad - -0.0002) < 1.0e-12);
+    CHECK(observed.mechanical_velocity_rad_s == -2.0);
+    foc_virtual_motor_release_fixture(&motor);
+    CHECK(foc_virtual_motor_step(&motor, 0.0, 0.0, 0.0001) == 0);
+    CHECK(foc_virtual_motor_observe(&motor, &observed) == 0);
+    CHECK(!observed.fixture_active && observed.fixture_torque_nm == 0.0);
+    CHECK(observed.mechanical_velocity_rad_s != -2.0);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
 {
     return test_validation_and_zero_input() || test_power_consistency_and_instances() ||
-        test_duty_and_invalid_parameters() || test_load_changes_mechanical_trajectory();
+        test_duty_and_invalid_parameters() || test_load_changes_mechanical_trajectory() ||
+        test_speed_fixture_and_terminal_observation();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

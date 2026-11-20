@@ -34,6 +34,7 @@ add_library(
 target_include_directories(
   falconfoc-pipeline PUBLIC include ../core/include ../g3/np/include ../g3/safe/include
 )
+target_compile_definitions(falconfoc-pipeline PUBLIC FOC_RUNTIME_HOST_COGGING=1)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-pipeline PRIVATE -Wall -Wextra -Wpedantic)

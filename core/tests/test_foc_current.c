@@ -303,6 +303,34 @@ static int test_rejected_steps(void)
     return 0;
 }
 
+static int test_low_voltage_duty_roundoff(void)
+{
+    struct foc_current_config config = test_config();
+    struct foc_current_context context = {0};
+    const struct foc_current_input input = {
+        .phase_current_a = {-0.0240000002f, 0.0659999996f, -0.0420000032f},
+        .theta_elec_rad = 0.37f,
+        .target_a = {0.0f, 0.4f},
+        .vbus_v = 12.0f,
+        .dt_s = 0.0002f,
+    };
+    struct foc_current_output output;
+
+    config.pwm.voltage_limit_v = 0.12f;
+    config.kp_v_per_a = (struct foc_vector_dq){1.08f, 1.35f};
+    config.ki_v_per_a_s = (struct foc_vector_dq){540.0f, 540.0f};
+    TEST_ASSERT(foc_current_init(&context, &config) == FOC_STATUS_OK);
+    TEST_ASSERT(foc_current_step(&context, &input, &output) == FOC_STATUS_OK);
+    TEST_ASSERT(output.output_enable == 1U && output.svpwm.saturated == 1U);
+    const double ab = (double)output.svpwm.duty_a - output.svpwm.duty_b;
+    const double ac = (double)output.svpwm.duty_a - output.svpwm.duty_c;
+    const double bc = (double)output.svpwm.duty_b - output.svpwm.duty_c;
+    const double voltage = input.vbus_v * sqrt(2.0 * (ab * ab + ac * ac + bc * bc)) / 3.0;
+    TEST_ASSERT(voltage <= config.pwm.voltage_limit_v && voltage > 0.1199);
+    TEST_ASSERT(output.voltage_dq_v.q > 0.1199f && context.integral_v.q == 0.0f);
+    return 0;
+}
+
 static int test_fixed_rotor_model(void)
 {
     const double resistance = 0.5;
@@ -397,7 +425,8 @@ static int test_fixed_rotor_model(void)
 int main(void)
 {
     return test_proportional_and_coordinates() || test_integral_and_instances() ||
-        test_voltage_and_anti_windup() || test_rejected_steps() || test_fixed_rotor_model();
+        test_voltage_and_anti_windup() || test_rejected_steps() ||
+        test_low_voltage_duty_roundoff() || test_fixed_rotor_model();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

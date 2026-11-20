@@ -925,7 +925,9 @@ static int prepare(
           !isfinite(policy->torque_limit_nm) || policy->torque_limit_nm <= 0.0f ||
           !isfinite(policy->max_stiffness_nm_per_rad) || policy->max_stiffness_nm_per_rad < 0.0f ||
           !isfinite(policy->max_damping_nm_s_per_rad) || policy->max_damping_nm_s_per_rad < 0.0f ||
-          !isfinite(policy->max_feedforward_nm) || policy->max_feedforward_nm < 0.0f))) {
+          !isfinite(policy->max_feedforward_nm) || policy->max_feedforward_nm < 0.0f ||
+          !(policy->damping_filter_hz == 0.0f ||
+            (policy->damping_filter_hz >= 1.0f && policy->damping_filter_hz <= 200.0f))))) {
         return FOC_PARAMETER_ERR_CONFIG;
     }
     *candidate = trial;

@@ -223,6 +223,7 @@ static int init_demo(struct demo *demo, float iq_limit, bool report_config)
     base.motion.impedance.enabled = true;
     base.motion.impedance.torque_constant_nm_per_a = kt;
     base.motion.impedance.mechanical_frame_id = FRAME_ID;
+    base.motion.impedance.damping_filter_hz = 48.0f;
     demo->adapter.period_counts = demo->profile.pwm.period_counts;
     const struct foc_pipeline_config pipeline = pipeline_for(demo);
     const struct foc_parameter_edit edits[] = {
@@ -277,6 +278,10 @@ static int init_demo(struct demo *demo, float iq_limit, bool report_config)
         }
     }
     if (report_config) {
+        const float cutoff_hz = demo->runtime.config.motion.impedance.damping_filter_hz;
+        REQUIRE(cutoff_hz == base.motion.impedance.damping_filter_hz);
+        printf("config damping_filter_hz effective=%.6g unit=Hz\n",
+               (double)cutoff_hz);
         printf(
             "model_default_iq_limit_A=%.6g config_candidate=VALIDATED runtime=INITIALIZED\n",
             (double)base.motion.iq_limit_a

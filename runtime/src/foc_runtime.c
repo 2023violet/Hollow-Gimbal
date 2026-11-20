@@ -845,14 +845,40 @@ static int foc_runtime_supervise(
     return FOC_RUNTIME_OK;
 }
 
+static float foc_runtime_impedance_damping_error(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_sensor *sample,
+    const struct foc_runtime_sensor *previous,
+    float error
+)
+{
+    if (previous != NULL && sample->seq - previous->seq == 1U) {
+        const uint32_t dt_us = sample->captured_us - previous->captured_us;
+        const uint32_t max_gap_us = runtime->config.h1.period_us + runtime->config.h1.max_delay_us;
+        if (dt_us <= max_gap_us) {
+            /* H1 has already admitted the sample and ordered source time across wrap. */
+            const float omega_dt = (6.283185307179586f * 1.0e-6f) *
+                runtime->config.motion.impedance.damping_filter_hz * (float)dt_us;
+            const float alpha = omega_dt / (1.0f + omega_dt);
+            error = (1.0f - alpha) * runtime->damping_speed_error_rad_s + alpha * error;
+        }
+    }
+    runtime->damping_speed_error_rad_s = error;
+    runtime->damping_filter_seen = isfinite(error);
+    return error;
+}
+
 static bool foc_runtime_impedance_target(
-    const struct foc_runtime_motion_config *motion,
+    struct foc_runtime *runtime,
     const struct foc_runtime_impedance_command *reference,
     const struct foc_runtime_sensor *sample,
+    const struct foc_runtime_sensor *damping_previous,
     uint32_t session,
+    bool running,
     float *iq
 )
 {
+    const struct foc_runtime_motion_config *motion = &runtime->config.motion;
     const struct foc_runtime_impedance_config *policy = &motion->impedance;
     if (reference->source_session != session ||
         sample->mechanical_frame_id != policy->mechanical_frame_id ||
@@ -865,20 +891,95 @@ static bool foc_runtime_impedance_target(
         .torque_constant_nm_per_a = policy->torque_constant_nm_per_a,
         .torque_limit_nm = policy->torque_limit_nm,
     };
-    const struct foc_impedance_input input = {
+    struct foc_impedance_input input = {
         .position_error_rad = reference->position_rad - sample->mechanical_rad,
         .reference_velocity_rad_s = reference->velocity_rad_s,
         .measured_velocity_rad_s = sample->mechanical_rad_s,
         .torque_feedforward_nm = reference->torque_feedforward_nm,
         .live_iq_limit_a = motion->iq_limit_a,
     };
+    if (running && policy->damping_filter_hz > 0.0f) {
+        const float damping_error = foc_runtime_impedance_damping_error(
+            runtime,
+            sample,
+            damping_previous,
+            reference->velocity_rad_s - sample->mechanical_rad_s
+        );
+        /* Core uses the speed difference. Supply it in a zero-reference frame. */
+        input.reference_velocity_rad_s = 0.0f;
+        input.measured_velocity_rad_s = -damping_error;
+    }
     struct foc_impedance_output output;
     if (foc_impedance_step(&config, &input, &output) != FOC_STATUS_OK || !output.valid) {
+        runtime->damping_filter_seen = false;
         return false;
     }
     *iq = output.iq_ref_a;
     return true;
 }
+
+#if defined(FOC_RUNTIME_HOST_COGGING)
+static bool foc_runtime_cogging_valid(const struct foc_runtime_motion_config *motion)
+{
+    const struct foc_runtime_cogging_config *config = &motion->cogging;
+    const struct foc_runtime_cogging_lut *lut = &config->lut;
+    if (!motion->enabled || !config->enabled || !lut->qualified || config->motor_id == 0U ||
+        config->motor_id != lut->motor_id || config->mechanical_frame_id == 0U ||
+        config->mechanical_frame_id != lut->mechanical_frame_id || lut->training_capture_id == 0U ||
+        lut->holdout_capture_id == 0U || lut->training_capture_id == lut->holdout_capture_id ||
+        !isfinite(config->torque_constant_nm_per_a) || config->torque_constant_nm_per_a <= 0.0f ||
+        !isfinite(config->iq_limit_a) || config->iq_limit_a <= 0.0f ||
+        config->iq_limit_a > motion->iq_limit_a) {
+        return false;
+    }
+    for (unsigned int i = 0U; i < FOC_RUNTIME_COGGING_POINTS; ++i) {
+        const float iq = lut->torque_nm[i] / config->torque_constant_nm_per_a;
+        if (!isfinite(iq) || fabsf(iq) > config->iq_limit_a) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static float foc_runtime_add_cogging(
+    const struct foc_runtime_motion_config *motion,
+    const struct foc_runtime_sensor *sample,
+    const struct foc_runtime_command *command,
+    float iq
+)
+{
+    const struct foc_runtime_cogging_config *config = &motion->cogging;
+    /* Continuous Float32 position loses phase resolution over long travel. */
+    if (!config->enabled || sample->mechanical_frame_id != config->mechanical_frame_id ||
+        !isfinite(sample->mechanical_rad) || fabsf(sample->mechanical_rad) > 4096.0f) {
+        return iq;
+    }
+    const float two_pi = 6.28318530717958647692f;
+    float phase = fmodf(sample->mechanical_rad, two_pi);
+    if (phase < 0.0f) {
+        phase += two_pi;
+    }
+    const float knot = phase * ((float)FOC_RUNTIME_COGGING_POINTS / two_pi);
+    const unsigned int lower = (unsigned int)knot;
+    const unsigned int index = lower % FOC_RUNTIME_COGGING_POINTS;
+    const unsigned int next = (index + 1U) % FOC_RUNTIME_COGGING_POINTS;
+    const float blend = knot - (float)lower;
+    const float torque =
+        (1.0f - blend) * config->lut.torque_nm[index] + blend * config->lut.torque_nm[next];
+    float correction = torque / config->torque_constant_nm_per_a;
+    float cap = motion->iq_limit_a;
+    if (command->mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+        const struct foc_runtime_impedance_config *policy = &motion->impedance;
+        const float commanded = command->target.impedance.torque_feedforward_nm;
+        const float kt = policy->torque_constant_nm_per_a;
+        const float lower_headroom = (-policy->max_feedforward_nm - commanded) / kt;
+        const float upper_headroom = (policy->max_feedforward_nm - commanded) / kt;
+        correction = fmaxf(lower_headroom, fminf(upper_headroom, correction));
+        cap = fminf(cap, policy->torque_limit_nm / kt);
+    }
+    return fmaxf(-cap, fminf(cap, iq + correction));
+}
+#endif
 
 static void foc_runtime_prepare_outer(
     struct foc_runtime *runtime,
@@ -891,6 +992,9 @@ static void foc_runtime_prepare_outer(
     const bool same_session = previous != NULL && previous->session == view->motion_session;
     const bool running = view->state == FOC_SAFE_STATE_RUNNING && !view->inhibit_pending;
     const bool trajectory_enabled = runtime->config.motion.trajectory.enabled;
+    const struct foc_runtime_sensor *damping_previous =
+        same_session && runtime->damping_filter_seen ? &previous->sample : NULL;
+    runtime->damping_filter_seen = false;
     if (!same_session || !running) {
         (void)foc_velocity_reset(&runtime->outer_velocity);
         if (trajectory_enabled && runtime->trajectory.initialized) {
@@ -952,10 +1056,12 @@ static void foc_runtime_prepare_outer(
     }
     if (view->mode == FOC_RUNTIME_MODE_IMPEDANCE) {
         if (!foc_runtime_impedance_target(
-                &runtime->config.motion,
+                runtime,
                 &command->target.impedance,
                 &candidate->sample,
+                damping_previous,
                 view->motion_session,
+                running,
                 &iq
             )) {
             return;
@@ -1037,6 +1143,26 @@ static void foc_runtime_prepare_outer(
             iq = 0.0f;
         }
     }
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    if (running) {
+        const float compensated = foc_runtime_add_cogging(policy, &candidate->sample, command, iq);
+        if (protection && compensated != iq) {
+            /* A feedforward proposal must preserve the base command's admission. */
+            struct foc_motion_limits_request trial = candidate->motion_request;
+            trial.iq_ref_a = compensated;
+            if (foc_motion_limits_check(
+                    &policy->limits,
+                    candidate->sample.mechanical_rad,
+                    &trial
+                ) == FOC_MOTION_REJECT_NONE) {
+                candidate->motion_request = trial;
+                iq = compensated;
+            }
+        } else {
+            iq = compensated;
+        }
+    }
+#endif
     candidate->target =
         (struct foc_pipeline_command){{0.0f, iq}, command->seq, command->produced_us};
     candidate->target_valid = true;
@@ -1119,6 +1245,8 @@ static bool foc_runtime_impedance_policy_valid(const struct foc_runtime_motion_c
          isfinite(policy->max_stiffness_nm_per_rad) && policy->max_stiffness_nm_per_rad >= 0.0f &&
          isfinite(policy->max_damping_nm_s_per_rad) && policy->max_damping_nm_s_per_rad >= 0.0f &&
          isfinite(policy->max_feedforward_nm) && policy->max_feedforward_nm >= 0.0f &&
+         (policy->damping_filter_hz == 0.0f ||
+          (policy->damping_filter_hz >= 1.0f && policy->damping_filter_hz <= 200.0f)) &&
          isfinite(policy->torque_constant_nm_per_a * motion->iq_limit_a));
 }
 
@@ -1198,6 +1326,9 @@ int foc_runtime_init(
         .supervision = {.next_us = now_us, .last_call_us = now_us},
         .telemetry = {.next_us = now_us, .last_call_us = now_us},
     };
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    runtime->config.motion.cogging.enabled = foc_runtime_cogging_valid(&config->motion);
+#endif
     atomic_init(&runtime->sensor_slot, FOC_RUNTIME_UNPUBLISHED);
     atomic_init(&runtime->command_slot, FOC_RUNTIME_UNPUBLISHED);
     atomic_init(&runtime->foreground_us, 0U);

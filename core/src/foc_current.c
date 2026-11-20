@@ -48,12 +48,26 @@ static unsigned int foc_current_limit_vector(struct foc_vector_dq *vector, float
     return 0U;
 }
 
+static struct foc_vector_alpha_beta
+foc_current_duty_voltage(const struct foc_svpwm_output *duty, float vbus_v)
+{
+    const float ab = duty->duty_a - duty->duty_b;
+    const float ac = duty->duty_a - duty->duty_c;
+    const float bc = duty->duty_b - duty->duty_c;
+
+    return (struct foc_vector_alpha_beta){
+        ((ab + ac) / 3.0f) * vbus_v,
+        (bc * FOC_CURRENT_INV_SQRT3) * vbus_v,
+    };
+}
+
 static int foc_current_modulate(
     const struct foc_current_config *config,
     const struct foc_current_input *input,
     const struct foc_angle_cache *angle_cache,
     struct foc_vector_dq requested_v,
     float voltage_limit_v,
+    bool *voltage_repaired,
     struct foc_current_output *result
 )
 {
@@ -76,11 +90,7 @@ static int foc_current_modulate(
     result->svpwm.saturated |= limited;
 
     /* Subtract the floating neutral before multiplying by bus voltage. */
-    const float a = result->svpwm.duty_a;
-    const float b = result->svpwm.duty_b;
-    const float c = result->svpwm.duty_c;
-    voltage.alpha = ((a - b) + (a - c)) / 3.0f * input->vbus_v;
-    voltage.beta = (b - c) * FOC_CURRENT_INV_SQRT3 * input->vbus_v;
+    voltage = foc_current_duty_voltage(&result->svpwm, input->vbus_v);
     status = foc_park_cached(&voltage, angle_cache, &result->voltage_dq_v);
     if (status != FOC_STATUS_OK) {
         return status;
@@ -88,8 +98,30 @@ static int foc_current_modulate(
     /* Permit float roundoff at the envelope, but reject materially coarse duties. */
     const float voltage_magnitude = hypotf(voltage.alpha, voltage.beta);
     const float rounding_slack = 16.0f * FLT_EPSILON * voltage_limit_v;
-    if (voltage_magnitude - voltage_limit_v > rounding_slack) {
-        return FOC_STATUS_ERR_VOLTAGE_LIMIT;
+    const float excess_v = voltage_magnitude - voltage_limit_v;
+    if (excess_v > (*voltage_repaired ? -rounding_slack : rounding_slack)) {
+        /* Near 50% duty the rounding error scales with VBUS, even at low modulation. */
+        const float duty_rounding_v = 2.0f * FLT_EPSILON * input->vbus_v;
+        /* Refuse coarse duty resolution. The backoff budget must be <= 2^-13 of the limit. */
+        if (excess_v > duty_rounding_v || duty_rounding_v > 64.0f * rounding_slack) {
+            return FOC_STATUS_ERR_VOLTAGE_LIMIT;
+        }
+
+        /* Reduce phase differences inside the existing duty bounds and recheck the result. */
+        struct foc_svpwm_output *const duty = &result->svpwm;
+        const float minimum = fminf(duty->duty_a, fminf(duty->duty_b, duty->duty_c));
+        const float scale = (voltage_limit_v - duty_rounding_v) / voltage_magnitude;
+        duty->duty_a = minimum + (duty->duty_a - minimum) * scale;
+        duty->duty_b = minimum + (duty->duty_b - minimum) * scale;
+        duty->duty_c = minimum + (duty->duty_c - minimum) * scale;
+        duty->saturated = 1U;
+        voltage = foc_current_duty_voltage(duty, input->vbus_v);
+        if (hypotf(voltage.alpha, voltage.beta) > voltage_limit_v - rounding_slack) {
+            return FOC_STATUS_ERR_VOLTAGE_LIMIT;
+        }
+        /* Preserve the inward voltage margin if anti-windup remodulates this step. */
+        *voltage_repaired = true;
+        return foc_park_cached(&voltage, angle_cache, &result->voltage_dq_v);
     }
     return FOC_STATUS_OK;
 }
@@ -317,7 +349,16 @@ static int foc_current_step_internal(
         requested.d += feedforward_voltage.d;
         requested.q += feedforward_voltage.q;
     }
-    status = foc_current_modulate(config, input, &angle_cache, requested, voltage_limit_v, &result);
+    bool voltage_repaired = false;
+    status = foc_current_modulate(
+        config,
+        input,
+        &angle_cache,
+        requested,
+        voltage_limit_v,
+        &voltage_repaired,
+        &result
+    );
     if (status != FOC_STATUS_OK) {
         return status;
     }
@@ -355,6 +396,7 @@ static int foc_current_step_internal(
                 &angle_cache,
                 corrected,
                 voltage_limit_v,
+                &voltage_repaired,
                 &result
             );
             if (status != FOC_STATUS_OK) {

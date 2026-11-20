@@ -385,6 +385,17 @@ def _virtual_metrics(records, scenario, duration_us, timeline=None):
                 return window[index].get("virtual_time_us")
         return None
 
+    def tracking_error(window, errors):
+        outside = [record.get("virtual_time_us") for record, error in zip(window, errors)
+                   if abs(error) > tolerance]
+        return {
+            "final": abs(errors[-1]) if errors else None,
+            "peak": max(map(abs, errors), default=None),
+            "out_of_tolerance_samples": len(outside),
+            "first_out_of_tolerance_us": outside[0] if outside else None,
+            "last_out_of_tolerance_us": outside[-1] if outside else None,
+        }
+
     full_errors = errors_for(virtual)
     running = [
         record for record in virtual
@@ -469,12 +480,14 @@ def _virtual_metrics(records, scenario, duration_us, timeline=None):
             "end_us": virtual[-1].get("virtual_time_us"),
             "sample_count": len(virtual),
             "sample_rule": "all virtual records; historical metric retained",
+            "tracking_error": tracking_error(virtual, full_errors),
         },
         "running": {
             "start_us": running[0].get("virtual_time_us") if running else None,
             "end_us": running[-1].get("virtual_time_us") if running else None,
             "sample_count": len(running),
             "sample_rule": "state=RUNNING and output_action=UPDATE",
+            "tracking_error": tracking_error(running, running_errors),
         },
         "running_tail": {
             "start_us": running_tail[0].get("virtual_time_us") if running_tail else None,
@@ -724,13 +737,47 @@ def run_virtual_demo(
     return summary
 
 
+def calibrate_host(args, parser):
+    if not args.simulator or args.port or args.message:
+        parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
+    if args.load_config and (args.save_config or args.cancel_after or args.cogging or args.trace):
+        parser.error("--load-config cannot be combined with --save-config or capture options")
+    if args.save_config and not args.approve_candidate:
+        parser.error("--save-config requires --approve-candidate")
+    reports = [pathlib.Path(path).resolve() for path in
+               (args.json, args.save_config, args.load_config, args.trace) if path]
+    if len(reports) != len(set(reports)):
+        parser.error("report and configuration paths must be distinct")
+    command = [str(pathlib.Path(args.simulator).resolve()), "--profile-id", args.profile_id]
+    if args.approve_candidate:
+        command.extend(("--approve-candidate", args.approve_candidate))
+    if args.cogging:
+        command.append("--cogging")
+    for key, value in (("--save-config", args.save_config), ("--load-config", args.load_config),
+                       ("--cancel-after", args.cancel_after), ("--trace", args.trace)):
+        if value is not None:
+            command.extend((key, value))
+    process = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+    events = [json.loads(line) for line in process.stdout.splitlines()]
+    for event in events:
+        print(json.dumps(event, allow_nan=False))
+    if process.stderr:
+        print(process.stderr, file=sys.stderr, end="")
+    if args.json:
+        with pathlib.Path(args.json).open("x", encoding="utf-8") as report:
+            json.dump({"events": events, "exit_status": process.returncode},
+                      report, indent=2, allow_nan=False)
+            report.write("\n")
+    return process.returncode
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     connection = parser.add_mutually_exclusive_group()
     connection.add_argument("--port", help="Optional pyserial port. Connects when selected.")
     connection.add_argument("--simulator", help="Host foc-serial-sim executable")
     parser.add_argument(
-        "action", choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo"]
+        "action", choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "calibrate"]
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
     parser.add_argument("--hex", default="", help="Wire hex for decode, including delimiter")
@@ -772,8 +819,16 @@ def main():
     parser.add_argument("--load-off-us", type=int, default=15000)
     parser.add_argument("--load-torque-nm", type=float, default=0.03)
     parser.add_argument("--sensor-fault-us", type=int, default=5000)
+    parser.add_argument("--approve-candidate", help="Exact review_id returned by the Host candidate preview")
+    parser.add_argument("--save-config", help="Save a qualified Host calibration package")
+    parser.add_argument("--load-config", help="Restore an approved Host calibration package")
+    parser.add_argument("--cancel-after", help="Cancel a virtual calibration after the named stage")
+    parser.add_argument("--cogging", action="store_true", help="Capture and apply a virtual cogging LUT")
+    parser.add_argument("--trace", help="Export the d/q terminal voltage and ADC aperture CSV")
     args = parser.parse_args()
     try:
+        if args.action == "calibrate":
+            return calibrate_host(args, parser)
         payload = b""
         if args.message == "setpoint":
             payload = setpoint(args.mode, args.first, args.second)
@@ -906,7 +961,7 @@ def main():
                 else:
                     response = hello if args.message == "hello" else client.call(args.message, payload)
                     print(json.dumps(describe(response), allow_nan=False))
-    except (ValueError, OSError, TimeoutError, OverflowError, struct.error, ImportError) as error:
+    except (ValueError, OSError, TimeoutError, OverflowError, struct.error, ImportError, subprocess.TimeoutExpired) as error:
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 1
     return 0

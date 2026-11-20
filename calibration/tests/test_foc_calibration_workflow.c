@@ -469,6 +469,125 @@ static int native_capture_rejections(void)
     return 0;
 }
 
+static int capture_electrical(
+    struct foc_cal_workflow *workflow,
+    const struct foc_cal_workflow_stage_request *stage,
+    float rs,
+    float inductance
+)
+{
+    CHECK(foc_cal_workflow_open(workflow, stage) == FOC_CAL_WORKFLOW_OK);
+    float previous = 0.0f;
+    for (uint32_t index = 0U; index <= 96U; ++index) {
+        const uint32_t time = (index + (stage->capture - 90U) * 100U) * 50U;
+        const float current = 0.4f * sinf((float)index * 0.09f);
+        const struct foc_cal_workflow_sample sample = {
+            .session = workflow->result.request.session,
+            .identity = identity,
+            .capture = stage->capture,
+            .source = stage->source,
+            .units = FOC_CAL_WORKFLOW_ELECTRICAL_SI,
+            .valid = true,
+            .output_confirmed = true,
+            .data.electrical = {
+                .setup_id = identity.motor_setup_id,
+                .capture_id = stage->capture,
+                .source = FOC_MOTOR_ID_VIRTUAL,
+                .sequence = index,
+                .captured_us = time,
+                .voltage_begin_us = time - 50U,
+                .voltage_end_us = time,
+                .voltage_source = FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL,
+                .current_a = current,
+                .mean_voltage_v =
+                    rs * 0.5f * (previous + current) + inductance * (current - previous) / 0.00005f,
+                .current_valid = true,
+                .voltage_valid = true,
+                .output_confirmed = true,
+                .frame_confirmed = true,
+                .stationary_confirmed = true,
+            },
+        };
+        CHECK(foc_cal_workflow_push(workflow, &sample, time) == FOC_CAL_WORKFLOW_OK);
+        previous = current;
+    }
+    return foc_cal_workflow_finish_stage(workflow);
+}
+
+static int dual_axis_gate(void)
+{
+    struct foc_cal_workflow workflow = {0};
+    const uint32_t mask = FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ELECTRICAL);
+    struct foc_cal_workflow_request selected = request(1U, mask);
+    selected.require_dual_axis = true;
+    selected.max_rs_relative_difference = 0.05f;
+    const struct foc_cal_workflow_stage_request d = {
+        .stage = FOC_CAL_WORKFLOW_ELECTRICAL,
+        .source = FOC_CAL_WORKFLOW_HOST_SYNTHETIC,
+        .capture = 91U,
+        .policy.electrical = {
+            .axis = FOC_MOTOR_ID_D,
+            .source = FOC_MOTOR_ID_VIRTUAL,
+            .voltage_source = FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL,
+            .setup_id = 17U,
+            .min_interval_us = 50U,
+            .max_interval_us = 50U,
+            .intervals_per_window = 4U,
+            .min_windows = 6U,
+            .max_abs_current_a = 2.0f,
+            .max_abs_voltage_v = 4.0f,
+            .min_current_rms_a = 0.1f,
+            .min_slew_rms_a_per_s = 5.0f,
+            .min_voltage_rms_v = 0.05f,
+            .max_residual_rms_v = 0.005f,
+            .min_rs_ohm = 0.03f,
+            .max_rs_ohm = 2.0f,
+            .min_inductance_h = 0.0004f,
+            .max_inductance_h = 0.01f,
+        },
+    };
+    struct foc_cal_workflow_stage_request q = d;
+    q.policy.electrical.axis = FOC_MOTOR_ID_Q;
+    CHECK(foc_cal_workflow_init(&workflow) == FOC_CAL_WORKFLOW_OK);
+    CHECK(foc_cal_workflow_start(&workflow, &selected) == FOC_CAL_WORKFLOW_OK);
+    CHECK(foc_cal_workflow_open(&workflow, &q) == FOC_CAL_WORKFLOW_ERR_DEPENDENCY);
+    CHECK(capture_electrical(&workflow, &d, 0.6f, 0.0012f) == FOC_CAL_WORKFLOW_PARTIAL);
+    const struct foc_cal_workflow_bundle *result = foc_cal_workflow_result(&workflow);
+    CHECK(result->passed == 0U && result->missing == mask);
+    CHECK(result->electrical.usable && result->electrical.capture_id == 91U);
+    CHECK(foc_cal_workflow_open(&workflow, &q) == FOC_CAL_WORKFLOW_ERR_ORDER);
+    q.capture = 92U;
+    q.source = FOC_CAL_WORKFLOW_HOST_VIRTUAL_MEASUREMENT;
+    CHECK(foc_cal_workflow_open(&workflow, &q) == FOC_CAL_WORKFLOW_ERR_SOURCE);
+    q.source = FOC_CAL_WORKFLOW_HOST_SYNTHETIC;
+    CHECK(capture_electrical(&workflow, &q, 0.6f, 0.0018f) == FOC_CAL_WORKFLOW_OK);
+    CHECK(result->passed == mask && result->missing == 0U);
+    CHECK(result->stages[FOC_CAL_WORKFLOW_ELECTRICAL].primary.id == 91U);
+    CHECK(result->electrical_q_capture.id == 92U && result->electrical_q_capture.samples == 97U);
+    CHECK(result->electrical_q.usable && result->electrical_q.capture_id == 92U);
+    CHECK(fabsf(result->electrical_model.ld_h - 0.0012f) < 1e-6f);
+    CHECK(fabsf(result->electrical_model.lq_h - 0.0018f) < 1e-6f);
+    CHECK(foc_cal_workflow_finish(&workflow) == FOC_CAL_WORKFLOW_OK);
+
+    ++selected.session;
+    CHECK(foc_cal_workflow_start(&workflow, &selected) == FOC_CAL_WORKFLOW_OK);
+    CHECK(capture_electrical(&workflow, &d, 0.6f, 0.0012f) == FOC_CAL_WORKFLOW_PARTIAL);
+    CHECK(capture_electrical(&workflow, &q, 0.9f, 0.0018f) == FOC_CAL_WORKFLOW_ERR_QUALITY);
+    CHECK(result->electrical.usable && result->electrical_q.usable);
+    CHECK(
+        result->passed == 0U && result->missing == mask && result->electrical_model.rs_ohm == 0.0f
+    );
+    CHECK(foc_cal_workflow_finish(&workflow) == FOC_CAL_WORKFLOW_PARTIAL);
+
+    ++selected.session;
+    selected.require_dual_axis = false;
+    CHECK(foc_cal_workflow_start(&workflow, &selected) == FOC_CAL_WORKFLOW_OK);
+    CHECK(capture_electrical(&workflow, &q, 0.6f, 0.0018f) == FOC_CAL_WORKFLOW_OK);
+    CHECK(result->passed == mask && result->electrical.axis == FOC_MOTOR_ID_Q);
+    CHECK(!result->electrical_q.usable && result->electrical_q_capture.id == 0U);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
@@ -477,6 +596,7 @@ int main(void)
     CHECK(failed_capture() == 0);
     CHECK(model_dependency() == 0);
     CHECK(native_capture_rejections() == 0);
+    CHECK(dual_axis_gate() == 0);
     return 0;
 }
 

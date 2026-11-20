@@ -137,6 +137,10 @@ struct foc_cal_workflow_request {
     uint32_t stages;
     struct foc_cal_workflow_identity identity;
     struct foc_calibration_admission_limits admission;
+    /** With ELECTRICAL selected, qualify distinct d then q captures as one stage. */
+    bool require_dual_axis;
+    /** Rs agreement limit from foc_motor_id_make_model(), used only in dual-axis mode. */
+    float max_rs_relative_difference;
 };
 
 struct foc_cal_workflow_stage_request {
@@ -217,7 +221,12 @@ struct foc_cal_workflow_bundle {
     uint32_t missing;
     struct foc_cal_workflow_stage_result stages[FOC_CAL_WORKFLOW_STAGE_COUNT];
     struct foc_calibration_adc_result adc;
+    /** Single requested axis in a legacy session, d-axis capture in a dual-axis session. */
     struct foc_motor_id_result electrical;
+    struct foc_motor_id_result electrical_q;
+    struct foc_cal_workflow_capture electrical_q_capture;
+    /** Usable only while the dual-axis ELECTRICAL pass bit is set. */
+    struct foc_motor_rl_model electrical_model;
     struct foc_calibration_rotor_result rotor;
     struct foc_calibration_offset_result offset;
     struct foc_encoder_cal_result lut;
@@ -266,6 +275,8 @@ int foc_cal_workflow_push(struct foc_cal_workflow *workflow,
                           const struct foc_cal_workflow_sample *sample,
                           uint32_t now_us);
 int foc_cal_workflow_begin_holdout(struct foc_cal_workflow *workflow, uint32_t capture);
+
+/** In dual-axis mode a qualified d capture returns PARTIAL and allows a subsequent q capture. */
 int foc_cal_workflow_finish_stage(struct foc_cal_workflow *workflow);
 
 /** Mark a selected unopened or active capture as unavailable. */

@@ -407,7 +407,7 @@ static void record(
     const struct foc_runtime_sensor *sample,
     const struct foc_impedance_output *torque,
     float reference,
-    float speed,
+    float damping_error,
     float damping,
     uint32_t t,
     uint32_t end,
@@ -457,7 +457,7 @@ static void record(
     if (t >= end - tail_us) {
         const double q_hp = torque->iq_ref_a - *q_lp;
         const double actual_hp = plant->iq_a - *actual_lp;
-        const double damping_torque = damping * (speed - sample->mechanical_rad_s);
+        const double damping_torque = damping * damping_error;
         m->tail_peak_error = fmax(m->tail_peak_error, magnitude);
         m->tail_min_error = fmin(m->tail_min_error, error);
         m->tail_max_error = fmax(m->tail_max_error, error);
@@ -497,7 +497,12 @@ static unsigned quality_mask(const struct metrics *m, enum study_stimulus stimul
     return fail;
 }
 
-static int run_case(const struct study_case *test, const struct study_model *model, bool trace)
+static int run_case(
+    const struct study_case *test,
+    const struct study_model *model,
+    bool trace,
+    bool runtime_damping
+)
 {
     struct foc_virtual_current_profile profile = foc_virtual_current_default_profile();
     profile.motor.inertia_kg_m2 *= test->inertia_scale;
@@ -513,6 +518,7 @@ static int run_case(const struct study_case *test, const struct study_model *mod
         .torque_limit_nm = 0.315f,
         .max_stiffness_nm_per_rad = 3.0f,
         .max_damping_nm_s_per_rad = 0.3f,
+        .damping_filter_hz = runtime_damping ? 48.0f : 0.0f,
     };
     CHECK(
         profile.runtime.h0.period_us == 200U && profile.runtime.h1.period_us == period_us &&
@@ -611,12 +617,17 @@ static int run_case(const struct study_case *test, const struct study_model *mod
             vm.output.accepted_updates == vm.runtime.pipeline.mock.updates &&
             vm.output.rejected_updates == 0U
         );
-        const struct foc_impedance_input input = {
+        struct foc_impedance_input input = {
             .position_error_rad = reference - sample.mechanical_rad,
             .reference_velocity_rad_s = speed,
             .measured_velocity_rad_s = sample.mechanical_rad_s,
             .live_iq_limit_a = test->cap_a,
         };
+        if (runtime_damping) {
+            CHECK(vm.runtime.damping_filter_seen);
+            input.reference_velocity_rad_s = 0.0f;
+            input.measured_velocity_rad_s = -vm.runtime.damping_speed_error_rad_s;
+        }
         struct foc_impedance_output torque;
         CHECK(foc_impedance_step(&gains, &input, &torque) == FOC_STATUS_OK && torque.valid);
         CHECK(
@@ -637,7 +648,7 @@ static int run_case(const struct study_case *test, const struct study_model *mod
             &sample,
             &torque,
             reference,
-            speed,
+            input.reference_velocity_rad_s - input.measured_velocity_rad_s,
             gains.damping_nm_s_per_rad,
             t,
             end,
@@ -751,6 +762,10 @@ static int run_case(const struct study_case *test, const struct study_model *mod
         fail == 0U ? "HOST_QUALITY_PASS" : "HOST_QUALITY_FAIL",
         fail
     );
+    if (runtime_damping) {
+        /* The frozen overload keeps failing its duration gate. All feasible cases must pass. */
+        CHECK(fail == (test->stimulus == LOAD ? 16U : 0U));
+    }
 
     /* An off-period STOP also cancels any duty waiting for Plant application. */
     if (output.delay_us != 0U) {
@@ -2487,7 +2502,7 @@ static int run_mechanical_id_comparison(int argc, char **argv)
         const struct study_case *test = &cases[i];
         const struct study_model *model =
             test->design == NOMINAL ? &models[test->inertia_scale == 4.0 ? 1U : 0U] : NULL;
-        CHECK(run_case(test, model, trace) == 0);
+        CHECK(run_case(test, model, trace, false) == 0);
     }
     return 0;
 }
@@ -2580,21 +2595,26 @@ int main(int argc, char **argv)
     if (argc > 1 && strcmp(argv[1], "--mechanical-id-fit") == 0) {
         return run_mechanical_id_comparison(argc, argv);
     }
-    bool train = false, trace = false;
+    bool train = false, trace = false, runtime_damping = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--train") == 0) {
             train = true;
         } else if (strcmp(argv[i], "--trace") == 0) {
             trace = true;
+        } else if (strcmp(argv[i], "--runtime-damping") == 0) {
+            runtime_damping = true;
         } else {
             return 2;
         }
+    }
+    if (train && runtime_damping) {
+        return 2;
     }
     const struct study_case *cases = train ? training : holdout;
     const size_t count =
         train ? sizeof training / sizeof training[0] : sizeof holdout / sizeof holdout[0];
     for (size_t i = 0; i < count; ++i) {
-        CHECK(run_case(&cases[i], NULL, trace) == 0);
+        CHECK(run_case(&cases[i], NULL, trace, runtime_damping) == 0);
     }
     return 0;
 }

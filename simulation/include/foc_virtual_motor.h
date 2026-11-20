@@ -61,11 +61,33 @@ struct foc_virtual_motor_state {
     double mechanical_velocity_rad_s;
 };
 
+/** Coherent end-of-step state, signed shaft torque, and applied terminal voltage. */
+struct foc_virtual_motor_observation {
+    double id_a;
+    double iq_a;
+    double mechanical_position_rad;
+    double mechanical_velocity_rad_s;
+    double electrical_position_rad;
+    double v_alpha_v;
+    double v_beta_v;
+    double electromagnetic_torque_nm;
+    double applied_load_torque_nm;
+    double fixture_torque_nm;
+    bool fixture_active;
+};
+
 /** Caller-owned plant with copied immutable parameters and mutable state. */
 struct foc_virtual_motor {
     struct foc_virtual_motor_params params;
     struct foc_virtual_motor_state state;
     double load_torque_nm;
+    double load_gradient_nm_per_rad;
+    double cogging_amplitude_nm;
+    double cogging_phase_rad;
+    unsigned int cogging_cycles_per_turn;
+    double v_alpha_v;
+    double v_beta_v;
+    bool fixture_active;
     bool initialized;
 };
 
@@ -78,6 +100,25 @@ int foc_virtual_motor_init(struct foc_virtual_motor *motor,
 
 /** Set a finite external load torque in N·m. */
 int foc_virtual_motor_set_load(struct foc_virtual_motor *motor, double load_torque_nm);
+
+/** Add a signed load gradient around mechanical zero, in N*m/rad. */
+int foc_virtual_motor_set_load_gradient(struct foc_virtual_motor *motor, double nm_per_rad);
+
+/** Set a sinusoidal torque disturbance in the mechanical frame. Zero amplitude disables it. */
+int foc_virtual_motor_set_cogging(struct foc_virtual_motor *motor,
+                                  double amplitude_nm,
+                                  unsigned int cycles_per_turn,
+                                  double phase_rad);
+
+/** Impose a signed fixture speed across all integration stages. Zero constrains the shaft. */
+int foc_virtual_motor_set_fixture_speed(struct foc_virtual_motor *motor, double mechanical_rad_s);
+
+/** Release the constraint and keep the current position and speed as initial conditions. */
+void foc_virtual_motor_release_fixture(struct foc_virtual_motor *motor);
+
+/** Read shaft state/reaction and the last successful step's terminal voltages. */
+int foc_virtual_motor_observe(const struct foc_virtual_motor *motor,
+                              struct foc_virtual_motor_observation *observation);
 
 /** Advance the plant with constant alpha/beta voltage using one RK4 step. */
 int foc_virtual_motor_step(struct foc_virtual_motor *motor,

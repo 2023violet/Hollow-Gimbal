@@ -79,7 +79,7 @@ static bool foc_virtual_output_submit(void *argument, const struct foc_device_pw
         context->output.v_beta_v = (double)context->profile.vbus_v *
             ((double)request->duty_b - (double)request->duty_c) / FOC_VIRTUAL_SQRT3;
         if (hypot(context->output.v_alpha_v, context->output.v_beta_v) >=
-            (double)context->profile.current.pwm.voltage_limit_v - 1.0e-3) {
+            (double)context->runtime.pipeline.current.config.pwm.voltage_limit_v - 1.0e-3) {
             context->output.saturated_updates++;
         }
         context->output.accepted_updates++;
@@ -131,28 +131,10 @@ static int foc_virtual_integrate_to(struct foc_virtual_current *context, uint32_
     return 0;
 }
 
-static int foc_virtual_encoder_code(const struct foc_virtual_current *context, uint16_t *code)
-{
-    const double fundamental = context->profile.encoder_fundamental_error_rad;
-    const double third = context->profile.encoder_third_error_rad;
-    const struct foc_encoder_config *encoder = &context->profile.encoder;
-    if (fundamental == 0.0 && third == 0.0) {
-        return foc_virtual_motor_make_encoder_code(&context->motor, encoder, code);
-    }
-    /* Bias the simulated transducer before its existing quantizer. The real
-     * Plant angle remains available for ADC synthesis and the Host reference. */
-    struct foc_virtual_motor observation = context->motor;
-    const double direction = encoder->direction;
-    const double phase = direction * observation.state.mechanical_position_rad;
-    const double error = fundamental * sin(phase + 0.41) + third * sin(3.0 * phase - 0.23);
-    observation.state.mechanical_position_rad += direction * error;
-    return foc_virtual_motor_make_encoder_code(&observation, encoder, code);
-}
-
 static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
 {
     uint16_t raw_code = 0U;
-    if (foc_virtual_encoder_code(context, &raw_code) != 0) {
+    if (foc_virtual_current_acquire_encoder(&context->profile, &context->motor, &raw_code) != 0) {
         return -1;
     }
     struct foc_encoder_feedback feedback;
@@ -191,10 +173,18 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
             (float)((double)context->profile.motor.pole_pairs * (double)feedback.mechanical_rad +
                     context->profile.motor.electrical_offset_rad);
     }
-    const struct foc_runtime_motion_config *motion = &context->profile.runtime.motion;
+    const struct foc_runtime_motion_config *motion = &context->runtime.config.motion;
     const uint32_t frame = motion->limits.enabled || motion->following_error.enabled
         ? motion->limits.mechanical_frame_id
         : motion->impedance.mechanical_frame_id;
+    if (context->profile.signed_mechanical_origin && position_valid &&
+        !context->mechanical_origin_seen) {
+        /* Freeze the branch on the first valid observation so a near-zero
+         * corrected code on the preceding turn is still near shaft zero. */
+        context->mechanical_origin_shift_rad =
+            feedback.mechanical_rad >= 3.14159265358979323846f ? 6.28318530717958647692f : 0.0f;
+        context->mechanical_origin_seen = true;
+    }
     const struct foc_runtime_sensor sample = {
         .theta_elec_rad = phase,
         .captured_us = context->virtual_time_us,
@@ -202,7 +192,7 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
         /* Current mode needs an angle on the first frame; speed becomes valid
          * after foc_encoder_update() has accepted its second frame. */
         .valid = position_valid,
-        .mechanical_rad = feedback.mechanical_rad,
+        .mechanical_rad = feedback.mechanical_rad - context->mechanical_origin_shift_rad,
         .mechanical_rad_s = velocity,
         .electrical_phase_valid = phase_valid,
         .mechanical_frame_id = position_valid && feedback.speed_valid ? frame : 0U,
@@ -222,10 +212,9 @@ static int foc_virtual_publish_sensor(struct foc_virtual_current *context)
 static int foc_virtual_run_h0(struct foc_virtual_current *context)
 {
     struct foc_device_adc_raw raw;
-    if (foc_virtual_motor_make_adc(
+    if (foc_virtual_current_acquire_adc(
+            &context->profile,
             &context->motor,
-            &context->profile.adc,
-            context->profile.vbus_v,
             ++context->sample_seq,
             context->virtual_time_us,
             &raw
@@ -338,9 +327,55 @@ struct foc_virtual_current_profile foc_virtual_current_default_profile(void)
     };
 }
 
-int foc_virtual_current_init(
+int foc_virtual_current_acquire_adc(
+    const struct foc_virtual_current_profile *profile,
+    const struct foc_virtual_motor *motor,
+    uint32_t sequence,
+    uint32_t timestamp_us,
+    struct foc_device_adc_raw *raw
+)
+{
+    if (profile == NULL || profile->adc_noise_counts > 16U) {
+        return -1;
+    }
+    struct foc_device_adc_config sensed = profile->adc;
+    const float noise = (float)profile->adc_noise_counts;
+    sensed.phase_a_offset_count += noise * (float)((int)(sequence % 3U) - 1);
+    sensed.phase_b_offset_count += noise * (float)((int)((sequence + 1U) % 3U) - 1);
+    sensed.phase_c_offset_count += noise * (float)((int)((sequence + 2U) % 3U) - 1);
+    return foc_virtual_motor_make_adc(motor, &sensed, profile->vbus_v, sequence, timestamp_us, raw);
+}
+
+int foc_virtual_current_acquire_encoder(
+    const struct foc_virtual_current_profile *profile,
+    const struct foc_virtual_motor *motor,
+    uint16_t *code
+)
+{
+    if (profile == NULL || motor == NULL) {
+        return -1;
+    }
+    const double fundamental = profile->encoder_fundamental_error_rad;
+    const double third = profile->encoder_third_error_rad;
+    const struct foc_encoder_config *encoder = &profile->encoder;
+    if (fundamental == 0.0 && third == 0.0) {
+        return foc_virtual_motor_make_encoder_code(motor, encoder, code);
+    }
+    /* Bias the simulated transducer before its existing quantizer. The real
+     * Plant angle remains available for ADC synthesis and the Host reference. */
+    struct foc_virtual_motor observation = *motor;
+    const double direction = encoder->direction;
+    const double phase = direction * observation.state.mechanical_position_rad;
+    const double error = fundamental * sin(phase + 0.41) + third * sin(3.0 * phase - 0.23);
+    observation.state.mechanical_position_rad += direction * error;
+    return foc_virtual_motor_make_encoder_code(&observation, encoder, code);
+}
+
+static int foc_virtual_initialize_driver(
     struct foc_virtual_current *context,
-    const struct foc_virtual_current_profile *profile
+    const struct foc_virtual_current_profile *profile,
+    foc_virtual_current_initializer_t initialize,
+    void *argument
 )
 {
     if (context == NULL || profile == NULL) {
@@ -356,7 +391,13 @@ int foc_virtual_current_init(
     context->profile = *profile;
     if (foc_virtual_motor_init(&context->motor, &profile->motor, &profile->initial_state) != 0 ||
         foc_virtual_motor_set_load(&context->motor, profile->load_torque_nm) != 0 ||
-        foc_encoder_init(&context->encoder, &profile->encoder) != FOC_ENCODER_STATUS_OK) {
+        (profile->cogging_amplitude_nm != 0.0 &&
+         foc_virtual_motor_set_cogging(
+             &context->motor,
+             profile->cogging_amplitude_nm,
+             profile->cogging_cycles_per_turn,
+             profile->cogging_phase_rad
+         ) != 0)) {
         return -1;
     }
     context->output.mode = FOC_VIRTUAL_OUTPUT_HIGH_Z;
@@ -370,11 +411,49 @@ int foc_virtual_current_init(
         .output_submit = foc_virtual_output_submit,
         .output_arg = context,
     };
-    if (foc_runtime_init(&context->runtime, &pipeline, &profile->runtime, 0U) != FOC_RUNTIME_OK) {
+    const int initialized = initialize != NULL
+        ? initialize(argument, &context->runtime, &context->encoder, &pipeline, profile)
+        : (foc_encoder_init(&context->encoder, &profile->encoder) == FOC_ENCODER_STATUS_OK &&
+                   foc_runtime_init(&context->runtime, &pipeline, &profile->runtime, 0U) ==
+                       FOC_RUNTIME_OK
+               ? 0
+               : -1);
+    if (initialized != 0 || !context->encoder.initialized || !context->runtime.initialized ||
+        context->runtime.pipeline.output_submit != pipeline.output_submit ||
+        context->runtime.pipeline.output_arg != context ||
+        context->runtime.pipeline.adc_config.phase_order != profile->adc.phase_order ||
+        context->runtime.pipeline.adc_config.current_a_per_count !=
+            profile->adc.current_a_per_count ||
+        context->runtime.pipeline.adc_config.vbus_v_per_count != profile->adc.vbus_v_per_count ||
+        context->runtime.pipeline.pwm_config.period_counts != profile->pwm.period_counts ||
+        context->runtime.pipeline.pwm_config.phase_order != profile->pwm.phase_order ||
+        context->encoder.config.counts_per_revolution != profile->encoder.counts_per_revolution ||
+        context->encoder.config.direction != profile->encoder.direction) {
+        *context = (struct foc_virtual_current){0};
         return -1;
     }
     context->initialized = true;
     return 0;
+}
+
+int foc_virtual_current_init_with(
+    struct foc_virtual_current *context,
+    const struct foc_virtual_current_profile *profile,
+    foc_virtual_current_initializer_t initialize,
+    void *argument
+)
+{
+    return context == NULL || context->initialized || context->runtime.initialized
+        ? -1
+        : foc_virtual_initialize_driver(context, profile, initialize, argument);
+}
+
+int foc_virtual_current_init(
+    struct foc_virtual_current *context,
+    const struct foc_virtual_current_profile *profile
+)
+{
+    return foc_virtual_initialize_driver(context, profile, NULL, NULL);
 }
 
 int foc_virtual_current_publish_iq(struct foc_virtual_current *context, float id_a, float iq_a)

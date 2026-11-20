@@ -503,6 +503,95 @@ static int test_disabled_set_mode_observes_adc(void)
     return 0;
 }
 
+static int test_damping_capture_and_session(void)
+{
+    struct foc_runtime_config policy = config;
+    struct foc_runtime runtime;
+    const uint32_t boot = UINT32_MAX - 450U;
+    const float invalid[] = {-1.0f, 0.5f, 201.0f, NAN, INFINITY};
+    for (size_t i = 0U; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        policy.motion.impedance.damping_filter_hz = invalid[i];
+        CHECK(foc_runtime_init(&runtime, &pipeline_config, &policy, boot) == FOC_RUNTIME_ERR_CONFIG);
+    }
+    policy.motion.impedance.damping_filter_hz = 48.0f;
+    CHECK(foc_runtime_init(&runtime, &pipeline_config, &policy, boot) == FOC_RUNTIME_OK);
+    static const enum foc_runtime_action actions[] = {
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_SET_MODE,
+        FOC_RUNTIME_ACTION_ARM,
+        FOC_RUNTIME_ACTION_START,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_ARM,
+        FOC_RUNTIME_ACTION_START,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_NONE,
+        FOC_RUNTIME_ACTION_SET_MODE,
+    };
+    for (uint32_t i = 0U; i < sizeof actions / sizeof actions[0]; ++i) {
+        const uint32_t now = boot + i * 100U;
+        if (i == 2U || i == 5U || i == 8U) {
+            const struct foc_runtime_command command = command_at(&runtime, i, now - 90U);
+            CHECK(foc_runtime_publish_impedance_command(&runtime, &command, now - 90U) ==
+                  FOC_RUNTIME_OK);
+        }
+        if (actions[i] != FOC_RUNTIME_ACTION_NONE) {
+            const struct foc_runtime_lifecycle_request lifecycle = {
+                .action = actions[i],
+                .requested_mode = i == 12U ? FOC_RUNTIME_MODE_POSITION : FOC_RUNTIME_MODE_IMPEDANCE,
+                .request_sequence = i,
+                .source_session = runtime.motion_session,
+                .produced_us = now - 1U,
+            };
+            CHECK(foc_runtime_publish_lifecycle_request(&runtime, &lifecycle, now - 1U) ==
+                  FOC_RUNTIME_OK);
+        }
+        if (i == 11U) {
+            foc_runtime_request_inhibit(&runtime, FOC_SAFE_FAULT_NONE);
+        }
+        const struct foc_runtime_sensor sample = {
+            .theta_elec_rad = 0.37f,
+            .captured_us = i == 5U ? now - 10U : now,
+            .seq = i + (i >= 6U ? 1U : 0U),
+            .valid = true,
+            .electrical_phase_valid = true,
+            .mechanical_rad = 0.75f,
+            .mechanical_rad_s =
+                i == 5U ? 1.25f : i == 6U ? 0.75f : i == 7U ? NAN : i == 10U ? -0.25f : 0.25f,
+            .mechanical_frame_id = 7U,
+        };
+        CHECK(foc_runtime_h1_step(&runtime, &sample, now, 0U) ==
+              (i == 7U ? FOC_RUNTIME_ERR_INPUT : FOC_RUNTIME_OK));
+        const bool updates = (i >= 4U && i <= 6U) || i == 10U;
+        if (updates) {
+            /* K error is zero. At gapped capture and rearm the new D sample seeds directly. */
+            const float iq = i == 4U ? 0.25f : i == 5U ? 0.22357393f : i == 6U ? -0.25f : 0.75f;
+            const struct foc_runtime_sensor_slot *slot = proposal(&runtime);
+            CHECK(slot->target_valid && fabsf(slot->target.target_a.q - iq) < 1.0e-6f);
+            CHECK(slot->sample.mechanical_rad_s == sample.mechanical_rad_s);
+            CHECK(slot->electrical.velocity_rad_s == 4.0f * sample.mechanical_rad_s);
+        } else {
+            CHECK(!runtime.damping_filter_seen);
+        }
+        const uint32_t before = runtime.pipeline.mock.updates;
+        struct foc_runtime_fast_input input = adc(now);
+        input.adc.sample_seq = i;
+        const int status = foc_runtime_h0_step(&runtime, &input);
+        CHECK(runtime.pipeline.mock.updates == before + (updates ? 1U : 0U));
+        if (i == 7U || i == 11U) {
+            CHECK(status < 0 && runtime.pipeline.mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT);
+        } else {
+            CHECK(status >= 0);
+        }
+        struct foc_runtime_foreground_result result;
+        CHECK(foc_runtime_foreground_poll(&runtime, now, 0U, 0U, &result) >= 0);
+    }
+    CHECK(runtime.mode == FOC_RUNTIME_MODE_POSITION && runtime.pipeline.mock.updates == 4U);
+    return 0;
+}
+
 static int test_source_order_across_modes(void)
 {
     struct foc_runtime runtime;
@@ -561,7 +650,8 @@ int main(void)
     return test_config_and_admission() || test_rearm_and_frame() ||
         test_stop_preemption(FOC_RUNTIME_HOOK_COMMAND_WRITING) ||
         test_stop_preemption(FOC_RUNTIME_HOOK_SENSOR_WRITING) ||
-        test_disabled_set_mode_observes_adc() || test_source_order_across_modes();
+        test_disabled_set_mode_observes_adc() || test_source_order_across_modes() ||
+        test_damping_capture_and_session();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

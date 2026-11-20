@@ -67,7 +67,7 @@ static bool capture_used(const struct foc_cal_workflow_bundle *bundle, uint32_t 
             return true;
         }
     }
-    return false;
+    return bundle->electrical_q_capture.id == capture;
 }
 
 static bool identity_valid(const struct foc_cal_workflow_identity *identity)
@@ -117,6 +117,8 @@ static void revoke_candidates(struct foc_cal_workflow_bundle *bundle)
     bundle->reviewed = false;
     bundle->adc.usable = false;
     bundle->electrical.usable = false;
+    bundle->electrical_q.usable = false;
+    bundle->electrical_model = (struct foc_motor_rl_model){0};
     bundle->rotor.identifiable = false;
     bundle->offset.usable = false;
     bundle->lut.state = FOC_CALIBRATION_STATE_INVALID;
@@ -347,6 +349,13 @@ static enum foc_calibration_failure native_failure(const struct foc_cal_workflow
     }
 }
 
+static bool electrical_q_active(const struct foc_cal_workflow *workflow)
+{
+    return workflow->result.active == FOC_CAL_WORKFLOW_ELECTRICAL &&
+        workflow->result.request.require_dual_axis &&
+        workflow->scratch.electrical.config.axis == FOC_MOTOR_ID_Q;
+}
+
 static int finish_native(struct foc_cal_workflow *workflow)
 {
     struct foc_cal_workflow_bundle *bundle = &workflow->result;
@@ -354,7 +363,10 @@ static int finish_native(struct foc_cal_workflow *workflow)
     case FOC_CAL_WORKFLOW_ADC:
         return foc_calibration_adc_finalize(&workflow->scratch.adc, &bundle->adc);
     case FOC_CAL_WORKFLOW_ELECTRICAL:
-        return foc_motor_id_finish(&workflow->scratch.electrical, &bundle->electrical);
+        return foc_motor_id_finish(
+            &workflow->scratch.electrical,
+            electrical_q_active(workflow) ? &bundle->electrical_q : &bundle->electrical
+        );
     case FOC_CAL_WORKFLOW_ROTOR:
         return foc_calibration_rotor_finalize(&workflow->scratch.rotor, &bundle->rotor);
     case FOC_CAL_WORKFLOW_OFFSET:
@@ -424,6 +436,13 @@ int foc_cal_workflow_start(
         stages == 0U || (stages & ~FOC_CAL_WORKFLOW_ALL) != 0U) {
         return FOC_CAL_WORKFLOW_ERR_INPUT;
     }
+    if (request->require_dual_axis &&
+        ((stages & FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ELECTRICAL)) == 0U ||
+         !isfinite(request->max_rs_relative_difference) ||
+         request->max_rs_relative_difference < 0.0f ||
+         request->max_rs_relative_difference >= 1.0f)) {
+        return FOC_CAL_WORKFLOW_ERR_INPUT;
+    }
     for (unsigned int i = 0U; i < FOC_CAL_WORKFLOW_STAGE_COUNT; ++i) {
         const uint32_t bit = FOC_CAL_WORKFLOW_STAGE_BIT(i);
         const uint32_t required = dependencies((enum foc_cal_workflow_stage)i, stages);
@@ -468,6 +487,16 @@ int foc_cal_workflow_open(
     if (capture_used(&workflow->result, request->capture)) {
         return FOC_CAL_WORKFLOW_ERR_ORDER;
     }
+    const bool dual_axis =
+        request->stage == FOC_CAL_WORKFLOW_ELECTRICAL && workflow->result.request.require_dual_axis;
+    const bool next_q = dual_axis && workflow->result.electrical.usable;
+    if (dual_axis &&
+        request->policy.electrical.axis != (next_q ? FOC_MOTOR_ID_Q : FOC_MOTOR_ID_D)) {
+        return FOC_CAL_WORKFLOW_ERR_DEPENDENCY;
+    }
+    if (next_q && request->source != stage->source) {
+        return FOC_CAL_WORKFLOW_ERR_SOURCE;
+    }
     const int native = open_native(workflow, request);
     if (native != 0) {
         if (native == OPEN_IDENTITY_MISMATCH) {
@@ -480,11 +509,19 @@ int foc_cal_workflow_open(
         }
         return stage->status;
     }
-    *stage = (struct foc_cal_workflow_stage_result){
-        .quality = FOC_CAL_WORKFLOW_COLLECTING,
-        .source = request->source,
-        .primary.id = request->capture,
-    };
+    if (next_q) {
+        workflow->result.electrical_q_capture.id = request->capture;
+        stage->quality = FOC_CAL_WORKFLOW_COLLECTING;
+        stage->failure = FOC_CALIBRATION_FAILURE_NONE;
+        stage->status = FOC_CAL_WORKFLOW_OK;
+        stage->algorithm_status = FOC_MOTOR_ID_OK;
+    } else {
+        *stage = (struct foc_cal_workflow_stage_result){
+            .quality = FOC_CAL_WORKFLOW_COLLECTING,
+            .source = request->source,
+            .primary.id = request->capture,
+        };
+    }
     workflow->result.active = request->stage;
     workflow->result.state = FOC_CAL_WORKFLOW_WAITING_FOR_DATA;
     workflow->max_age_us = request->max_age_us;
@@ -505,8 +542,10 @@ int foc_cal_workflow_push(
         return FOC_CAL_WORKFLOW_ERR_STATE;
     }
     struct foc_cal_workflow_stage_result *result = &workflow->result.stages[stage];
-    struct foc_cal_workflow_capture *capture =
-        workflow->holdout ? &result->holdout : &result->primary;
+    const bool q_axis = electrical_q_active(workflow);
+    struct foc_cal_workflow_capture *capture = q_axis
+        ? &workflow->result.electrical_q_capture
+        : (workflow->holdout ? &result->holdout : &result->primary);
     if (sample->session != workflow->result.request.session || sample->capture != capture->id) {
         return FOC_CAL_WORKFLOW_ERR_ORDER;
     }
@@ -523,6 +562,7 @@ int foc_cal_workflow_push(
         failure = FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
     } else if (
         now_us - time > workflow->max_age_us || capture->samples == UINT32_MAX ||
+        (q_axis && capture->samples == 0U && !newer(time, result->primary.last_us)) ||
         (capture->samples != 0U &&
          (!newer(time, capture->last_us) || !newer(sequence, capture->last_sequence)))
     ) {
@@ -654,6 +694,37 @@ int foc_cal_workflow_finish_stage(struct foc_cal_workflow *workflow)
             status
         );
         return FOC_CAL_WORKFLOW_ERR_QUALITY;
+    }
+    struct foc_cal_workflow_bundle *bundle = &workflow->result;
+    if (stage == FOC_CAL_WORKFLOW_ELECTRICAL && bundle->request.require_dual_axis) {
+        if (!electrical_q_active(workflow)) {
+            conclude_stage(
+                workflow,
+                stage,
+                FOC_CAL_WORKFLOW_PENDING,
+                FOC_CALIBRATION_FAILURE_NONE,
+                FOC_CAL_WORKFLOW_PARTIAL,
+                status
+            );
+            return FOC_CAL_WORKFLOW_PARTIAL;
+        }
+        const int comparison = foc_motor_id_make_model(
+            &bundle->electrical,
+            &bundle->electrical_q,
+            bundle->request.max_rs_relative_difference,
+            &bundle->electrical_model
+        );
+        if (comparison != FOC_MOTOR_ID_OK) {
+            conclude_stage(
+                workflow,
+                stage,
+                FOC_CAL_WORKFLOW_REJECTED_BY_QUALITY,
+                FOC_CALIBRATION_FAILURE_RESIDUAL,
+                FOC_CAL_WORKFLOW_ERR_QUALITY,
+                comparison
+            );
+            return FOC_CAL_WORKFLOW_ERR_QUALITY;
+        }
     }
     conclude_stage(
         workflow,

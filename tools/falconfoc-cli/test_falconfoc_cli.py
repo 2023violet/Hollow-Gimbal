@@ -161,7 +161,7 @@ class DeviceTests(unittest.TestCase):
              "virtual_update_accepted": 0, "virtual_update_rejected": 0,
              "saturation_count": 0, "faults": 0, "replay_hash": 1},
             {"kind": "virtual", "virtual_time_us": 100, "state": 3, "output_action": 1,
-             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.3,
+             "control_mode": 0, "iq_target_a": 0.4, "iq_actual_a": 0.25,
              "virtual_update_accepted": 1, "virtual_update_rejected": 0,
              "saturation_count": 0, "faults": 0, "replay_hash": 2},
             {"kind": "virtual", "virtual_time_us": 200, "state": 3, "output_action": 1,
@@ -177,6 +177,29 @@ class DeviceTests(unittest.TestCase):
         self.assertGreater(metrics["full_window_rmse"], metrics["running_window_rmse"])
         self.assertEqual(metrics["measurement_window"]["running"]["sample_count"], 2)
         self.assertEqual(metrics["measurement_window"]["full"]["sample_count"], 4)
+        self.assertEqual(metrics["control_quality"], "CONTROL_QUALITY_FAIL")
+        self.assertIsNone(metrics["settling_us"])
+        self.assertEqual(metrics["settling_time_us"], 200)
+        full = metrics["measurement_window"]["full"]["tracking_error"]
+        running = metrics["measurement_window"]["running"]["tracking_error"]
+        self.assertAlmostEqual(full["final"], 0.3)
+        self.assertEqual(full["out_of_tolerance_samples"], 3)
+        self.assertEqual(full["first_out_of_tolerance_us"], 0)
+        self.assertEqual(full["last_out_of_tolerance_us"], 300)
+        self.assertEqual(running["final"], 0.0)
+        self.assertAlmostEqual(running["peak"], 0.15)
+        self.assertEqual(running["out_of_tolerance_samples"], 1)
+        self.assertEqual(running["first_out_of_tolerance_us"], 100)
+        self.assertEqual(running["last_out_of_tolerance_us"], 100)
+
+        # A pause in actuation cannot hide an actual end-of-run tracking error.
+        records[2]["iq_actual_a"] = 0.25
+        failed = foc._virtual_metrics(records, "current", 300)
+        running = failed["measurement_window"]["running"]["tracking_error"]
+        self.assertAlmostEqual(running["final"], 0.15)
+        self.assertEqual(running["out_of_tolerance_samples"], 2)
+        self.assertEqual(running["last_out_of_tolerance_us"], 200)
+        self.assertIsNone(failed["settling_time_us"])
 
     def test_load_counterfactual_oracle(self):
         executable = os.environ.get("FOC_VIRTUAL_DEVICE")

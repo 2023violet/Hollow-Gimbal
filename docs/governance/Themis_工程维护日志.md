@@ -3073,3 +3073,14 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 ## 2026-11-19 · NEXT-PRODUCT-01 软件准备
 
 增加独立 Host 三相 PWM 事务模型和锁定态 DWT/SRAM 离线校验入口，验证完整 Shadow 写入、指定 Load、Session/Token 与 STOP/FAULT 撤销。ARM 固件继续锁定。原理图中的独立去能及 Break 路由待实际硬件确认，功率和实机闭环保持阻断。参见 [PRODUCT-01 验收](../evidence/2026-11-19-next-product-01.md)。
+
+
+## 2026-11-19 · NEXT-CAL-INTEG-01 Host 标定与 FOC 集成
+
+- 在 VM01A `0d6ca149` 基线上交付统一 Host 标定入口。虚拟采集覆盖 ADC、转子与 Encoder LUT、独立 d/q R/L、反电动势磁链、J/B 和可选齿槽。审核后，新的生产 Runtime、Pipeline 与 Encoder 实际消费校准与增益，FCAL v1 支持审核重载。
+- 两种 Host 配置四模式双向控制、关闭与超时恢复均通过，保留旧 Current 与 Servo 的品质失败。Clang、GCC、ASan/UBSan、严格门禁和 Legacy Host 通过，AT32F415 锁定 BIN 与基线相同。实际标定、物理输出与 WCET 待验证。 [验收报告](../evidence/2026-11-19-next-cal-integ-01.md)
+
+## 2026-11-20 · NEXT-CQ-01 控制品质和标定收益
+
+- 隔离原 36 Hz Host 整定引起的 Current 退化，两种虚拟配置按 130 Hz 重新验证四模式双向、失配及重载，最坏方向 RMS 均改善。Core 修复低调制比重构的舍入误停，保留事务和保护。
+- 裁决 `NEXT-CQ-01 PARTIAL — QUALITY FAILURES REMAIN`。历史 10 ms Current 和三项 Servo 失败仍在，48 Hz 阻尼试验保留为 Host 候选。软件回归和锁定 ARM 构建通过，实机标定和 WCET 待验。 [验收报告](../evidence/2026-11-20-next-cq-01.md)

@@ -251,7 +251,48 @@ struct foc_runtime_impedance_config {
     float max_damping_nm_s_per_rad;
     /** Maximum absolute feedforward torque in N*m, nonnegative. */
     float max_feedforward_nm;
+    /** Optional H1 damping error cutoff in Hz. Zero preserves unfiltered damping. */
+    float damping_filter_hz;
 };
+
+#if defined(FOC_RUNTIME_HOST_COGGING)
+/** Number of uniform knots spanning one mechanical turn, with knot zero at mechanical zero. */
+enum {
+    FOC_RUNTIME_COGGING_POINTS = 32
+};
+
+/** Qualified compensation torque in the positive motor-shaft frame. */
+struct foc_runtime_cogging_lut {
+    /** Nonzero identity of the motor measured in both captures. */
+    uint32_t motor_id;
+    /** Nonzero identity of mechanical zero and positive shaft rotation. */
+    uint32_t mechanical_frame_id;
+    /** Nonzero training capture ID. */
+    uint32_t training_capture_id;
+    /** Nonzero holdout capture ID, distinct from training. */
+    uint32_t holdout_capture_id;
+    /** True after the independent holdout meets the acquisition and error limits. */
+    bool qualified;
+    /** Signed opposing torque at knots k * 2*pi / FOC_RUNTIME_COGGING_POINTS. */
+    float torque_nm[FOC_RUNTIME_COGGING_POINTS];
+};
+
+/** Explicit Host admission and bounded q-axis feedforward for a reviewed table. */
+struct foc_runtime_cogging_config {
+    /** Request use of this table in a fresh Host Runtime. */
+    bool enabled;
+    /** Expected motor identity from the application configuration. */
+    uint32_t motor_id;
+    /** Expected identity of the continuously observed shaft frame. */
+    uint32_t mechanical_frame_id;
+    /** Reviewed positive motor-shaft torque constant for ampere-peak q current. */
+    float torque_constant_nm_per_a;
+    /** Positive magnitude limit on the additive q current contribution. */
+    float iq_limit_a;
+    /** Runtime-local copy of the reviewed table. */
+    struct foc_runtime_cogging_lut lut;
+};
+#endif
 
 /** Optional mechanical-feedback and outer-loop policy, copied at initialization. */
 struct foc_runtime_motion_config {
@@ -275,6 +316,10 @@ struct foc_runtime_motion_config {
     struct foc_motion_limits_config limits;
     /** Optional H0-owned position following monitor. */
     struct foc_following_error_config following_error;
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    /** Optional Host table. Disabled or invalid tables leave the motion controller unchanged. */
+    struct foc_runtime_cogging_config cogging;
+#endif
 };
 
 /** Caller-selected schedules and Host injection configuration. */
@@ -325,8 +370,9 @@ struct foc_runtime_sensor {
      */
     bool electrical_phase_valid;
     /**
-     * Mechanical frame identity for impedance. Supply a nonzero value only for
-     * a coherent, valid continuous position and valid velocity at captured_us.
+     * Mechanical frame identity for impedance, motion limits, and cogging.
+     * Supply a nonzero value only for a coherent continuous position and
+     * valid velocity at captured_us.
      * Leave zero for other producers or until velocity is established.
      */
     uint32_t mechanical_frame_id;
@@ -519,6 +565,10 @@ struct foc_runtime {
     float outer_trial_a;
     /** True when the last H1 publication has an integral proposal. */
     bool outer_trial_seen;
+    /** H1-owned filtered speed error for impedance damping only. */
+    float damping_speed_error_rad_s;
+    /** True if the previous H1 publication advanced the damping filter. */
+    bool damping_filter_seen;
     /** H1-owned trajectory state for the current session. */
     struct foc_trajectory_context trajectory;
     /** Trial trajectory state awaiting H0 acceptance. */

@@ -59,6 +59,30 @@ static double foc_virtual_angle(
         motor->params.electrical_offset_rad;
 }
 
+static double foc_virtual_motor_torque(
+    const struct foc_virtual_motor *motor,
+    const struct foc_virtual_motor_state *state
+)
+{
+    return 1.5 * (double)motor->params.pole_pairs *
+        (motor->params.psi_f_wb * state->iq_a +
+         (motor->params.ld_h - motor->params.lq_h) * state->id_a * state->iq_a);
+}
+
+static double foc_virtual_load(const struct foc_virtual_motor *motor, double position_rad)
+{
+    return motor->load_torque_nm + motor->load_gradient_nm_per_rad * position_rad;
+}
+
+static double foc_virtual_cogging(const struct foc_virtual_motor *motor, double position_rad)
+{
+    if (motor->cogging_amplitude_nm == 0.0) {
+        return 0.0;
+    }
+    return motor->cogging_amplitude_nm *
+        sin((double)motor->cogging_cycles_per_turn * position_rad + motor->cogging_phase_rad);
+}
+
 static struct foc_virtual_motor_derivative foc_virtual_derivative(
     const struct foc_virtual_motor *motor,
     const struct foc_virtual_motor_state *state,
@@ -73,9 +97,8 @@ static struct foc_virtual_motor_derivative foc_virtual_derivative(
     const double vq_v = cosine * v_beta_v - sine * v_alpha_v;
     const double omega_e_rad_s =
         (double)motor->params.pole_pairs * state->mechanical_velocity_rad_s;
-    const double torque_nm = 1.5 * (double)motor->params.pole_pairs *
-        (motor->params.psi_f_wb * state->iq_a +
-         (motor->params.ld_h - motor->params.lq_h) * state->id_a * state->iq_a);
+    const double position_rad = state->mechanical_position_rad;
+    const double torque_nm = foc_virtual_motor_torque(motor, state);
 
     return (struct foc_virtual_motor_derivative){
         .id_a = (vd_v - motor->params.rs_ohm * state->id_a +
@@ -85,10 +108,12 @@ static struct foc_virtual_motor_derivative foc_virtual_derivative(
                  omega_e_rad_s * (motor->params.ld_h * state->id_a + motor->params.psi_f_wb)) /
             motor->params.lq_h,
         .mechanical_position_rad = state->mechanical_velocity_rad_s,
-        .mechanical_velocity_rad_s =
-            (torque_nm - motor->params.damping_nm_s * state->mechanical_velocity_rad_s -
-             motor->load_torque_nm) /
-            motor->params.inertia_kg_m2,
+        .mechanical_velocity_rad_s = motor->fixture_active
+            ? 0.0
+            : ((torque_nm - motor->params.damping_nm_s * state->mechanical_velocity_rad_s -
+                foc_virtual_load(motor, position_rad)) +
+               foc_virtual_cogging(motor, position_rad)) /
+                motor->params.inertia_kg_m2,
     };
 }
 
@@ -172,6 +197,87 @@ int foc_virtual_motor_set_load(struct foc_virtual_motor *motor, double load_torq
     return 0;
 }
 
+int foc_virtual_motor_set_load_gradient(struct foc_virtual_motor *motor, double nm_per_rad)
+{
+    if (motor == NULL || !motor->initialized || !isfinite(nm_per_rad)) {
+        return -1;
+    }
+    motor->load_gradient_nm_per_rad = nm_per_rad;
+    return 0;
+}
+
+int foc_virtual_motor_set_cogging(
+    struct foc_virtual_motor *motor,
+    double amplitude_nm,
+    unsigned int cycles_per_turn,
+    double phase_rad
+)
+{
+    if (motor == NULL || !motor->initialized || !isfinite(amplitude_nm) || amplitude_nm < 0.0 ||
+        (amplitude_nm > 0.0 && (cycles_per_turn == 0U || !isfinite(phase_rad)))) {
+        return -1;
+    }
+    motor->cogging_amplitude_nm = amplitude_nm;
+    motor->cogging_cycles_per_turn = cycles_per_turn;
+    motor->cogging_phase_rad = amplitude_nm == 0.0 ? 0.0 : foc_virtual_wrap(phase_rad);
+    return 0;
+}
+
+int foc_virtual_motor_set_fixture_speed(struct foc_virtual_motor *motor, double mechanical_rad_s)
+{
+    if (motor == NULL || !motor->initialized || !isfinite(mechanical_rad_s)) {
+        return -1;
+    }
+    motor->state.mechanical_velocity_rad_s = mechanical_rad_s;
+    motor->fixture_active = true;
+    return 0;
+}
+
+void foc_virtual_motor_release_fixture(struct foc_virtual_motor *motor)
+{
+    if (motor != NULL && motor->initialized) {
+        motor->fixture_active = false;
+    }
+}
+
+int foc_virtual_motor_observe(
+    const struct foc_virtual_motor *motor,
+    struct foc_virtual_motor_observation *observation
+)
+{
+    if (motor == NULL || !motor->initialized || observation == NULL) {
+        return -1;
+    }
+    const struct foc_virtual_motor_state *state = &motor->state;
+    const double position = state->mechanical_position_rad;
+    const double electromagnetic_torque = foc_virtual_motor_torque(motor, state);
+    const double applied_load = foc_virtual_load(motor, position);
+    const double electrical_position = foc_virtual_angle(motor, state);
+    /* The imposed-speed fixture supplies the residual shaft torque for zero acceleration. */
+    const double fixture_torque = motor->fixture_active
+        ? applied_load + motor->params.damping_nm_s * state->mechanical_velocity_rad_s -
+            foc_virtual_cogging(motor, position) - electromagnetic_torque
+        : 0.0;
+    if (!isfinite(electrical_position) || !isfinite(electromagnetic_torque) ||
+        !isfinite(applied_load) || !isfinite(fixture_torque)) {
+        return -1;
+    }
+    *observation = (struct foc_virtual_motor_observation){
+        .id_a = state->id_a,
+        .iq_a = state->iq_a,
+        .mechanical_position_rad = position,
+        .mechanical_velocity_rad_s = state->mechanical_velocity_rad_s,
+        .electrical_position_rad = electrical_position,
+        .v_alpha_v = motor->v_alpha_v,
+        .v_beta_v = motor->v_beta_v,
+        .electromagnetic_torque_nm = electromagnetic_torque,
+        .applied_load_torque_nm = applied_load,
+        .fixture_torque_nm = fixture_torque,
+        .fixture_active = motor->fixture_active,
+    };
+    return 0;
+}
+
 int foc_virtual_motor_step(
     struct foc_virtual_motor *motor,
     double v_alpha_v,
@@ -215,6 +321,8 @@ int foc_virtual_motor_step(
         return -1;
     }
     motor->state = trial;
+    motor->v_alpha_v = v_alpha_v;
+    motor->v_beta_v = v_beta_v;
     return 0;
 }
 

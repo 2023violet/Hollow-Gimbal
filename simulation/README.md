@@ -278,3 +278,45 @@ operator affects the tested damping term through the existing Host fixture.
 The runtime acceptance and output paths still run for every arm. CTest
 checks execution and transaction assertions; the evidence tools evaluate
 noise and dynamic admission separately.
+
+
+## Measured Host calibration
+
+The top-level Simulation build provides `falconfoc-virtual-calibrate` for
+[the calibrate CLI](../tools/falconfoc-cli/README.md#host-motor-calibration-and-foc).
+It drives a dedicated, bounded calibration fixture and then verifies the
+approved values in new production Runtime and Encoder instances. The model
+supports an imposed virtual reference-fixture shaft speed, standstill and an
+optional periodic disturbance. Control evaluation uses the free plant driven
+by the existing accepted-output adapter.
+
+
+## Control quality counterfactuals
+
+Run the calibration preview with the same profile and cogging choice as the
+approved run. The native Host runner accepts an additional cycle CSV path.
+
+```powershell
+$exe = 'build/virtual-cal/falconfoc-virtual-calibrate.exe'
+& $exe --profile-id GENERIC_RESEARCH_MOTOR --cogging
+$reviewId = 'copy-the-review-id-from-CANDIDATE_PREVIEW'
+& $exe --profile-id GENERIC_RESEARCH_MOTOR --cogging --approve-candidate $reviewId --cq-current-csv cq-cycles.csv
+```
+
+The study drives the same Plant, ADC, Encoder, Runtime, Pipeline and output
+adapter through fresh instances. A is the original default. B and C use the
+older 36 Hz sizing with measured and oracle R/L, respectively, and share
+the same admitted sensing. D holds the original gains with admitted sensing. E changes
+one sensing or gain factor. F sweeps admitted-model gains with sensing held
+fixed. The pressure cases perturb the model, lower the available voltage,
+reverse current, or inject and release load. Their samples include the
+requested reference, measured feedback, Plant oracle, aligned angle, duties,
+reconstructed voltage, integral and output receipt. `near_voltage_cap` uses
+a 2 mV proximity tolerance on the reconstructed voltage. CSV generation runs from the
+quiescent Host observer at the virtual ticks. It adds no firmware tracing.
+
+The normal four-mode report retains the existing 1 ms comparison grid
+and bounds. It requires a fresh RUNNING/UPDATE receipt for each metric
+sample. `CURRENT_BENEFIT_PASS` compares the worst full-window q-current
+RMS across both polarities. Older 36 Hz FCAL v1 packages still reload
+under their admitted policy and report their own benefit verdict.

@@ -106,3 +106,72 @@ the software result. Physical applied is always false in the locked image.
 V1 mode selection is constrained to the current Runtime mode. Parameter IDs,
 response layouts and session semantics are specified in the
 [protocol documentation](../../protocol/README.md).
+
+
+## Host motor calibration and FOC
+
+Build the Virtual Motor project from the repository root. The calibration
+command uses the C11 product runner in the same project as the V1 virtual
+device. It operates on Host profiles and uses Python's standard library.
+
+```powershell
+cmake -S simulation -B build/virtual-cal -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/virtual-cal --target falconfoc-virtual-calibrate
+$exe = 'build/virtual-cal/falconfoc-virtual-calibrate.exe'
+$cli = 'tools/falconfoc-cli/falconfoc_cli.py'
+
+# Capture and preview measured parameters and gains.
+python -B $cli calibrate --simulator $exe --profile-id GENERIC_RESEARCH_MOTOR --cogging
+
+# Review the same fixture and policy, apply afresh, run the control trials, and save.
+$reviewId = 'copy-the-review-id-from-CANDIDATE_PREVIEW'
+python -B $cli calibrate --simulator $exe --profile-id GENERIC_RESEARCH_MOTOR --approve-candidate $reviewId --cogging --save-config motor.fcal --trace rl.csv --json calibration.json
+
+# Reload against the same profile, then repeat readback and verification.
+python -B $cli calibrate --simulator $exe --profile-id GENERIC_RESEARCH_MOTOR --load-config motor.fcal
+python -B $cli calibrate --simulator $exe --profile-id GENERIC_RESEARCH_MOTOR --approve-candidate $reviewId --load-config motor.fcal --json restored.json
+```
+
+Executable naming depends on the host. `CALIBRATION_SALIENT_MOTOR` is the
+second fixture with separate Motor/Encoder identities, opposite raw encoder
+direction, ACB phase order and different electrical and mechanical dynamics.
+Preview emits `PARAMETERS_IDENTIFIED`, `CALIBRATION_QUALIFIED`,
+`CANDIDATE_PREVIEW` and `REVIEW_REQUIRED`. Captured stage records are printed with the result. Use the reported
+`review_id` with `--approve-candidate` to authorize the same measured values,
+gains, identity and LUTs on a deterministic rerun. A mismatch holds the
+Runtime inhibited. Apply uses new Runtime and Encoder storage. The report includes
+configuration readback, ± Current/Velocity/Position/Impedance comparisons,
+timeout recovery, STOP and `CONTROL_QUALITY_PASS/FAIL`. The reports always
+carry `PHYSICAL_CALIBRATION_NOT_VERIFIED`.
+
+`--cogging` adds the optional Host fixture's separate bidirectional capture,
+holdout and H1 feedforward. `--trace` exports the separately identified d/q
+terminal-voltage intervals and ADC-current endpoints; this CSV is distinct
+from Measurement Trace v1. `--cancel-after ELECTRICAL_D` exercises cancellation
+without applying or saving a configuration. Rejections carry a machine-readable
+`error`, `stage` and `native_status`.
+
+Save creates a new Host FCAL v1 file only after quality verification.
+Readback on reload identifies the stored model and applied gains and compares
+them against the selected profile's baseline again. FCAL v1 uses little-endian
+words, binary32 parameters and CRC32, with profile motor, encoder, frame and
+acquisition identity checks. Restore requires explicit approval, validates
+parameter ranges and LUT admission, recomputes every gain from the stored
+model and local tuning policy, and binds a fresh local output owner. CRC32
+checks corruption and supplies the review fingerprint. The fingerprint
+identifies a payload for explicit review. UART V1, Schema 2 and MCU Flash use their existing
+separate contracts. JSON, CSV and package outputs require new file names.
+
+Run the product CLI acceptance test after a normal Simulation build with
+`ctest --test-dir build/virtual-cal -R '^test-foc-virtual-calibration-cli$' --output-on-failure`.
+The test requires Python 3. The C runner also accepts the options directly.
+
+
+The current Host calibration uses a 130 Hz Current PI design request within
+its 360 µs sample and 260 µs update-delay budgets. The prepared values
+still pass the existing voltage and current admission. The recommendation
+also checks bidirectional active-window Current RMS against the default
+configuration. Archived FCAL v1 files from the 36 Hz policy may be loaded
+with their original review ID and emit their own benefit result. The
+historical `virtual-demo` verdict retains its original metrics and adds
+state-aware `tracking_error` diagnostics. See [Cycle-level A/B](../../simulation/README.md#control-quality-counterfactuals).

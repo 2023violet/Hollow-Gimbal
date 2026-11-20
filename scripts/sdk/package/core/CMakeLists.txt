@@ -8,6 +8,8 @@ add_library(
   src/foc_impedance_feedforward.c
   src/foc_impedance_tuning.c
   src/foc_motion.c
+  src/foc_motion_limits.c
+  src/foc_following_error.c
   src/foc_trajectory.c
 )
 target_include_directories(falconfoc-core PUBLIC include)

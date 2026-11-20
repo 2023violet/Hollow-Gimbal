@@ -1,0 +1,236 @@
+[falconfoc-servo-demo inspect]
+target=HOST_VIRTUAL transport=C11_CONTROL_PLANE profile=default_pmsm calibration_source=HOST_MODEL physical_applied=false
+capabilities=configuration,IMPEDANCE,SET_MODE,ARM,START,STOP,COMMAND_TIMEOUT_RECOVERY
+UART_V1=CURRENT,VELOCITY,POSITION remote_impedance=false remote_mode_switch=false Board1_ARM_START=OUTPUT_LOCKED
+config motion.iq_limit candidate=1.8 effective=1.8 unit=A
+config servo.torque_limit candidate=0.315 effective=0.315 unit=N*m
+config servo.max_stiffness candidate=1 effective=1 unit=N*m/rad
+config servo.max_damping candidate=0.1 effective=0.1 unit=N*m*s/rad
+config servo.max_feedforward candidate=0.1 effective=0.1 unit=N*m
+model_default_iq_limit_A=2.5 config_candidate=VALIDATED runtime=INITIALIZED
+parameter id=0x1001 name=motor.pole_pairs type=u32 unit=1 reinit=false range=[1,4294967295] effective=4
+parameter id=0x1002 name=motor.electrical_offset type=f32 unit=rad reinit=false range=[-3.402823e+38,3.402823e+38] effective=0.37
+parameter id=0x1003 name=motor.kt type=f32 unit=N*m/A reinit=false range=(0,3.402823e+38] effective=0.15
+parameter id=0x1004 name=servo.mechanical_frame type=u32 unit=1 reinit=false range=[1,4294967295] effective=81
+parameter id=0x1005 name=motion.iq_limit type=f32 unit=A reinit=true range=(0,1.8] effective=1.8
+parameter id=0x1006 name=servo.torque_limit type=f32 unit=N*m reinit=true range=(0,3.402823e+38] effective=0.315
+parameter id=0x1007 name=servo.max_stiffness type=f32 unit=N*m/rad reinit=true range=[0,3.402823e+38] effective=1
+parameter id=0x1008 name=servo.max_damping type=f32 unit=N*m*s/rad reinit=true range=[0,3.402823e+38] effective=0.1
+parameter id=0x1009 name=servo.max_feedforward type=f32 unit=N*m reinit=true range=[0,3.402823e+38] effective=0.1
+parameter id=0x100a name=position.speed_limit type=f32 unit=rad/s reinit=false range=(0,3.402823e+38] effective=12
+parameter id=0x100b name=motion.limits_enabled type=u32 unit=1 reinit=true range=[0,1] effective=0
+parameter id=0x100c name=motion.position_min type=f32 unit=rad reinit=true range=[-3.402823e+38,3.402823e+38] effective=0
+parameter id=0x100d name=motion.position_max type=f32 unit=rad reinit=true range=[-3.402823e+38,3.402823e+38] effective=0
+parameter id=0x100e name=motion.limit_tolerance type=f32 unit=rad reinit=true range=[0,3.402823e+38] effective=0
+parameter id=0x100f name=motion.protection_frame type=u32 unit=1 reinit=true range=[1,4294967295] effective=0
+parameter id=0x1010 name=motion.following_enabled type=u32 unit=1 reinit=true range=[0,1] effective=0
+parameter id=0x1011 name=motion.following_threshold type=f32 unit=rad reinit=true range=(0,3.402823e+38] effective=0
+parameter id=0x1012 name=motion.following_duration type=u32 unit=us reinit=true range=[1,2147483647] effective=0
+parameter id=0x1013 name=motion.following_max_gap type=u32 unit=us reinit=true range=[1,2147483647] effective=0
+parameter id=0x2001 name=servo.target_position type=f32 unit=rad reinit=false range=[-1024,1024]
+parameter id=0x2002 name=servo.target_velocity type=f32 unit=rad/s reinit=false range=[-3.402823e+38,3.402823e+38]
+parameter id=0x2003 name=servo.stiffness type=f32 unit=N*m/rad reinit=false range=[0,1]
+parameter id=0x2004 name=servo.damping type=f32 unit=N*m*s/rad reinit=false range=[0,0.1]
+parameter id=0x2005 name=servo.feedforward type=f32 unit=N*m reinit=false range=[-0.1,0.1]
+parameter id=0x3001 name=runtime.mode type=enum unit=1 reinit=false range=[0,3]
+parameter id=0x3002 name=safety.state type=enum unit=1 reinit=false range=[0,4]
+parameter id=0x3003 name=safety.faults type=u32 unit=bits reinit=false range=[0,4294967295]
+parameter id=0x3004 name=runtime.session type=u32 unit=1 reinit=false range=[0,4294967295]
+parameter id=0x3005 name=command.observed_sequence type=u32 unit=1 reinit=false range=[0,4294967295]
+parameter id=0x3006 name=command.observed_source_time type=u32 unit=us reinit=false range=[0,4294967295]
+parameter id=0x3007 name=sensor.source_time type=u32 unit=us reinit=false range=[0,4294967295]
+parameter id=0x3008 name=output.action type=enum unit=1 reinit=false range=[0,3]
+parameter id=0x3009 name=output.confirmed type=u32 unit=1 reinit=false range=[0,1]
+parameter id=0x300a name=output.updates type=u32 unit=1 reinit=false range=[0,4294967295]
+parameter id=0x300b name=output.inhibit_pending type=u32 unit=1 reinit=false range=[0,1]
+parameter id=0x300c name=sensor.valid type=u32 unit=1 reinit=false range=[0,1]
+parameter id=0x300d name=sensor.position type=f32 unit=rad reinit=false range=[-3.402823e+38,3.402823e+38]
+parameter id=0x300e name=sensor.velocity type=f32 unit=rad/s reinit=false range=[-3.402823e+38,3.402823e+38]
+parameter id=0x300f name=runtime.pipeline_status type=i32 unit=1 reinit=false range=[-2147483648,2147483647]
+parameter id=0x3010 name=motion.following_state type=enum unit=1 reinit=false range=[0,6]
+parameter id=0x3011 name=motion.rejection type=enum unit=1 reinit=false range=[0,7]
+parameter id=0x4001 name=action.stop type=action unit=1 reinit=false
+parameter id=0x4002 name=action.clear_command_timeout type=action unit=1 reinit=false
+parameter id=0x4003 name=action.set_mode type=enum unit=1 reinit=false range=[0,3]
+parameter id=0x4004 name=action.arm type=action unit=1 reinit=false
+parameter id=0x4005 name=action.start type=action unit=1 reinit=false
+inspection state=DISABLED output=INHIBITED confirmed=true updates=0 physical_applied=false
+
+[falconfoc-servo-demo normal]
+target=HOST_VIRTUAL transport=C11_CONTROL_PLANE profile=default_pmsm calibration_source=HOST_MODEL physical_applied=false
+capabilities=configuration,IMPEDANCE,SET_MODE,ARM,START,STOP,COMMAND_TIMEOUT_RECOVERY
+UART_V1=CURRENT,VELOCITY,POSITION remote_impedance=false remote_mode_switch=false Board1_ARM_START=OUTPUT_LOCKED
+config motion.iq_limit candidate=2.2 effective=2.2 unit=A
+config servo.torque_limit candidate=0.315 effective=0.315 unit=N*m
+config servo.max_stiffness candidate=1 effective=1 unit=N*m/rad
+config servo.max_damping candidate=0.1 effective=0.1 unit=N*m*s/rad
+config servo.max_feedforward candidate=0.1 effective=0.1 unit=N*m
+model_default_iq_limit_A=2.5 config_candidate=VALIDATED runtime=INITIALIZED
+HOST EXAMPLE PARAMETERS - NOT BOARD1 DEFAULTS model=2 frame=81 pole_pairs=4 flux_Wb=0.025 Kt_Nm_per_A=0.150 J_kg_m2=0.0020 B_Nms_per_rad=0.006 CPR=65536 direction=1 Iq_limit_A=2.20 H0_us=200 H1_us=500 foreground_us=200 angle_timeout_us=600
+tuning model=2 K_Nm_per_rad=0.648000 D_Nms_per_rad=0.048000 omega_rad_s=18.00 zeta=0.75
+static REACHABLE Iq_A=2.20 torque_capacity_Nm=0.315000 margin_Nm=0.276000 error_rad=0.060185
+static TORQUE_INSUFFICIENT Iq_A=0.25 torque_capacity_Nm=0.037500 margin_Nm=-0.001500
+static UNKNOWN load_model_id=0
+scenario ZERO_FF hold/forward/reverse/KD_change/load/recovery
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+ZERO_FF t_us=1000 ref_rad=0.00000 pos_rad=0.00000 ref_rad_s=0.00000 vel_rad_s=0.00000 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.00000 Iq_plant_A=0.00000 Iq_limit_A=2.20000 sensor_pos_rad=0.00000 sensor_vel_rad_s=0.00000 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2 FG_us=1000 H1_seq=3 sensor_us=1000 sensor_age_us=0 ADC_us=1000 command_receipt=APPLIED confirmed=1 updates=1 physical_applied=false
+command request=ACCEPTED session=1 seq=3 produced_us=1500
+ZERO_FF t_us=200000 ref_rad=0.00000 pos_rad=0.00000 ref_rad_s=0.00000 vel_rad_s=0.00000 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.00000 Iq_plant_A=0.00000 Iq_limit_A=2.20000 sensor_pos_rad=0.00000 sensor_vel_rad_s=0.00000 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=400 FG_us=200000 H1_seq=401 sensor_us=200000 sensor_age_us=0 ADC_us=200000 command_receipt=APPLIED confirmed=1 updates=996 physical_applied=false
+ZERO_FF t_us=400000 ref_rad=0.02277 pos_rad=0.01106 ref_rad_s=0.58008 vel_rad_s=0.37226 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.12591 Iq_plant_A=0.12322 Iq_limit_A=2.20000 sensor_pos_rad=0.01103 sensor_vel_rad_s=0.34520 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=800 FG_us=400000 H1_seq=801 sensor_us=400000 sensor_age_us=0 ADC_us=400000 command_receipt=APPLIED confirmed=1 updates=1996 physical_applied=false
+ZERO_FF t_us=600000 ref_rad=0.19723 pos_rad=0.19234 ref_rad_s=0.58008 vel_rad_s=0.84411 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.06701 Iq_plant_A=-0.06595 Iq_limit_A=2.20000 sensor_pos_rad=0.19232 sensor_vel_rad_s=0.85570 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=1200 FG_us=600000 H1_seq=1201 sensor_us=600000 sensor_age_us=0 ADC_us=600000 command_receipt=APPLIED confirmed=1 updates=2996 physical_applied=false
+ZERO_FF t_us=800000 ref_rad=0.22000 pos_rad=0.22526 ref_rad_s=0.00000 vel_rad_s=-0.09468 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.00438 Iq_plant_A=0.00770 Iq_limit_A=2.20000 sensor_pos_rad=0.22530 sensor_vel_rad_s=-0.08528 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=1600 FG_us=800000 H1_seq=1601 sensor_us=800000 sensor_age_us=0 ADC_us=800000 command_receipt=APPLIED confirmed=1 updates=3996 physical_applied=false
+ZERO_FF t_us=1000000 ref_rad=0.18688 pos_rad=0.20362 ref_rad_s=-0.84375 vel_rad_s=-0.53948 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.17930 Iq_plant_A=-0.17385 Iq_limit_A=2.20000 sensor_pos_rad=0.20364 sensor_vel_rad_s=-0.50973 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2000 FG_us=1000000 H1_seq=2001 sensor_us=1000000 sensor_age_us=0 ADC_us=1000000 command_receipt=APPLIED confirmed=1 updates=4996 physical_applied=false
+ZERO_FF t_us=1100200 ref_rad=0.06000 pos_rad=0.09280 ref_rad_s=-1.50000 vel_rad_s=-1.55960 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.12484 Iq_plant_A=-0.12519 Iq_limit_A=2.20000 sensor_pos_rad=0.09309 sensor_vel_rad_s=-1.55663 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2200 FG_us=1100000 H1_seq=2201 sensor_us=1100000 sensor_age_us=200 ADC_us=1100200 command_receipt=APPLIED confirmed=1 updates=5497 physical_applied=false
+ZERO_FF t_us=1200000 ref_rad=-0.06687 pos_rad=-0.05980 ref_rad_s=-0.84375 vel_rad_s=-1.22723 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.10452 Iq_plant_A=0.09455 Iq_limit_A=2.20000 sensor_pos_rad=-0.05983 sensor_vel_rad_s=-1.26554 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2400 FG_us=1200000 H1_seq=2401 sensor_us=1200000 sensor_age_us=0 ADC_us=1200000 command_receipt=APPLIED confirmed=1 updates=5996 physical_applied=false
+ZERO_FF t_us=1400000 ref_rad=-0.10000 pos_rad=-0.10767 ref_rad_s=-0.00000 vel_rad_s=0.13697 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.01163 Iq_plant_A=-0.01153 Iq_limit_A=2.20000 sensor_pos_rad=-0.10767 sensor_vel_rad_s=0.13985 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2800 FG_us=1400000 H1_seq=2801 sensor_us=1400000 sensor_age_us=0 ADC_us=1400000 command_receipt=APPLIED confirmed=1 updates=6996 physical_applied=false
+ZERO_FF t_us=1450000 ref_rad=-0.10000 pos_rad=-0.10247 ref_rad_s=-0.00000 vel_rad_s=0.07172 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.01076 Iq_plant_A=-0.01320 Iq_limit_A=2.20000 sensor_pos_rad=-0.10249 sensor_vel_rad_s=0.06911 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2900 FG_us=1450000 H1_seq=2901 sensor_us=1450000 sensor_age_us=0 ADC_us=1450000 command_receipt=APPLIED confirmed=1 updates=7246 physical_applied=false
+ZERO_FF t_us=1600000 ref_rad=-0.10000 pos_rad=-0.11613 ref_rad_s=-0.00000 vel_rad_s=-0.52103 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.20356 Iq_plant_A=0.20609 Iq_limit_A=2.20000 sensor_pos_rad=-0.11610 sensor_vel_rad_s=-0.50149 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3200 FG_us=1600000 H1_seq=3201 sensor_us=1600000 sensor_age_us=0 ADC_us=1600000 command_receipt=APPLIED confirmed=1 updates=7996 physical_applied=false
+ZERO_FF t_us=1700200 ref_rad=-0.10000 pos_rad=-0.16035 ref_rad_s=-0.00000 vel_rad_s=-0.26660 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.30130 Iq_plant_A=0.30214 Iq_limit_A=2.20000 sensor_pos_rad=-0.16030 sensor_vel_rad_s=-0.27734 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3400 FG_us=1700000 H1_seq=3401 sensor_us=1700000 sensor_age_us=200 ADC_us=1700200 command_receipt=APPLIED confirmed=1 updates=8497 physical_applied=false
+ZERO_FF t_us=1800000 ref_rad=-0.10000 pos_rad=-0.17247 ref_rad_s=-0.00000 vel_rad_s=-0.02339 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.27343 Iq_plant_A=0.27541 Iq_limit_A=2.20000 sensor_pos_rad=-0.17248 sensor_vel_rad_s=-0.02534 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3600 FG_us=1800000 H1_seq=3601 sensor_us=1800000 sensor_age_us=0 ADC_us=1800000 command_receipt=APPLIED confirmed=1 updates=8996 physical_applied=false
+ZERO_FF t_us=2000000 ref_rad=-0.10000 pos_rad=-0.12866 ref_rad_s=-0.00000 vel_rad_s=0.46422 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.02991 Iq_plant_A=-0.03064 Iq_limit_A=2.20000 sensor_pos_rad=-0.12866 sensor_vel_rad_s=0.46930 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4000 FG_us=2000000 H1_seq=4001 sensor_us=2000000 sensor_age_us=0 ADC_us=2000000 command_receipt=APPLIED confirmed=1 updates=9996 physical_applied=false
+ZERO_FF t_us=2200000 ref_rad=-0.10000 pos_rad=-0.09816 ref_rad_s=-0.00000 vel_rad_s=-0.01013 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.00381 Iq_plant_A=-0.00195 Iq_limit_A=2.20000 sensor_pos_rad=-0.09817 sensor_vel_rad_s=-0.01003 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4400 FG_us=2200000 H1_seq=4401 sensor_us=2200000 sensor_age_us=0 ADC_us=2200000 command_receipt=APPLIED confirmed=1 updates=10996 physical_applied=false
+ZERO_FF t_us=2400000 ref_rad=-0.10000 pos_rad=-0.09999 ref_rad_s=-0.00000 vel_rad_s=-0.00126 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.00001 Iq_plant_A=0.00050 Iq_limit_A=2.20000 sensor_pos_rad=-0.10000 sensor_vel_rad_s=-0.00000 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4800 FG_us=2400000 H1_seq=4801 sensor_us=2400000 sensor_age_us=0 ADC_us=2400000 command_receipt=APPLIED confirmed=1 updates=11996 physical_applied=false
+STOP request=ACCEPTED session=1 t_us=2400000 H0=pending
+STOP H0=OBSERVED H0_us=2400200 output=INHIBITED
+STOP action=INHIBIT confirmed=true t_us=2402000 H0_us=2402000 state=DISABLED faults=0x0 session=1->2 updates=11996->11996 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+ZERO_FF reverse_position_RMS_rad=0.0199641 reverse_velocity_RMS_rad_s=0.2452988 peak_Iq_request_A=0.307144 peak_Iq_plant_A=0.303333 loaded_peak_error_rad=0.0727627 limited_updates=0 updates=11996 plant_update_steps=23992
+scenario MODEL_FF hold/forward/reverse/KD_change/load/recovery
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+MODEL_FF t_us=1000 ref_rad=0.00000 pos_rad=0.00000 ref_rad_s=0.00000 vel_rad_s=0.00000 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.00000 Iq_plant_A=0.00000 Iq_limit_A=2.20000 sensor_pos_rad=0.00000 sensor_vel_rad_s=0.00000 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2 FG_us=1000 H1_seq=3 sensor_us=1000 sensor_age_us=0 ADC_us=1000 command_receipt=APPLIED confirmed=1 updates=1 physical_applied=false
+command request=ACCEPTED session=1 seq=3 produced_us=1500
+MODEL_FF t_us=200000 ref_rad=0.00000 pos_rad=0.00000 ref_rad_s=0.00000 vel_rad_s=0.00000 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=0.00000 Iq_plant_A=0.00000 Iq_limit_A=2.20000 sensor_pos_rad=0.00000 sensor_vel_rad_s=0.00000 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=400 FG_us=200000 H1_seq=401 sensor_us=200000 sensor_age_us=0 ADC_us=200000 command_receipt=APPLIED confirmed=1 updates=996 physical_applied=false
+MODEL_FF t_us=400000 ref_rad=0.02277 pos_rad=0.02291 ref_rad_s=0.58008 vel_rad_s=0.58754 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.01895 Iq_request_audit_A=0.12917 Iq_plant_A=0.12654 Iq_limit_A=2.20000 sensor_pos_rad=0.02291 sensor_vel_rad_s=0.56929 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=800 FG_us=400000 H1_seq=801 sensor_us=400000 sensor_age_us=0 ADC_us=400000 command_receipt=APPLIED confirmed=1 updates=1996 physical_applied=false
+MODEL_FF t_us=600000 ref_rad=0.19723 pos_rad=0.19747 ref_rad_s=0.58008 vel_rad_s=0.56990 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=-0.01199 Iq_request_audit_A=-0.08521 Iq_plant_A=-0.08396 Iq_limit_A=2.20000 sensor_pos_rad=0.19750 sensor_vel_rad_s=0.59291 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=1200 FG_us=600000 H1_seq=1201 sensor_us=600000 sensor_age_us=0 ADC_us=600000 command_receipt=APPLIED confirmed=1 updates=2996 physical_applied=false
+MODEL_FF t_us=800000 ref_rad=0.22000 pos_rad=0.21960 ref_rad_s=0.00000 vel_rad_s=0.00616 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.01081 Iq_plant_A=0.00128 Iq_limit_A=2.20000 sensor_pos_rad=0.21965 sensor_vel_rad_s=0.03854 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=1600 FG_us=800000 H1_seq=1601 sensor_us=800000 sensor_age_us=0 ADC_us=800000 command_receipt=APPLIED confirmed=1 updates=3996 physical_applied=false
+MODEL_FF t_us=1000000 ref_rad=0.18688 pos_rad=0.18672 ref_rad_s=-0.84375 vel_rad_s=-0.85486 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=-0.02756 Iq_request_audit_A=-0.19453 Iq_plant_A=-0.18499 Iq_limit_A=2.20000 sensor_pos_rad=0.18676 sensor_vel_rad_s=-0.80855 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2000 FG_us=1000000 H1_seq=2001 sensor_us=1000000 sensor_age_us=0 ADC_us=1000000 command_receipt=APPLIED confirmed=1 updates=4996 physical_applied=false
+MODEL_FF t_us=1100200 ref_rad=0.06000 pos_rad=0.05862 ref_rad_s=-1.50000 vel_rad_s=-1.50211 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=-0.00900 Iq_request_audit_A=-0.06142 Iq_plant_A=-0.05599 Iq_limit_A=2.20000 sensor_pos_rad=0.05896 sensor_vel_rad_s=-1.48154 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2200 FG_us=1100000 H1_seq=2201 sensor_us=1100000 sensor_age_us=200 ADC_us=1100200 command_receipt=APPLIED confirmed=1 updates=5497 physical_applied=false
+MODEL_FF t_us=1200000 ref_rad=-0.06687 pos_rad=-0.06723 ref_rad_s=-0.84375 vel_rad_s=-0.82883 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.01744 Iq_request_audit_A=0.11673 Iq_plant_A=0.11948 Iq_limit_A=2.20000 sensor_pos_rad=-0.06721 sensor_vel_rad_s=-0.84075 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2400 FG_us=1200000 H1_seq=2401 sensor_us=1200000 sensor_age_us=0 ADC_us=1200000 command_receipt=APPLIED confirmed=1 updates=5996 physical_applied=false
+MODEL_FF t_us=1400000 ref_rad=-0.10000 pos_rad=-0.09944 ref_rad_s=-0.00000 vel_rad_s=-0.00835 K_Nm_per_rad=0.64800 D_Nms_per_rad=0.04800 FF_Nm=0.00000 Iq_request_audit_A=-0.00207 Iq_plant_A=-0.00151 Iq_limit_A=2.20000 sensor_pos_rad=-0.09942 sensor_vel_rad_s=-0.00135 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2800 FG_us=1400000 H1_seq=2801 sensor_us=1400000 sensor_age_us=0 ADC_us=1400000 command_receipt=APPLIED confirmed=1 updates=6996 physical_applied=false
+MODEL_FF t_us=1450000 ref_rad=-0.10000 pos_rad=-0.09977 ref_rad_s=-0.00000 vel_rad_s=-0.00497 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.00290 Iq_plant_A=0.00541 Iq_limit_A=2.20000 sensor_pos_rad=-0.09980 sensor_vel_rad_s=-0.01256 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=2900 FG_us=1450000 H1_seq=2901 sensor_us=1450000 sensor_age_us=0 ADC_us=1450000 command_receipt=APPLIED confirmed=1 updates=7246 physical_applied=false
+MODEL_FF t_us=1600000 ref_rad=-0.10000 pos_rad=-0.11667 ref_rad_s=-0.00000 vel_rad_s=-0.51695 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.20819 Iq_plant_A=0.20485 Iq_limit_A=2.20000 sensor_pos_rad=-0.11668 sensor_vel_rad_s=-0.51023 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3200 FG_us=1600000 H1_seq=3201 sensor_us=1600000 sensor_age_us=0 ADC_us=1600000 command_receipt=APPLIED confirmed=1 updates=7996 physical_applied=false
+MODEL_FF t_us=1700200 ref_rad=-0.10000 pos_rad=-0.16046 ref_rad_s=-0.00000 vel_rad_s=-0.26314 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.29848 Iq_plant_A=0.29973 Iq_limit_A=2.20000 sensor_pos_rad=-0.16040 sensor_vel_rad_s=-0.26633 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3400 FG_us=1700000 H1_seq=3401 sensor_us=1700000 sensor_age_us=200 ADC_us=1700200 command_receipt=APPLIED confirmed=1 updates=8497 physical_applied=false
+MODEL_FF t_us=1800000 ref_rad=-0.10000 pos_rad=-0.17243 ref_rad_s=-0.00000 vel_rad_s=-0.02323 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=0.28021 Iq_plant_A=0.27119 Iq_limit_A=2.20000 sensor_pos_rad=-0.17248 sensor_vel_rad_s=-0.04885 load_Nm=0.039 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=3600 FG_us=1800000 H1_seq=3601 sensor_us=1800000 sensor_age_us=0 ADC_us=1800000 command_receipt=APPLIED confirmed=1 updates=8996 physical_applied=false
+MODEL_FF t_us=2000000 ref_rad=-0.10000 pos_rad=-0.12867 ref_rad_s=-0.00000 vel_rad_s=0.46410 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.02991 Iq_plant_A=-0.03066 Iq_limit_A=2.20000 sensor_pos_rad=-0.12866 sensor_vel_rad_s=0.46930 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4000 FG_us=2000000 H1_seq=4001 sensor_us=2000000 sensor_age_us=0 ADC_us=2000000 command_receipt=APPLIED confirmed=1 updates=9996 physical_applied=false
+MODEL_FF t_us=2200000 ref_rad=-0.10000 pos_rad=-0.09814 ref_rad_s=-0.00000 vel_rad_s=-0.00968 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.00104 Iq_plant_A=-0.00031 Iq_limit_A=2.20000 sensor_pos_rad=-0.09817 sensor_vel_rad_s=-0.01966 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4400 FG_us=2200000 H1_seq=4401 sensor_us=2200000 sensor_age_us=0 ADC_us=2200000 command_receipt=APPLIED confirmed=1 updates=10996 physical_applied=false
+MODEL_FF t_us=2400000 ref_rad=-0.10000 pos_rad=-0.09998 ref_rad_s=-0.00000 vel_rad_s=-0.00145 K_Nm_per_rad=0.55080 D_Nms_per_rad=0.04320 FF_Nm=0.00000 Iq_request_audit_A=-0.00001 Iq_plant_A=0.00054 Iq_limit_A=2.20000 sensor_pos_rad=-0.10000 sensor_vel_rad_s=-0.00002 load_Nm=0.000 limited=0 mode=IMPEDANCE state=RUNNING faults=0x0 action=UPDATE session=1 FG_seq=4800 FG_us=2400000 H1_seq=4801 sensor_us=2400000 sensor_age_us=0 ADC_us=2400000 command_receipt=APPLIED confirmed=1 updates=11996 physical_applied=false
+STOP request=ACCEPTED session=1 t_us=2400000 H0=pending
+STOP H0=OBSERVED H0_us=2400200 output=INHIBITED
+STOP action=INHIBIT confirmed=true t_us=2402000 H0_us=2402000 state=DISABLED faults=0x0 session=1->2 updates=11996->11996 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+MODEL_FF reverse_position_RMS_rad=0.0008316 reverse_velocity_RMS_rad_s=0.0116649 peak_Iq_request_A=0.306572 peak_Iq_plant_A=0.302846 loaded_peak_error_rad=0.0727279 limited_updates=0 updates=11996 plant_update_steps=23992
+same-reference comparison PASS physical_applied=false
+
+[falconfoc-servo-demo faults]
+target=HOST_VIRTUAL transport=C11_CONTROL_PLANE profile=default_pmsm calibration_source=HOST_MODEL physical_applied=false
+capabilities=configuration,IMPEDANCE,SET_MODE,ARM,START,STOP,COMMAND_TIMEOUT_RECOVERY
+UART_V1=CURRENT,VELOCITY,POSITION remote_impedance=false remote_mode_switch=false Board1_ARM_START=OUTPUT_LOCKED
+invalid config id=0x1003 result=ERR_CONFIG effective_unchanged=true
+invalid config id=0x1004 result=ERR_CONFIG effective_unchanged=true
+invalid config id=0x1007 result=ERR_RANGE effective_unchanged=true
+IMPEDANCE command in CURRENT result=ERR_STATE
+lifecycle START request=ACCEPTED request_seq=1 source_session=0
+lifecycle START REJECTED H0_us=200 mode=0 state=DISABLED session=0 request_seq=1
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+invalid K/D, NaN, Inf=ERR_RANGE frame=ERR_FRAME duplicate_sequence=ERR_ORDER prior_receipt=APPLIED updates_unchanged=true
+lifecycle SET_MODE request=ACCEPTED request_seq=4 source_session=1
+lifecycle SET_MODE REJECTED H0_us=1200 mode=3 state=RUNNING session=1 request_seq=4
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+command request=ACCEPTED session=1 seq=3 produced_us=1500
+stale Sensor reason=OUT_OF_ORDER H1_status=-2 capture_age_us=1000
+Sensor stopped control action=INHIBIT confirmed=true t_us=1600 H0_us=1600 state=DISABLED faults=0x0 session=1->2 updates=3->3 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+command request=ACCEPTED session=1 seq=3 produced_us=1500
+invalid Sensor reason=ENCODER_TRANSPORT H1_status=-1 capture_age_us=invalid
+Sensor stopped control action=INHIBIT confirmed=true t_us=1600 H0_us=1600 state=DISABLED faults=0x0 session=1->2 updates=3->3 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+SAMPLE_INVALID FAULT_LATCHED action=INHIBIT confirmed=true t_us=2400 H0_us=2400 state=FAULT_LATCHED faults=0x4 session=1->3 updates=3->3 old_session_publish=ERR_FAULT old_receipt=ERR_FAULT target=invalid physical_applied=false
+recovery BLOCKED reason=SAMPLE_INVALID requires_separate_safety_path=true
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=900
+UPDATE rejected by Host adapter; tentative_PI_committed=false
+adapter rejected UPDATE action=INHIBIT confirmed=true t_us=1200 H0_us=1200 state=DISABLED faults=0x0 session=1->2 updates=1->1 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+COMMAND_TIMEOUT FAULT_LATCHED action=INHIBIT confirmed=true t_us=4000 H0_us=4000 state=FAULT_LATCHED faults=0x1 session=1->2 updates=13->13 old_session_publish=ERR_FAULT old_receipt=ERR_FAULT target=invalid physical_applied=false
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+STOP request=ACCEPTED session=1 t_us=1000 H0=pending
+STOP+FATAL_RESET_REQUIRED action=INHIBIT confirmed=true t_us=1200 H0_us=1200 state=FAULT_LATCHED faults=0x100 session=1->2 updates=1->1 old_session_publish=ERR_FAULT old_receipt=ERR_FAULT target=invalid physical_applied=false
+recovery BLOCKED reason=FATAL_RESET_REQUIRED
+
+[falconfoc-servo-demo recovery]
+target=HOST_VIRTUAL transport=C11_CONTROL_PLANE profile=default_pmsm calibration_source=HOST_MODEL physical_applied=false
+capabilities=configuration,IMPEDANCE,SET_MODE,ARM,START,STOP,COMMAND_TIMEOUT_RECOVERY
+UART_V1=CURRENT,VELOCITY,POSITION remote_impedance=false remote_mode_switch=false Board1_ARM_START=OUTPUT_LOCKED
+lifecycle SET_MODE request=ACCEPTED request_seq=1 source_session=0
+lifecycle SET_MODE APPLIED H0_us=200 mode=3 state=DISABLED session=1 request_seq=1
+command request=ACCEPTED session=1 seq=1 produced_us=500
+lifecycle ARM request=ACCEPTED request_seq=2 source_session=1
+lifecycle ARM APPLIED H0_us=600 mode=3 state=READY session=1 request_seq=2
+lifecycle START request=ACCEPTED request_seq=3 source_session=1
+lifecycle START APPLIED H0_us=800 mode=3 state=RUNNING session=1 request_seq=3
+command request=ACCEPTED session=1 seq=2 produced_us=1000
+COMMAND_TIMEOUT FAULT_LATCHED action=INHIBIT confirmed=true t_us=4000 H0_us=4000 state=FAULT_LATCHED faults=0x1 session=1->2 updates=13->13 old_session_publish=ERR_FAULT old_receipt=ERR_FAULT target=invalid physical_applied=false
+CLEAR_COMMAND_TIMEOUT request=ACCEPTED t_us=4000 H0=pending
+CLEAR_COMMAND_TIMEOUT APPLIED H0_us=4400 state=DISABLED output=INHIBITED session=4
+cleared timeout action=INHIBIT confirmed=true t_us=4400 H0_us=4400 state=DISABLED faults=0x0 session=1->4 updates=13->13 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+command request=ACCEPTED session=4 seq=3 produced_us=4500
+lifecycle ARM request=ACCEPTED request_seq=4 source_session=4
+lifecycle ARM APPLIED H0_us=4600 mode=3 state=READY session=4 request_seq=4
+lifecycle START request=ACCEPTED request_seq=5 source_session=4
+lifecycle START APPLIED H0_us=4800 mode=3 state=RUNNING session=4 request_seq=5
+recovery state=RUNNING command_receipt=APPLIED session=4 seq=4 sensor_us=5000 H0_us=5000 action=UPDATE updates=14 physical_applied=false
+STOP request=ACCEPTED session=4 t_us=5000 H0=pending
+recovery STOP action=INHIBIT confirmed=true t_us=6200 H0_us=6200 state=DISABLED faults=0x0 session=4->5 updates=14->14 old_session_publish=ERR_SESSION old_receipt=ERR_SESSION target=invalid physical_applied=false
+

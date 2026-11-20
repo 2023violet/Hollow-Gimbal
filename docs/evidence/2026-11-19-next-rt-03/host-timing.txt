@@ -1,0 +1,103 @@
+[board-clang-off]
+2: Test command: C:\Users\16429\AppData\Local\Temp\falconfoc-rt03-5f2c74\board-clang-off\test-foc-timing.exe
+2: Working Directory: C:/Users/16429/AppData/Local/Temp/falconfoc-rt03-5f2c74/board-clang-off
+2: Test timeout computed to be: 10000000
+2: RT-03 H1 snapshot: one collision publishes, two collisions keep BUSY and request STOP
+2: HOST_SIMULATED IRQ: SPI elapsed 23 us = 4 code + 19 nested; queued close 105 us rejects
+2: legacy-two-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-three-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=13333.333 TRIGGERS=40 VALID=40 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=20 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-rearm-recovery last_conversion_seq=3 last_carrier_id=4 missed=1
+2: 20/20 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=60 ACCEPTED=60 LOADED=60 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 10/10 PWM_FREQ=10000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/10 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/20-faults PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=19666.667 TRIGGERS=59 VALID=59 H0=58 ACCEPTED=57 LOADED=57 MISSED_EVENTS=1 DEADLINE_VIOLATIONS=2 ADC_LATE=1 H0_LATE=1 DUPLICATES=1
+2: board-adc late-drain, duplicate, deadline, recovery identity, independent instance checked
+2: RT-01 slots single=1 total=4; timer wrap, half/full-range ambiguity, phase, pause, epoch and saturation checked
+2: RT-01 stale PCCE and failed clear drain; foreground snapshot remains coherent while a new token is issued
+2: board-h1 old angle age=580us after publish=280us; BUSY and stale checked
+2: board-spi close hold 1us rejects, 2us accepts; frame >100us inhibits
+2: RT-01 adapter refusal, guard STOP, pending STOP and late-frame/WDT preserve PI and output lock
+2: RT-02 A/B model: 0/3/6/9/12 us injected IRQ delay, 4 valid + 1 late per path
+2: RT-02 A/B modeled deadline: A 2 timely + 2 misses, B 4 timely + 0 misses
+2: RT-02 rank aperture, per-phase windows and high-duty rejection verified
+2: RT-02 shadow stage/load separation, deadline, stale output and wrap verified
+2: RT-02 OFF: timing contract, snapshot and output lock verified without trace
+100% tests passed out of 5
+
+[board-clang-on]
+2: Test command: C:\Users\16429\AppData\Local\Temp\falconfoc-rt03-5f2c74\board-clang-on\test-foc-timing.exe
+2: Working Directory: C:/Users/16429/AppData/Local/Temp/falconfoc-rt03-5f2c74/board-clang-on
+2: Test timeout computed to be: 10000000
+2: RT-03 H1 snapshot: one collision publishes, two collisions keep BUSY and request STOP
+2: HOST_SIMULATED IRQ: SPI elapsed 23 us = 4 code + 19 nested; queued close 105 us rejects
+2: legacy-two-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-three-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=13333.333 TRIGGERS=40 VALID=40 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=20 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-rearm-recovery last_conversion_seq=3 last_carrier_id=4 missed=1
+2: 20/20 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=60 ACCEPTED=60 LOADED=60 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 10/10 PWM_FREQ=10000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/10 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/20-faults PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=19666.667 TRIGGERS=59 VALID=59 H0=58 ACCEPTED=57 LOADED=57 MISSED_EVENTS=1 DEADLINE_VIOLATIONS=2 ADC_LATE=1 H0_LATE=1 DUPLICATES=1
+2: board-adc late-drain, duplicate, deadline, recovery identity, independent instance checked
+2: RT-01 slots single=1 total=4; timer wrap, half/full-range ambiguity, phase, pause, epoch and saturation checked
+2: RT-01 stale PCCE and failed clear drain; foreground snapshot remains coherent while a new token is issued
+2: board-h1 old angle age=580us after publish=280us; BUSY and stale checked
+2: board-spi close hold 1us rejects, 2us accepts; frame >100us inhibits
+2: RT-01 adapter refusal, guard STOP, pending STOP and late-frame/WDT preserve PI and output lock
+2: RT-02 A/B model: 0/3/6/9/12 us injected IRQ delay, 4 valid + 1 late per path
+2: RT-02 A/B modeled deadline: A 2 timely + 2 misses, B 4 timely + 0 misses
+2: RT-02 rank aperture, per-phase windows and high-duty rejection verified
+2: RT-02 shadow stage/load separation, deadline, stale output and wrap verified
+2: RT-02 ON: trace markers, wrapping cycle zero, snapshot and instance isolation
+100% tests passed out of 5
+
+[board-gcc-on]
+2: Test command: C:\Users\16429\AppData\Local\Temp\falconfoc-rt03-5f2c74\board-gcc-on\test-foc-timing.exe
+2: Working Directory: C:/Users/16429/AppData/Local/Temp/falconfoc-rt03-5f2c74/board-gcc-on
+2: Test timeout computed to be: 10000000
+2: RT-03 H1 snapshot: one collision publishes, two collisions keep BUSY and request STOP
+2: HOST_SIMULATED IRQ: SPI elapsed 23 us = 4 code + 19 nested; queued close 105 us rejects
+2: legacy-two-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-three-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=13333.333 TRIGGERS=40 VALID=40 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=20 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-rearm-recovery last_conversion_seq=3 last_carrier_id=4 missed=1
+2: 20/20 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=60 ACCEPTED=60 LOADED=60 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 10/10 PWM_FREQ=10000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/10 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/20-faults PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=19666.667 TRIGGERS=59 VALID=59 H0=58 ACCEPTED=57 LOADED=57 MISSED_EVENTS=1 DEADLINE_VIOLATIONS=2 ADC_LATE=1 H0_LATE=1 DUPLICATES=1
+2: board-adc late-drain, duplicate, deadline, recovery identity, independent instance checked
+2: RT-01 slots single=1 total=4; timer wrap, half/full-range ambiguity, phase, pause, epoch and saturation checked
+2: RT-01 stale PCCE and failed clear drain; foreground snapshot remains coherent while a new token is issued
+2: board-h1 old angle age=580us after publish=280us; BUSY and stale checked
+2: board-spi close hold 1us rejects, 2us accepts; frame >100us inhibits
+2: RT-01 adapter refusal, guard STOP, pending STOP and late-frame/WDT preserve PI and output lock
+2: RT-02 A/B model: 0/3/6/9/12 us injected IRQ delay, 4 valid + 1 late per path
+2: RT-02 A/B modeled deadline: A 2 timely + 2 misses, B 4 timely + 0 misses
+2: RT-02 rank aperture, per-phase windows and high-duty rejection verified
+2: RT-02 shadow stage/load separation, deadline, stale output and wrap verified
+2: RT-02 ON: trace markers, wrapping cycle zero, snapshot and instance isolation
+100% tests passed out of 5
+
+[board-asan-on]
+2: Test command: C:\Users\16429\AppData\Local\Temp\falconfoc-rt03-5f2c74\board-asan-on\test-foc-timing.exe
+2: Working Directory: C:/Users/16429/AppData/Local/Temp/falconfoc-rt03-5f2c74/board-asan-on
+2: Test timeout computed to be: 10000000
+2: RT-03 H1 snapshot: one collision publishes, two collisions keep BUSY and request STOP
+2: HOST_SIMULATED IRQ: SPI elapsed 23 us = 4 code + 19 nested; queued close 105 us rejects
+2: legacy-two-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-three-edges PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=13333.333 TRIGGERS=40 VALID=40 H0=0 ACCEPTED=0 LOADED=0 MISSED_EVENTS=20 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: legacy-rearm-recovery last_conversion_seq=3 last_carrier_id=4 missed=1
+2: 20/20 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=20000.000 TRIGGERS=60 VALID=60 H0=60 ACCEPTED=60 LOADED=60 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 10/10 PWM_FREQ=10000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/10 PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=10000 ACTUAL_VALID_SAMPLE_FREQ=10000.000 TRIGGERS=30 VALID=30 H0=30 ACCEPTED=30 LOADED=30 MISSED_EVENTS=0 DEADLINE_VIOLATIONS=0 ADC_LATE=0 H0_LATE=0 DUPLICATES=0
+2: 20/20-faults PWM_FREQ=20000 EXPECTED_SAMPLE_FREQ=20000 ACTUAL_VALID_SAMPLE_FREQ=19666.667 TRIGGERS=59 VALID=59 H0=58 ACCEPTED=57 LOADED=57 MISSED_EVENTS=1 DEADLINE_VIOLATIONS=2 ADC_LATE=1 H0_LATE=1 DUPLICATES=1
+2: board-adc late-drain, duplicate, deadline, recovery identity, independent instance checked
+2: RT-01 slots single=1 total=4; timer wrap, half/full-range ambiguity, phase, pause, epoch and saturation checked
+2: RT-01 stale PCCE and failed clear drain; foreground snapshot remains coherent while a new token is issued
+2: board-h1 old angle age=580us after publish=280us; BUSY and stale checked
+2: board-spi close hold 1us rejects, 2us accepts; frame >100us inhibits
+2: RT-01 adapter refusal, guard STOP, pending STOP and late-frame/WDT preserve PI and output lock
+2: RT-02 A/B model: 0/3/6/9/12 us injected IRQ delay, 4 valid + 1 late per path
+2: RT-02 A/B modeled deadline: A 2 timely + 2 misses, B 4 timely + 0 misses
+2: RT-02 rank aperture, per-phase windows and high-duty rejection verified
+2: RT-02 shadow stage/load separation, deadline, stale output and wrap verified
+2: RT-02 ON: trace markers, wrapping cycle zero, snapshot and instance isolation
+100% tests passed out of 5

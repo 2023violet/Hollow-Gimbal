@@ -3039,3 +3039,37 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 在项目纲领写入产品目标、成熟工程方法和可验证证据共同决定架构的原则，并将 ADR 纳入 AGENTS.md 接手顺序。
 - V2 以独立 C11 Core 和 H0/H1/Foreground 为评审基线，规定变更证据、同条件对照、验收与回退。独立记录 Legacy 漏边沿反例，PWM 同步和 20/20 kHz 留作待验目标。
 - 见 [ARCH-001](../architecture/FalconFOC_BareMetal_Execution_ADR.md)。本次交付为治理文档，事件模型验证属 NEXT-ARCH-00。
+
+## 2026-11-19 NEXT-ARCH-00 裸机执行与 Host 时间合同
+
+- 基于 VM01A `d824933` 复原 IRQ、时间与状态所有权，形成触发、频率、候选与反证条件。保留 H0/H1、SPI IRQ，`sched` 裁决 `KEEP_UNUSED`。
+- 新增 Board Host 时间事件测试，计算 Legacy 抽象反例 20,000 → 13,333.333 Hz，覆盖漏触发、两个装载期限反例及 Runtime 交错。Board Host 三个验证配置各 5/5，严格门禁通过，锁定 ARM 三种产物摘要一致。
+- 裁决 `ARCH-00 HOST PASS — HARDWARE TIMING NOT VERIFIED`。下一项为 Board 周期身份与 ADC token 观测。 [ARCH-00 证据](../evidence/2026-11-19-next-arch-00.md)
+
+## 2026-11-19 NEXT-RT-01 逻辑周期与 ADC–H0 交接
+
+- Board 使用 TMR1 相位、TMR2 epoch 与 sticky 见证推导 200 µs 逻辑槽，发现缺失和不可信时序。同槽限一次请求，跨槽或未排空 PCCE 拒绝，保留旧 token 和原 STOP/Safety 合同。
+- Board Host 三配置各 5/5，严格门禁与 Legacy Host 45/45 通过。锁定 ARM Flash/RAM 增加 1,232/184 B。优先在保留现行触发路径的锁定镜像上做下一轮 DWT 基线。 [RT-01 证据](../evidence/2026-11-19-next-rt-01.md)
+
+## 2026-11-19 NEXT-RT-02 ADC–PWM 同步与装载合同
+
+- 保留软件触发与 RT-01 周期身份，启用可选的单事务 DWT 插桩。专用 TMR1 CH4 候选完成 SDK 编译核查和 Host A/B。四 Rank 孔径、逐相有效窗口及指定装载截止期使用纯 C11 判定。
+- 默认锁定 ARM BIN 与 RT-01 字节一致。物理触发、采样窗口、装载与 WCET 待验。正式路线依次为 RT-03、INTEG-01、INTEG-02、PRODUCT-01。 [RT-02 证据](../evidence/2026-11-19-next-rt-02.md)
+
+## 2026-11-19 NEXT-RT-03 H0/H1 抢占、SPI 与 WCET 证据
+
+- 复现 H0 抢占导致 H1 和监督快照 `BUSY` 的误停。H1 加一次有界重读，监督延后冲突周期并保留实际超期的 INHIBIT。SPI 端口以 TMR2 夹时校验 CS/TX/关闭期限，丢弃跨界事务。
+- 延续 RT-02 的可关闭 DWT 探针并完成 IRQ、协议、控制路径的 Host 与 ARM 静态复验。裁决 `KEEP H0/H1 ARCHITECTURE`；目标板 WCET 待验，下一步为 INTEG-01 的 Host 入口。 [RT-03 证据](../evidence/2026-11-19-next-rt-03.md)
+
+## 2026-11-19 NEXT-INTEG-01 Host Servo 产品入口
+
+- 将既有 Servo 程序接入 C11 Control Plane。新增能力和配置检查、H0 可配对回执、禁用确认及同一 Runtime 上的命令超时恢复。保留虚拟电机、前馈和控制品质口径。
+- Host 入口矩阵与外部源码构建通过，默认 ARM ELF/BIN/HEX 与 RT-03 相同。修订 SDK 源码组装依赖并验证临时目录投影；既有归档和发布状态保留。 [INTEG-01 证据](../evidence/2026-11-19-next-integ-01.md)
+
+## 2026-11-19 · NEXT-INTEG-02 Board1 只读采集
+
+新增默认关闭的 8 ms SRAM 单次采集和冻结镜像，接入 ADC1/PCCE、SPI1/TMR5 及 Runtime/Safety 观测。由受控 SWD 导出，Host 按版本、来源、时钟、序号和摘要归档。ADC_ZERO 仅在独立零电流和采样窗口见证满足时转换为现有 SOFT-06 V1 输入。实板采集、真实回放与 WCET 待取证。参见 [INTEG-02 验收](../evidence/2026-11-19-next-integ-02.md)。
+
+## 2026-11-19 · NEXT-PRODUCT-01 软件准备
+
+增加独立 Host 三相 PWM 事务模型和锁定态 DWT/SRAM 离线校验入口，验证完整 Shadow 写入、指定 Load、Session/Token 与 STOP/FAULT 撤销。ARM 固件继续锁定。原理图中的独立去能及 Break 路由待实际硬件确认，功率和实机闭环保持阻断。参见 [PRODUCT-01 验收](../evidence/2026-11-19-next-product-01.md)。

@@ -212,6 +212,10 @@ enum foc_runtime_hook_point {
     FOC_RUNTIME_HOOK_AFTER_CONTROL,
     /** A Foreground snapshot read has loaded part of the publication. */
     FOC_RUNTIME_HOOK_TELEMETRY_READING,
+    /** H1 or supervision is copying the H0 publication. */
+    FOC_RUNTIME_HOOK_CONTROL_SNAPSHOT_READING,
+    /** Internal snapshot reads that do not dispatch a hook. */
+    FOC_RUNTIME_HOOK_NONE,
 };
 
 struct foc_runtime;

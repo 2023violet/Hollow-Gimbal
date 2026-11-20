@@ -243,6 +243,54 @@
       "redistribution": "owner_pending"
     },
     {
+      "source": "core/include/foc_following_error.h",
+      "path": "core/include/foc_following_error.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/include/foc_motion_limits.h",
+      "path": "core/include/foc_motion_limits.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_following_error.c",
+      "path": "core/src/foc_following_error.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_motion_limits.c",
+      "path": "core/src/foc_motion_limits.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "control_plane/include/foc_parameter.h",
+      "path": "control_plane/include/foc_parameter.h",
+      "module": "control_plane",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "control_plane/src/foc_parameter.c",
+      "path": "control_plane/src/foc_parameter.c",
+      "module": "control_plane",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
       "source": "docs/servo/quickstart.md",
       "path": "docs/servo/quickstart.md",
       "module": "servo_example",

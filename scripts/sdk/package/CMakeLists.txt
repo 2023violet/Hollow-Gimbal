@@ -14,6 +14,15 @@ add_subdirectory(core)
 
 if(NOT FALCONFOC_SDK_CORE_ONLY)
   add_subdirectory(simulation)
+  add_library(falconfoc-control-plane STATIC control_plane/src/foc_parameter.c)
+  target_include_directories(falconfoc-control-plane PUBLIC control_plane/include)
+  target_link_libraries(falconfoc-control-plane PUBLIC falconfoc-pipeline)
+  set_target_properties(
+    falconfoc-control-plane
+    PROPERTIES C_STANDARD 11
+               C_STANDARD_REQUIRED YES
+               C_EXTENSIONS OFF
+  )
   if(FALCONFOC_SDK_BUILD_TESTS)
     enable_testing()
     add_subdirectory(examples/servo)

@@ -30,6 +30,12 @@ The target emits `falconfoc-v2-at32f415.{elf,bin,hex,map}` in the cross-build
 directory. The Host test passes fake peripheral observations to the same Board
 Port functions called by the MCU handlers.
 
+Run `ctest --test-dir build/sw03-board-host -R '^test-foc-timing$' -V` for the
+ARCH-00 event counts and deliberate deadline, ADC, SPI and Runtime fault cases.
+Board cases call the production Board Port and Runtime. Carrier, load markers
+and costs in the frequency comparison use a synthetic clock.
+[Execution ADR](../../docs/architecture/FalconFOC_BareMetal_Execution_ADR.md)
+
 ## Timing ownership
 
 AT32F415 timer-clock facts are owned by
@@ -90,6 +96,48 @@ invalid snapshot cannot be published. After an encoder gap beyond 2.5 ms, the
 continuous position remains invalid for the session. At startup two timely
 encoder observations are needed to estimate velocity. The software latch
 threshold allows the initial ADC cycles with no velocity estimate.
+
+RT-01 assigns each ADC token a 200-µs logical TMR1 slot from phase and TMR2
+time witnesses. The port rejects ambiguous time and cross-slot completions.
+An optional single foreground reader can request a coherent Board snapshot
+with `foc_board_adc_read`. A BUSY result leaves its destination unchanged
+while the IRQ owner services the request. This API adds no UART V1 operation.
+The diagnostic load timestamp identifies the logical next slot boundary.
+[RT-01 timing and evidence](../../docs/evidence/2026-11-19-next-rt-01.md)
+
+RT-02 adds opt-in local timestamps with `-DFALCONFOC_RT02_TIMING_TRACE=ON`.
+The single ADC transaction carries the expected CH4 slot identity, IRQ entry
+counter samples, pre-PCSWTRG proxy, PCCE IRQ entry, H0 elapsed cycles, and
+adapter attempt/return, including a declined UPDATE before INHIBIT.
+Read the same coherent Board snapshot with `foc_board_adc_read`. On ARM the
+probe uses DWT CYCCNT when enabled and supported. Markers describe software
+execution. ADC synchronization, signal aperture and physical PWM load
+require independent event witnesses.
+
+`foc_board_timing` encodes offline ADC trigger candidates and checks nominal
+rank apertures and future carrier-specific shadow deadlines. See
+[RT-02 timing and evidence](../../docs/evidence/2026-11-19-next-rt-02.md)
+for timing assumptions, the Host A/B model, and OFF/ON build results.
+
+RT-03 extends the same option with per-domain DWT observations of the ADC,
+encoder/SPI, H0/H1 and foreground paths. The observations are latest records
+owned by their interrupt or by foreground. A debugger read needs a stable
+record, and elapsed cycles can include preemption.
+
+The SPI phase check uses a TMR2 time bracket around TMR5 service and rejects a
+transaction when the CS/TX or close action proxy exceeds its window. A
+contended H1 snapshot permits one fresh copy attempt. Supervision defers a
+contended read without claiming a successful heartbeat. The ARM cost inputs
+remain zero-valued Host budget placeholders. See
+[RT-03 evidence](../../docs/evidence/2026-11-19-next-rt-03.md).
+
+## Locked Board1 capture
+
+Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and
+Runtime/Safety observations in a one-shot SRAM image. Read the frozen image
+over the controlled SWD workflow and check it offline with the Host tools.
+See [Board1 capture and SOFT-06 import](BOARD_CAPTURE.md).
+See [locked timing observations](LOCKED_TIMING.md) for the DWT and SRAM comparison.
 
 ## Evidence limits
 

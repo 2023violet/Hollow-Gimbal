@@ -37,6 +37,11 @@ enum foc_board_limits {
     FOC_BOARD_US_HZ = TM_PLATFORM_V2_TIMEBASE_HZ,
     /** Nominal TMR1 event interval in microseconds. */
     FOC_BOARD_H0_US = 200,
+    FOC_BOARD_ADC_COMPARE_US = 40,
+    FOC_BOARD_ADC_LATEST_US = 110,
+    FOC_BOARD_ADC_FRAME_US = 80,
+    /** Maximum width of the startup and observation clock brackets. */
+    FOC_BOARD_ADC_BRACKET_US = 2,
     /** Nominal TMR5 event interval in microseconds. */
     FOC_BOARD_H1_US = 500,
     /** TMR1 period and maximum diagnostic compare. */
@@ -57,6 +62,53 @@ enum foc_board_output_result {
     FOC_BOARD_OUTPUT_INVALID,
 };
 
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+enum foc_board_trace_point {
+    FOC_BOARD_TRACE_SOFTWARE_TRIGGER = 1U,
+    FOC_BOARD_TRACE_PCCE_ENTRY = 2U,
+    FOC_BOARD_TRACE_H0 = 4U,
+    FOC_BOARD_TRACE_ADAPTER = 8U,
+    FOC_BOARD_TRACE_UPDATE = 16U,
+    FOC_BOARD_TRACE_H0_INPUTS = 32U,
+    FOC_BOARD_TRACE_H0_GUARD = 64U,
+    FOC_BOARD_TRACE_H0_CONTROL_DONE = 128U,
+};
+
+/** One transaction, in CYCCNT cycles. Phase is a TMR1 counter sample. */
+struct foc_board_adc_trace {
+    uint32_t compare_irq_cycles;
+    uint32_t compare_irq_phase_ticks;
+    uint32_t trigger_proxy_cycles;
+    uint32_t trigger_write_return_cycles;
+    uint32_t pcce_irq_cycles;
+    uint32_t ranks_ready_cycles;
+    uint32_t h0_start_cycles;
+    uint32_t h0_finish_cycles;
+    uint32_t adapter_start_cycles;
+    uint32_t adapter_return_cycles;
+    uint32_t update_start_cycles;
+    uint32_t update_return_cycles;
+    uint32_t h0_inputs_cycles;
+    uint32_t h0_guard_cycles;
+    uint32_t h0_control_done_cycles;
+    uint32_t sensor_capture_us;
+    uint32_t sensor_seq;
+    uint32_t prediction_us;
+    uint32_t motion_session;
+    uint32_t accepted_outer_seq;
+    enum foc_board_output_result adapter_result;
+    enum foc_board_output_result update_result;
+    unsigned int points;
+    bool adapter_accepted;
+    bool update_accepted;
+    bool sensor_used;
+    bool outer_accepted;
+};
+
+typedef uint32_t (*foc_board_trace_clock)(void);
+struct foc_board_adc;
+#endif
+
 /** H0-owned attempt journal, separate from the Pipeline result. */
 struct foc_board_output {
     /** Last complete action received. */
@@ -65,18 +117,115 @@ struct foc_board_output {
     enum foc_board_output_result result;
     /** Number of valid UPDATEs declined by the board. */
     uint32_t declined_updates;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    struct foc_board_adc *trace_owner;
+#endif
 };
 
-/** H0-owned acquisition token, shared by two non-preempting IRQ handlers. */
+/** Sticky counter witnesses acknowledged by the IRQ binding after a coherent read. */
+enum foc_board_adc_clock_flags {
+    FOC_BOARD_TIME_WRAP = 1U,
+    FOC_BOARD_TIME_HALF = 2U,
+    FOC_BOARD_SLOT_WRAP = 4U,
+};
+
+/** Live TMR1 phase bracketed by TMR2, with timer configuration verified by the binding. */
+struct foc_board_adc_event {
+    uint32_t before_us;
+    uint32_t now_us;
+    uint32_t phase_ticks;
+    unsigned int flags;
+    bool coherent;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    uint32_t irq_entry_cycles;
+    uint32_t irq_entry_phase_ticks;
+    uint32_t ranks_ready_cycles;
+#endif
+};
+
+enum foc_board_adc_state {
+    FOC_BOARD_ADC_IDLE,
+    FOC_BOARD_ADC_PENDING,
+    FOC_BOARD_ADC_DRAIN,
+    FOC_BOARD_ADC_COMPLETED,
+    FOC_BOARD_ADC_REJECTED,
+};
+
+enum foc_board_adc_rejection {
+    FOC_BOARD_ADC_NO_REJECTION,
+    FOC_BOARD_ADC_AMBIGUOUS_CLOCK,
+    FOC_BOARD_ADC_TRIGGER_WINDOW,
+    FOC_BOARD_ADC_DUPLICATE_TRIGGER,
+    FOC_BOARD_ADC_OVERLAP,
+    FOC_BOARD_ADC_UNDRAINED_PCCE,
+    FOC_BOARD_ADC_UNMATCHED_PCCE,
+    FOC_BOARD_ADC_LATE,
+    FOC_BOARD_ADC_BAD_RANKS,
+};
+
+/** TIMER_SLOT_ONLY; the load marker is the logical next timer boundary.
+ * Board1 always reports PHYSICAL_OUTPUT_NOT_APPLIED, including after H0. */
+struct foc_board_adc_transaction {
+    uint32_t slot_id;
+    uint32_t generation;
+    /** Request/ADC source proxy before PCSWTRG, not the physical aperture. */
+    uint32_t requested_us;
+    uint32_t completed_us;
+    uint32_t diagnostic_load_us;
+    int h0_result;
+    enum foc_board_adc_state state;
+    enum foc_board_adc_rejection rejection;
+    enum foc_board_output_result final_output;
+    bool adc_valid;
+    bool h0_called;
+    bool h0_consumed;
+    bool update_accepted;
+    bool update_declined;
+    bool physical_output_applied;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    struct foc_board_adc_trace trace;
+#endif
+};
+
+/** Counters saturate; an event can have one rejection and increment its diagnostic subset. */
+struct foc_board_adc_diagnostics {
+    /** Distinct slots with a coherent CH4 or PCCE observation. */
+    uint32_t observed_slots;
+    /** Closed slots without a timely valid ADC frame, including gaps without IRQs. */
+    uint32_t missing_slots;
+    uint32_t trigger_requests;
+    /** Drained PCCE matched to a timely token, before validating ranks. */
+    uint32_t adc_completions;
+    /** PCCE without a live token (duplicate or otherwise orphaned). */
+    uint32_t unmatched_completions;
+    uint32_t late_completions;
+    uint32_t overlap_rejections;
+    /** Count of new ADC watermarks observed inside the actual Runtime. */
+    uint32_t h0_consumed;
+    uint32_t timing_rejections;
+    uint32_t unattributable_events;
+    uint32_t slot_id;
+    bool clock_valid;
+    enum foc_board_adc_rejection last_rejection;
+    struct foc_board_adc_transaction transaction;
+};
+
+/** Two non-preempting IRQs own the clock, token and live diagnostics.
+ * A single foreground reader requests a coherent copy through snapshot_state. */
 struct foc_board_adc {
-    /** Software trigger time in the common microsecond epoch. */
-    uint32_t captured_us;
-    /** Sequence issued for the next acquisition. */
-    uint32_t seq;
-    /** True while awaiting one complete injected frame. */
-    bool pending;
-    /** A timed-out conversion must be drained before a new trigger. */
-    bool expired;
+    uint32_t slot_start_us;
+    uint32_t last_clock_us;
+    uint32_t epoch_width_us;
+    uint32_t next_generation;
+    bool timing_initialized;
+    bool slot_served;
+    bool trigger_seen;
+    struct foc_board_adc_diagnostics live;
+    atomic_uint snapshot_state;
+    struct foc_board_adc_diagnostics published;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_board_trace_clock trace_cycles;
+#endif
 };
 
 /** Why the latest encoder transaction did not publish usable feedback. */
@@ -92,6 +241,22 @@ enum foc_board_encoder_result {
     /** Time or angle displacement was outside the permitted range. */
     FOC_BOARD_ENCODER_DISCONTINUITY,
 };
+
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+/** One H1-owned close/decode/publication observation. Cycle spans include preemption. */
+struct foc_board_encoder_trace {
+    uint32_t capture_us;
+    uint32_t close_us;
+    uint32_t seq;
+    uint32_t decode_start_cycles;
+    uint32_t decode_done_cycles;
+    uint32_t h1_start_cycles;
+    uint32_t publish_proxy_cycles;
+    uint32_t h1_finish_cycles;
+    int h1_status;
+    bool publishing;
+};
+#endif
 
 /** H1-owned transaction and continuous mechanical position state. */
 struct foc_board_encoder {
@@ -115,6 +280,10 @@ struct foc_board_encoder {
     struct foc_encoder_config config;
     /** True when config is an explicit calibrated policy. */
     bool config_valid;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_board_trace_clock trace_cycles;
+    struct foc_board_encoder_trace trace;
+#endif
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -141,15 +310,32 @@ int foc_board_init_with_calibration(struct foc_runtime *runtime,
 /** Convert an inclusive half-range-valid interval to seconds. */
 bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_us, float *seconds);
 
-/** Reserve one conversion token. A busy token requests stop and is never replaced. */
-bool foc_board_adc_begin(struct foc_runtime *runtime, struct foc_board_adc *adc, uint32_t now_us);
+/** Set the epoch of a zero-initialized instance once before producers start. */
+bool foc_board_adc_init_timing(struct foc_board_adc *adc,
+                               uint32_t before_us,
+                               uint32_t after_us,
+                               uint32_t initial_phase_ticks);
 
-/** Consume one group completion. Exactly four 12-bit ranks can enter H0. */
+/** Reserve one conversion token for a verified compare window with no stale PCCE. */
+bool foc_board_adc_begin(struct foc_runtime *runtime,
+                         struct foc_board_adc *adc,
+                         const struct foc_board_adc_event *event,
+                         bool pcce_pending);
+
+/** Retire a uniquely matched group after acknowledging PCCE. */
 int foc_board_adc_complete(struct foc_runtime *runtime,
                            struct foc_board_adc *adc,
+                           struct foc_board_output *output,
                            const uint16_t *ranks,
                            unsigned int count,
-                           uint32_t now_us);
+                           const struct foc_board_adc_event *event,
+                           bool pcce_drained);
+
+/** IRQ owner serves one pending diagnostic request after handling a hardware event. */
+void foc_board_adc_publish(struct foc_board_adc *adc);
+
+/** Single foreground reader. BUSY requests/awaits a copy without modifying diagnostics. */
+int foc_board_adc_read(struct foc_board_adc *adc, struct foc_board_adc_diagnostics *diagnostics);
 
 /** Start one encoder transaction. Overlap invalidates the outstanding response. */
 bool foc_board_encoder_begin(struct foc_board_encoder *encoder, uint32_t now_us);

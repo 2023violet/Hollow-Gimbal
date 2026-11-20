@@ -20,3 +20,10 @@ python "$tool/replay.py" explain "$tool/fixtures/host-misaligned" --runner $runn
 For real-source packages, leave provenance unverified unless an independent acquisition owner has checked the setup and original capture. A caller-trusted `--attestation` file outside the pack can bind the exact manifest SHA-256, claimed source, and complete device/motor/encoder/frame identity to that review. The tool verifies that binding. It cannot observe the hardware or authenticate the statement from the file itself. An offline candidate still requires explicit SOFT-05 review and initialization. The CLI never applies or persists settings.
 
 [Fixture provenance and regeneration](fixtures/README.md) · [Public C11 interface](../../calibration/include/foc_measurement_trace.h)
+
+## Board1 acquisition
+
+`board_capture.py` reads the versioned SRAM image held by the locked Board1
+firmware and archives raw bytes and source declarations. It can prepare a
+selected ADC_ZERO Trace V1 when the caller supplies the required witness.
+See [Board1 capture and SOFT-06 import](../../firmware/at32f415/BOARD_CAPTURE.md).

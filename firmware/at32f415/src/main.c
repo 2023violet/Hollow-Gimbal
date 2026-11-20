@@ -13,21 +13,38 @@
 
 #include "at32f415.h"
 #include "foc_board.h"
+#include "foc_board_timing.h"
+#if defined(FALCONFOC_BOARD_CAPTURE)
+#include "foc_board_capture.h"
+#endif
 #include "foc_serial.h"
 
 /* Private Macros --------------------------------------------------------------- */
 
 #define FOC_TIMER_TICKS_PER_US (FOC_BOARD_TIMER_HZ / FOC_BOARD_US_HZ)
-#define FOC_ADC_TRIGGER_US     40U
-#define FOC_ADC_LATEST_US      110U
-#define FOC_SPI_SEND_US        20U
-#define FOC_SPI_FINISH_US      70U
-#define FOC_SPI_LATEST_US      100U
+#define FOC_TIME_HALF_MARK     0x80000000U
+#define FOC_TIME_FLAGS         (TMR_OVF_FLAG | TMR_C1_FLAG)
 #define FOC_SPI_ERROR_FLAGS    (SPI_MMERR_FLAG | SPI_I2S_ROERR_FLAG | SPI_CCERR_FLAG)
 #define FOC_SPI_IRQS           (SPI_I2S_RDBF_INT | SPI_I2S_ERROR_INT)
 #define FOC_TMR5_EVENTS        (TMR_OVF_FLAG | TMR_C1_FLAG | TMR_C2_FLAG)
 #define FOC_ENCODER_CS         GPIO_PINS_15
 #define FOC_STARTUP_POLL_LIMIT 100000U
+
+/* Check the offline route model against the vendor SDK in every ARM build. */
+_Static_assert((int)FOC_BOARD_ADC_TMR1_CH4 == (int)ADC12_PREEMPT_TRIG_TMR1CH4, "ADC CH4 selector");
+_Static_assert(
+    (int)FOC_BOARD_ADC_TMR1_TRGOUT == (int)ADC12_PREEMPT_TRIG_TMR1TRGOUT,
+    "ADC TRGOUT selector"
+);
+_Static_assert(
+    (int)FOC_BOARD_ADC_REMAPPED_CH4 == (int)ADC12_PREEMPT_TRIG_EXINT15_TMR1CH4,
+    "ADC remapped CH4 selector"
+);
+_Static_assert(
+    (int)FOC_BOARD_ADC_SOFTWARE == (int)ADC12_PREEMPT_TRIG_SOFTWARE,
+    "ADC software selector"
+);
+_Static_assert(ADC1_ETP_GMUX == 0x30040101U, "ADC1 remap7 bit 4");
 
 /* Private Types ---------------------------------------------------------------- */
 
@@ -51,11 +68,285 @@ static uint32_t spi_rx_us;
 static struct foc_uart_buffer uart;
 static struct foc_serial serial;
 
+#if defined(FALCONFOC_BOARD_CAPTURE)
+/* These are the only SWD capture control words. No UART view or control
+ * request is extended. The record image begins at falconfoc_capture_ram. */
+struct foc_board_capture falconfoc_capture_ram;
+volatile uint32_t falconfoc_capture_request;
+volatile uint32_t falconfoc_capture_cancel;
+static uint32_t capture_cs_us;
+static uint32_t capture_spi_status;
+static bool capture_cs_seen;
+static bool capture_rx_seen;
+#endif
+
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+struct foc_at32_trace_span {
+    uint32_t start;
+    uint32_t end;
+    uint32_t identity;
+    uint32_t detail;
+};
+
+/* Each record has one execution-domain owner. The probe is read after the
+ * selected scenario; a live multiword read can cross a publication. */
+static volatile struct {
+    struct foc_at32_trace_span probe;
+    struct foc_at32_trace_span trigger;
+    struct foc_at32_trace_span adc;
+    struct foc_at32_trace_span tmr5[3];
+    struct foc_at32_trace_span spi;
+    struct foc_at32_trace_span usart;
+    struct foc_at32_trace_span supervision;
+    struct foc_at32_trace_span serial;
+    uint32_t cs_assert_cycles;
+    uint32_t tx_cycles;
+    uint32_t rx_cycles;
+    uint32_t cs_release_cycles;
+} rt_trace;
+#endif
+
 /* Private Helpers -------------------------------------------------------------- */
+
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+static uint32_t foc_at32_trace_cycles(void)
+{
+    return DWT->CYCCNT;
+}
+
+static uint32_t foc_at32_trace_enter(void)
+{
+    return adc.trace_cycles != NULL ? foc_at32_trace_cycles() : 0U;
+}
+
+static void foc_at32_trace_exit(
+    volatile struct foc_at32_trace_span *span,
+    uint32_t start,
+    uint32_t identity,
+    uint32_t detail
+)
+{
+    if (adc.trace_cycles != NULL) {
+        const uint32_t end = foc_at32_trace_cycles();
+        span->start = start;
+        span->identity = identity;
+        span->detail = detail;
+        span->end = end;
+    }
+}
+
+static void
+foc_at32_trace_hook(struct foc_runtime *instance, enum foc_runtime_hook_point point, void *argument)
+{
+    (void)instance;
+    (void)argument;
+    struct foc_board_adc_trace *trace = &adc.live.transaction.trace;
+    switch (point) {
+    case FOC_RUNTIME_HOOK_H0_INPUTS:
+        trace->h0_inputs_cycles = foc_at32_trace_cycles();
+        trace->points |= FOC_BOARD_TRACE_H0_INPUTS;
+        break;
+    case FOC_RUNTIME_HOOK_BEFORE_SUBMIT:
+        trace->h0_guard_cycles = foc_at32_trace_cycles();
+        trace->points |= FOC_BOARD_TRACE_H0_GUARD;
+        break;
+    case FOC_RUNTIME_HOOK_AFTER_CONTROL:
+        trace->h0_control_done_cycles = foc_at32_trace_cycles();
+        trace->points |= FOC_BOARD_TRACE_H0_CONTROL_DONE;
+        break;
+    case FOC_RUNTIME_HOOK_SENSOR_WRITING:
+        encoder.trace.publish_proxy_cycles = foc_at32_trace_cycles();
+        encoder.trace.publishing = true;
+        break;
+    default:
+        break;
+    }
+}
+
+static void foc_at32_trace_init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    if ((DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) == 0U) {
+        DWT->CYCCNT = 0U;
+        DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+        if ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) != 0U) {
+            adc.trace_cycles = foc_at32_trace_cycles;
+            encoder.trace_cycles = foc_at32_trace_cycles;
+            runtime.config.hook = foc_at32_trace_hook;
+            foc_at32_trace_exit(&rt_trace.probe, foc_at32_trace_enter(), 0U, 0U);
+        }
+    }
+}
+#endif
 
 static uint32_t foc_at32_now_us(void)
 {
     return tmr_counter_value_get(TMR2);
+}
+
+#if defined(FALCONFOC_BOARD_CAPTURE)
+static void foc_at32_capture_foreground(void)
+{
+    struct foc_board_capture *capture = &falconfoc_capture_ram;
+    const unsigned int state = atomic_load_explicit(&capture->state, memory_order_relaxed);
+    if (state == FOC_CAPTURE_IDLE) {
+        const uint32_t request = falconfoc_capture_request;
+        if (request != 0U) {
+            const struct foc_capture_profile profile = foc_board_capture_default_profile();
+            (void)foc_board_capture_start(
+                capture,
+                request,
+                FOC_CAPTURE_BOARD,
+                foc_at32_now_us() + 1000U,
+                &profile
+            );
+        }
+    } else if (state != FOC_CAPTURE_READY) {
+        const uint32_t now = state == FOC_CAPTURE_ACTIVE ? foc_at32_now_us() : 0U;
+        foc_board_capture_poll(capture, now, falconfoc_capture_cancel);
+    }
+}
+
+static void foc_at32_capture_adc(
+    const uint16_t ranks[4],
+    const struct foc_board_adc_event *event,
+    bool pending_token,
+    bool pcce_drained,
+    int result
+)
+{
+    struct foc_capture_adc *row = foc_board_capture_adc(&falconfoc_capture_ram, event->now_us);
+    if (row == NULL) {
+        return;
+    }
+    const struct foc_board_adc_transaction *token = &adc.live.transaction;
+    row->ranks12 = ranks[0] | ((uint32_t)ranks[1] << 16);
+    row->ranks34 = ranks[2] | ((uint32_t)ranks[3] << 16);
+    row->flags = pcce_drained ? FOC_CAPTURE_ADC_CLEAR : 0U;
+    row->missing_slots = adc.live.missing_slots;
+    row->late_count = adc.live.late_completions;
+    row->rejection = pending_token ? token->rejection : adc.live.last_rejection;
+    if (adc.live.clock_valid && event->coherent) {
+        row->flags |= FOC_CAPTURE_ADC_SLOT;
+        row->slot = adc.live.slot_id;
+        row->slot_start_us = adc.slot_start_us;
+    }
+    if (pending_token) {
+        row->flags |= FOC_CAPTURE_ADC_TOKEN;
+        row->generation = token->generation;
+        row->token_slot = token->slot_id;
+        row->requested_us = token->requested_us;
+        if (token->adc_valid) {
+            row->flags |= FOC_CAPTURE_ADC_VALID;
+        }
+        if (token->h0_called) {
+            row->flags |= FOC_CAPTURE_ADC_H0;
+            row->h0_us = event->now_us;
+            row->h0_return_us = foc_at32_now_us();
+            if (token->h0_consumed) {
+                row->flags |= FOC_CAPTURE_ADC_CONSUMED;
+            }
+            if (token->h0_consumed && runtime.observed_sensor.valid) {
+                row->flags |= FOC_CAPTURE_ADC_SENSOR;
+                row->sensor_sequence = runtime.observed_sensor.seq;
+                row->sensor_us = runtime.observed_sensor.captured_us;
+            }
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+            if ((token->trace.points & FOC_BOARD_TRACE_H0) != 0U) {
+                row->flags |= FOC_CAPTURE_ADC_DWT;
+                row->h0_cycles = token->trace.h0_finish_cycles - token->trace.h0_start_cycles;
+            }
+#endif
+        }
+    }
+    const struct foc_safe_context *safe = &runtime.pipeline.safety;
+    const struct foc_pipeline_mock *mock = &runtime.pipeline.mock;
+    if (safe->command_seen) {
+        row->flags |= FOC_CAPTURE_ADC_COMMAND;
+        row->command_sequence = safe->command_seq;
+    }
+    const bool stop = atomic_load_explicit(&runtime.stop_requests, memory_order_relaxed) != 0U;
+    row->safety = FOC_CAPTURE_OUTPUT_LOCKED | (uint32_t)mock->last_request.action |
+        ((uint32_t)safe->state << 4) |
+        (mock->output_confirmed && !stop ? FOC_CAPTURE_OUTPUT_CONFIRMED : 0U) |
+        (stop ? FOC_CAPTURE_STOP_PENDING : 0U);
+    row->session = runtime.motion_session;
+    row->faults = safe->latched_faults;
+    row->h0_result = result;
+}
+
+static void
+foc_at32_capture_encoder(uint32_t closed_us, enum foc_board_encoder_result transport, int h1)
+{
+    struct foc_capture_encoder *row = foc_board_capture_encoder(&falconfoc_capture_ram, closed_us);
+    if (row == NULL) {
+        return;
+    }
+    row->encoder_sequence = encoder.seq - 1U;
+    row->h1_return_us = foc_at32_now_us();
+    row->flags = (capture_cs_seen ? FOC_CAPTURE_ENCODER_CS : 0U) |
+        (capture_rx_seen ? FOC_CAPTURE_ENCODER_RAW : 0U) |
+        ((encoder.result == FOC_BOARD_ENCODER_OK &&
+          (encoder.feedback.quality == FOC_ENCODER_QUALITY_VALID ||
+           encoder.feedback.quality == FOC_ENCODER_QUALITY_UNINITIALIZED))
+             ? FOC_CAPTURE_ENCODER_POSITION
+             : 0U) |
+        ((encoder.result == FOC_BOARD_ENCODER_OK && encoder.feedback.speed_valid)
+             ? FOC_CAPTURE_ENCODER_SPEED
+             : 0U) |
+        (encoder.continuity_lost ? FOC_CAPTURE_ENCODER_CONTINUITY_LOST : 0U) |
+        (h1 == FOC_RUNTIME_OK ? FOC_CAPTURE_ENCODER_H1 : 0U);
+    row->cs_us = capture_cs_seen ? capture_cs_us : 0U;
+    row->rx_us = capture_rx_seen ? spi_rx_us : 0U;
+    row->raw_word = capture_rx_seen ? spi_word : 0U;
+    row->transport = transport;
+    row->result = encoder.result;
+    row->losses = encoder.losses;
+    row->h1_status = h1;
+    row->spi_status = capture_spi_status;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (encoder.trace_cycles != NULL) {
+        row->flags |= FOC_CAPTURE_ENCODER_DWT;
+        row->h1_cycles = encoder.trace.h1_finish_cycles - encoder.trace.h1_start_cycles;
+    }
+#endif
+}
+#endif
+
+static struct foc_board_adc_event foc_at32_adc_event(void)
+{
+    struct foc_board_adc_event event = {0};
+    for (unsigned int attempt = 0U; attempt < 2U; ++attempt) {
+        const uint32_t marks = TMR2->ists & FOC_TIME_FLAGS;
+        const uint32_t period = TMR1->ists & TMR_OVF_FLAG;
+        event.before_us = TMR2->cval;
+        event.phase_ticks = TMR1->cval;
+        event.now_us = TMR2->cval;
+        if (marks != (TMR2->ists & FOC_TIME_FLAGS) || period != (TMR1->ists & TMR_OVF_FLAG)) {
+            continue;
+        }
+        if (marks != 0U) {
+            tmr_flag_clear(TMR2, marks);
+        }
+        if (period != 0U) {
+            tmr_flag_clear(TMR1, TMR_OVF_FLAG);
+            /* A second overflow during W0C can erase the next witness. */
+            if (TMR1->cval < event.phase_ticks) {
+                return event;
+            }
+        }
+        event.flags = ((marks & TMR_OVF_FLAG) != 0U ? FOC_BOARD_TIME_WRAP : 0U) |
+            ((marks & TMR_C1_FLAG) != 0U ? FOC_BOARD_TIME_HALF : 0U) |
+            (period != 0U ? FOC_BOARD_SLOT_WRAP : 0U);
+        event.coherent = TMR1->ctrl1_bit.tmren != 0U && TMR1->ctrl1_bit.cnt_dir == TMR_COUNT_UP &&
+            TMR1->pr == FOC_BOARD_COMPARE_MAX && TMR1->div == 0U &&
+            TMR1->c4dt == FOC_BOARD_ADC_COMPARE_US * FOC_TIMER_TICKS_PER_US &&
+            TMR2->ctrl1_bit.tmren != 0U && TMR2->ctrl1_bit.cnt_dir == TMR_COUNT_UP &&
+            TMR2->ctrl1_bit.pmen != 0U && TMR2->pr == UINT32_MAX &&
+            TMR2->div == FOC_TIMER_TICKS_PER_US - 1U && TMR2->c1dt == FOC_TIME_HALF_MARK;
+        return event;
+    }
+    return event;
 }
 
 static uint32_t foc_at32_serial_now(void *argument)
@@ -221,16 +512,21 @@ static void foc_at32_timers_init(void)
     crm_periph_clock_enable(CRM_TMR5_PERIPH_CLOCK, TRUE);
     tmr_32_bit_function_enable(TMR2, TRUE);
     tmr_base_init(TMR2, UINT32_MAX, FOC_TIMER_TICKS_PER_US - 1U);
+    /* Internal sticky midpoint and overflow witnesses, without a TMR2 IRQ. */
+    TMR2->c1dt = FOC_TIME_HALF_MARK;
+    tmr_counter_value_set(TMR2, 0U);
+    tmr_flag_clear(TMR2, FOC_TIME_FLAGS);
 
     /* Only channel 4 compare events. No GPIO mux, channel enable, or MOE. */
     tmr_base_init(TMR1, FOC_BOARD_COMPARE_MAX, 0U);
-    TMR1->c4dt = FOC_ADC_TRIGGER_US * FOC_TIMER_TICKS_PER_US;
-    tmr_flag_clear(TMR1, TMR_C4_FLAG);
+    TMR1->c4dt = FOC_BOARD_ADC_COMPARE_US * FOC_TIMER_TICKS_PER_US;
+    tmr_counter_value_set(TMR1, 0U);
+    tmr_flag_clear(TMR1, TMR_C4_FLAG | TMR_OVF_FLAG);
     tmr_interrupt_enable(TMR1, TMR_C4_INT, TRUE);
 
     tmr_base_init(TMR5, FOC_BOARD_H1_US - 1U, FOC_TIMER_TICKS_PER_US - 1U);
-    tmr_channel_value_set(TMR5, TMR_SELECT_CHANNEL_1, FOC_SPI_SEND_US);
-    tmr_channel_value_set(TMR5, TMR_SELECT_CHANNEL_2, FOC_SPI_FINISH_US);
+    tmr_channel_value_set(TMR5, TMR_SELECT_CHANNEL_1, FOC_BOARD_SPI_SEND_US);
+    tmr_channel_value_set(TMR5, TMR_SELECT_CHANNEL_2, FOC_BOARD_SPI_CLOSE_US);
     tmr_counter_value_set(TMR5, FOC_BOARD_H1_US - 1U);
     tmr_flag_clear(TMR5, FOC_TMR5_EVENTS);
     tmr_interrupt_enable(TMR5, TMR_OVF_INT | TMR_C1_INT | TMR_C2_INT, TRUE);
@@ -257,15 +553,32 @@ static void foc_at32_irq_enable(void)
     NVIC_EnableIRQ(USART1_IRQn);
 }
 
-static void foc_at32_spi_finish(uint32_t now_us, enum foc_board_encoder_result result)
+static void foc_at32_spi_finish(
+    uint32_t phase_us,
+    uint32_t before_phase_us,
+    enum foc_board_encoder_result result
+)
 {
     spi_i2s_interrupt_enable(SPI1, FOC_SPI_IRQS, FALSE);
     gpio_bits_set(GPIOA, FOC_ENCODER_CS);
+    const uint32_t closed_us = foc_at32_now_us();
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    rt_trace.cs_release_cycles = foc_at32_trace_enter();
+#endif
+    if (result == FOC_BOARD_ENCODER_OK &&
+        !foc_board_spi_on_time(FOC_BOARD_SPI_CLOSE, phase_us, before_phase_us, closed_us)) {
+        result = FOC_BOARD_ENCODER_TIMEOUT;
+    }
     spi_phase = FOC_SPI_IDLE;
     if (result != FOC_BOARD_ENCODER_OK) {
         foc_at32_spi_reset();
     }
-    (void)foc_board_encoder_complete(&runtime, &encoder, now_us, result, spi_word);
+#if defined(FALCONFOC_BOARD_CAPTURE)
+    const int h1 = foc_board_encoder_complete(&runtime, &encoder, closed_us, result, spi_word);
+    foc_at32_capture_encoder(closed_us, result, h1);
+#else
+    (void)foc_board_encoder_complete(&runtime, &encoder, closed_us, result, spi_word);
+#endif
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -281,16 +594,44 @@ int main(void)
         foc_serial_init(&serial, &runtime);
         foc_at32_uart_init();
         foc_at32_irq_enable();
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        foc_at32_trace_init();
+#endif
         tmr_counter_enable(TMR2, TRUE);
         tmr_counter_enable(TMR5, TRUE);
+        const uint32_t initial_phase = TMR1->cval;
+        const uint32_t epoch_before = foc_at32_now_us();
         tmr_counter_enable(TMR1, TRUE);
-        __enable_irq();
-        struct foc_runtime_foreground_result result;
-        for (;;) {
-            (void)foc_runtime_foreground_poll(&runtime, foc_at32_now_us(), 0U, 0U, &result);
-            foc_serial_poll(&serial, &uart, &runtime, foc_at32_serial_now, NULL);
-            if (!foc_uart_tx_available(&uart)) {
-                usart_interrupt_enable(USART1, USART_TDBE_INT, TRUE);
+        if (foc_board_adc_init_timing(&adc, epoch_before, foc_at32_now_us(), initial_phase)) {
+            __enable_irq();
+            struct foc_runtime_foreground_result result;
+            for (;;) {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+                const uint32_t supervision_start = foc_at32_trace_enter();
+                const int supervision_status =
+                    foc_runtime_foreground_poll(&runtime, foc_at32_now_us(), 0U, 0U, &result);
+                if (supervision_status != FOC_RUNTIME_IDLE) {
+                    foc_at32_trace_exit(
+                        &rt_trace.supervision,
+                        supervision_start,
+                        runtime.supervision.due_count,
+                        (uint32_t)supervision_status
+                    );
+                }
+                const uint32_t serial_start = foc_at32_trace_enter();
+#else
+                (void)foc_runtime_foreground_poll(&runtime, foc_at32_now_us(), 0U, 0U, &result);
+#endif
+                foc_serial_poll(&serial, &uart, &runtime, foc_at32_serial_now, NULL);
+                if (!foc_uart_tx_available(&uart)) {
+                    usart_interrupt_enable(USART1, USART_TDBE_INT, TRUE);
+                }
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+                foc_at32_trace_exit(&rt_trace.serial, serial_start, 0U, 0U);
+#endif
+#if defined(FALCONFOC_BOARD_CAPTURE)
+                foc_at32_capture_foreground();
+#endif
             }
         }
     }
@@ -301,74 +642,179 @@ int main(void)
 
 void TMR1_CH_IRQHandler(void)
 {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const uint32_t entry_cycles = foc_at32_trace_enter();
+    const uint32_t entry_phase = adc.trace_cycles != NULL ? TMR1->cval : 0U;
+#endif
     if (tmr_flag_get(TMR1, TMR_C4_FLAG) == RESET) {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        foc_at32_trace_exit(&rt_trace.trigger, entry_cycles, 0U, 0U);
+#endif
         return;
     }
+    struct foc_board_adc_event event = foc_at32_adc_event();
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    event.irq_entry_cycles = entry_cycles;
+    event.irq_entry_phase_ticks = entry_phase;
+#endif
+    /* Acknowledge after the phase read so a compare within its window
+     * cannot be issued once as stale work and again as a new IRQ. */
     tmr_flag_clear(TMR1, TMR_C4_FLAG);
-    const uint32_t count = tmr_counter_value_get(TMR1);
-    if (count < FOC_ADC_TRIGGER_US * FOC_TIMER_TICKS_PER_US ||
-        count > FOC_ADC_LATEST_US * FOC_TIMER_TICKS_PER_US) {
-        foc_runtime_request_inhibit(&runtime, FOC_SAFE_FAULT_FAST_HEARTBEAT);
-        return;
-    }
-    if (foc_board_adc_begin(&runtime, &adc, foc_at32_now_us())) {
+    if (foc_board_adc_begin(&runtime, &adc, &event, adc_flag_get(ADC1, ADC_PCCE_FLAG) != RESET)) {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        if (adc.trace_cycles != NULL) {
+            adc.live.transaction.trace.points |= FOC_BOARD_TRACE_SOFTWARE_TRIGGER;
+            adc.live.transaction.trace.trigger_proxy_cycles = foc_at32_trace_cycles();
+        }
+#endif
         adc_preempt_software_trigger_enable(ADC1, TRUE);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        adc.live.transaction.trace.trigger_write_return_cycles = foc_at32_trace_enter();
+#endif
     }
+    foc_board_adc_publish(&adc);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_at32_trace_exit(&rt_trace.trigger, entry_cycles, adc.live.slot_id, adc.live.last_rejection);
+#endif
 }
 
 void ADC1_IRQHandler(void)
 {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const uint32_t entry_cycles = foc_at32_trace_enter();
+#endif
     if (adc_flag_get(ADC1, ADC_PCCE_FLAG) == RESET) {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        foc_at32_trace_exit(&rt_trace.adc, entry_cycles, 0U, 0U);
+#endif
         return;
     }
-    const uint32_t now_us = foc_at32_now_us();
+    struct foc_board_adc_event event = foc_at32_adc_event();
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    event.irq_entry_cycles = entry_cycles;
+#endif
     const uint16_t ranks[] = {
         adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_1),
         adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_2),
         adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_3),
         adc_preempt_conversion_data_get(ADC1, ADC_PREEMPT_CHANNEL_4),
     };
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    event.ranks_ready_cycles = foc_at32_trace_enter();
+#endif
     adc_flag_clear(ADC1, ADC_PCCE_FLAG);
-    (void)foc_board_adc_complete(&runtime, &adc, ranks, sizeof ranks / sizeof ranks[0], now_us);
+#if defined(FALCONFOC_BOARD_CAPTURE)
+    const enum foc_board_adc_state token_state = adc.live.transaction.state;
+    const bool drained = adc_flag_get(ADC1, ADC_PCCE_FLAG) == RESET;
+    const int result = foc_board_adc_complete(
+        &runtime,
+        &adc,
+        &output,
+        ranks,
+        sizeof ranks / sizeof ranks[0],
+        &event,
+        drained
+    );
+    foc_at32_capture_adc(
+        ranks,
+        &event,
+        token_state == FOC_BOARD_ADC_PENDING || token_state == FOC_BOARD_ADC_DRAIN,
+        drained,
+        result
+    );
+#else
+    (void)foc_board_adc_complete(
+        &runtime,
+        &adc,
+        &output,
+        ranks,
+        sizeof ranks / sizeof ranks[0],
+        &event,
+        adc_flag_get(ADC1, ADC_PCCE_FLAG) == RESET
+    );
+#endif
+    foc_board_adc_publish(&adc);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_at32_trace_exit(&rt_trace.adc, entry_cycles, adc.live.slot_id, adc.live.last_rejection);
+#endif
 }
 
-void TMR5_GLOBAL_IRQHandler(void)
+static void foc_at32_tmr5_service(uint32_t events)
 {
-    const uint32_t events = TMR5->ists & FOC_TMR5_EVENTS;
     tmr_flag_clear(TMR5, events);
+    const uint32_t before_phase_us = foc_at32_now_us();
     const uint32_t phase_us = tmr_counter_value_get(TMR5);
     const uint32_t now_us = foc_at32_now_us();
     if ((events & TMR_OVF_FLAG) != 0U) {
         if (encoder.pending) {
             (void)foc_board_encoder_begin(&encoder, now_us);
-            foc_at32_spi_finish(now_us, FOC_BOARD_ENCODER_OVERLAP);
+            foc_at32_spi_finish(phase_us, before_phase_us, FOC_BOARD_ENCODER_OVERLAP);
             return;
         }
         if (foc_board_encoder_begin(&encoder, now_us)) {
-            if (events == TMR_OVF_FLAG && phase_us <= 10U) {
+#if defined(FALCONFOC_BOARD_CAPTURE)
+            capture_cs_seen = false;
+            capture_rx_seen = false;
+            capture_spi_status = 0U;
+#endif
+            if (events == TMR_OVF_FLAG &&
+                foc_board_spi_on_time(
+                    FOC_BOARD_SPI_CS,
+                    phase_us,
+                    before_phase_us,
+                    foc_at32_now_us()
+                )) {
                 gpio_bits_reset(GPIOA, FOC_ENCODER_CS);
-                spi_phase = FOC_SPI_SELECTED;
-            } else {
-                foc_at32_spi_finish(now_us, FOC_BOARD_ENCODER_TIMEOUT);
+                const uint32_t selected_us = foc_at32_now_us();
+#if defined(FALCONFOC_BOARD_CAPTURE)
+                capture_cs_seen = true;
+                capture_cs_us = selected_us;
+#endif
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+                rt_trace.cs_assert_cycles = foc_at32_trace_enter();
+#endif
+                if (foc_board_spi_on_time(
+                        FOC_BOARD_SPI_CS,
+                        phase_us,
+                        before_phase_us,
+                        selected_us
+                    )) {
+                    encoder.captured_us = selected_us;
+                    spi_phase = FOC_SPI_SELECTED;
+                    return;
+                }
             }
+            foc_at32_spi_finish(phase_us, before_phase_us, FOC_BOARD_ENCODER_TIMEOUT);
         }
     } else if ((events & TMR_C2_FLAG) != 0U && encoder.pending) {
         const uint32_t status = SPI1->sts;
+#if defined(FALCONFOC_BOARD_CAPTURE)
+        capture_spi_status |= status;
+#endif
         const bool error = spi_phase == FOC_SPI_ERROR ||
             (status & (FOC_SPI_ERROR_FLAGS | SPI_I2S_RDBF_FLAG)) != 0U;
-        /* At least two counter ticks leave a full microsecond of CS hold. */
-        const bool timely = phase_us >= FOC_SPI_FINISH_US && phase_us <= FOC_SPI_LATEST_US &&
-            (status & SPI_I2S_BF_FLAG) == 0U && now_us - spi_rx_us >= 2U;
-        enum foc_board_encoder_result result = FOC_BOARD_ENCODER_TIMEOUT;
-        if (error) {
-            result = FOC_BOARD_ENCODER_FRAME;
-        } else if (spi_phase == FOC_SPI_RECEIVED && timely) {
-            result = FOC_BOARD_ENCODER_OK;
-        }
-        foc_at32_spi_finish(now_us, result);
+        const enum foc_board_encoder_result result = foc_board_spi_close_result(
+            phase_us,
+            before_phase_us,
+            foc_at32_now_us(),
+            spi_rx_us,
+            spi_phase == FOC_SPI_RECEIVED,
+            (status & SPI_I2S_BF_FLAG) != 0U,
+            error
+        );
+        foc_at32_spi_finish(phase_us, before_phase_us, result);
     } else if ((events & TMR_C1_FLAG) != 0U && spi_phase == FOC_SPI_SELECTED) {
         const uint32_t status = SPI1->sts;
-        if (phase_us < FOC_SPI_SEND_US || phase_us > 30U || (status & SPI_I2S_TDBE_FLAG) == 0U ||
+#if defined(FALCONFOC_BOARD_CAPTURE)
+        capture_spi_status |= status;
+#endif
+        if ((status & SPI_I2S_TDBE_FLAG) == 0U ||
+            !foc_board_spi_on_time(
+                FOC_BOARD_SPI_SEND,
+                phase_us,
+                before_phase_us,
+                foc_at32_now_us()
+            ) ||
             (status & (FOC_SPI_ERROR_FLAGS | SPI_I2S_RDBF_FLAG | SPI_I2S_BF_FLAG)) != 0U) {
             spi_phase = FOC_SPI_ERROR;
             return;
@@ -376,15 +822,45 @@ void TMR5_GLOBAL_IRQHandler(void)
         spi_phase = FOC_SPI_SENT;
         spi_i2s_interrupt_enable(SPI1, FOC_SPI_IRQS, TRUE);
         spi_i2s_data_transmit(SPI1, 0U);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        rt_trace.tx_cycles = foc_at32_trace_enter();
+#endif
+        if (!foc_board_spi_on_time(
+                FOC_BOARD_SPI_SEND,
+                phase_us,
+                before_phase_us,
+                foc_at32_now_us()
+            )) {
+            spi_phase = FOC_SPI_ERROR;
+            spi_i2s_interrupt_enable(SPI1, FOC_SPI_IRQS, FALSE);
+        }
     }
 }
 
-void SPI1_IRQHandler(void)
+void TMR5_GLOBAL_IRQHandler(void)
 {
-    const uint32_t status = SPI1->sts;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const uint32_t start = foc_at32_trace_enter();
+    const uint32_t identity = encoder.seq;
+#endif
+    const uint32_t events = TMR5->ists & FOC_TMR5_EVENTS;
+    foc_at32_tmr5_service(events);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const unsigned int point = (events & TMR_OVF_FLAG) != 0U ? FOC_BOARD_SPI_CS
+        : (events & TMR_C2_FLAG) != 0U                       ? FOC_BOARD_SPI_CLOSE
+                                                             : FOC_BOARD_SPI_SEND;
+    foc_at32_trace_exit(&rt_trace.tmr5[point], start, identity, events);
+#endif
+}
+
+static void foc_at32_spi_service(uint32_t status)
+{
     if ((status & (SPI_I2S_RDBF_FLAG | FOC_SPI_ERROR_FLAGS)) == 0U) {
         return;
     }
+#if defined(FALCONFOC_BOARD_CAPTURE)
+    capture_spi_status |= status;
+#endif
     spi_i2s_interrupt_enable(SPI1, FOC_SPI_IRQS, FALSE);
     if (spi_phase != FOC_SPI_SENT || (status & FOC_SPI_ERROR_FLAGS) != 0U) {
         spi_phase = FOC_SPI_ERROR;
@@ -392,11 +868,32 @@ void SPI1_IRQHandler(void)
     }
     spi_word = spi_i2s_data_receive(SPI1);
     spi_rx_us = foc_at32_now_us();
+#if defined(FALCONFOC_BOARD_CAPTURE)
+    capture_rx_seen = true;
+#endif
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    rt_trace.rx_cycles = foc_at32_trace_enter();
+#endif
     spi_phase = FOC_SPI_RECEIVED;
+}
+
+void SPI1_IRQHandler(void)
+{
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const uint32_t start = foc_at32_trace_enter();
+#endif
+    const uint32_t status = SPI1->sts;
+    foc_at32_spi_service(status);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_at32_trace_exit(&rt_trace.spi, start, encoder.seq, status);
+#endif
 }
 
 void USART1_IRQHandler(void)
 {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    const uint32_t start = foc_at32_trace_enter();
+#endif
     const uint32_t status = USART1->sts;
     const uint32_t errors = USART_PERR_FLAG | USART_FERR_FLAG | USART_NERR_FLAG | USART_ROERR_FLAG;
     if ((status & (USART_RDBF_FLAG | errors)) != 0U) {
@@ -413,6 +910,9 @@ void USART1_IRQHandler(void)
             usart_interrupt_enable(USART1, USART_TDBE_INT, FALSE);
         }
     }
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    foc_at32_trace_exit(&rt_trace.usart, start, 0U, status);
+#endif
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

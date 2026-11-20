@@ -13,6 +13,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#include "foc_adc_test_clock.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -69,30 +70,67 @@ static int test_adc(void)
     CHECK(fabsf(measurement.phase_current_a.a - 0.08381f) < 0.0001f);
     CHECK(fabsf(measurement.phase_current_a.b - 0.04190f) < 0.0001f);
     CHECK(fabsf(measurement.phase_current_a.c + 0.12571f) < 0.0001f);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 0U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 8U) == FOC_RUNTIME_ERR_ALIGNMENT);
-    CHECK(runtime.adc.seen && runtime.adc.seq == 0U && runtime.adc.produced_us == 0U);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 213U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 222U) == FOC_RUNTIME_ERR_ALIGNMENT);
+    struct foc_adc_test_clock clock = {0};
+    CHECK(foc_board_adc_init_timing(&adc, 0U, 0U, 0U));
+    struct foc_board_adc_event event = foc_adc_test_event(&clock, 40U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 48U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_ALIGNMENT
+    );
+    CHECK(runtime.adc.seen && runtime.adc.seq == 0U && runtime.adc.produced_us == 40U);
+    event = foc_adc_test_event(&clock, 253U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 262U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_ALIGNMENT
+    );
     CHECK(runtime.interval_us == 213U && runtime.adc.seq == 1U);
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 223U) == FOC_RUNTIME_ERR_ORDER);
+    event = foc_adc_test_event(&clock, 263U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_ORDER
+    );
     CHECK(runtime.h0.due_count == 2U);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 400U));
-    CHECK(!foc_board_adc_begin(&runtime, &adc, 600U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 608U) == FOC_RUNTIME_ERR_ORDER);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 800U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 3U, 807U) == FOC_RUNTIME_ERR_INPUT);
+    event = foc_adc_test_event(&clock, 440U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 640U);
+    CHECK(!foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 648U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_ORDER
+    );
+    event = foc_adc_test_event(&clock, 840U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 847U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 3U, &event, true) ==
+        FOC_RUNTIME_ERR_INPUT
+    );
     CHECK(runtime.h0.due_count == 2U);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 1000U));
+    event = foc_adc_test_event(&clock, 1040U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
     const uint16_t invalid[] = {1241U, 4096U, 2048U, 2048U};
-    CHECK(foc_board_adc_complete(&runtime, &adc, invalid, 4U, 1008U) == FOC_RUNTIME_ERR_TIMING);
+    event = foc_adc_test_event(&clock, 1048U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, invalid, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_TIMING
+    );
     CHECK(runtime.h0.due_count == 3U && runtime.h0.missed == 3U);
     CHECK(runtime.pipeline.safety.state == FOC_SAFE_STATE_FAULT_LATCHED);
     CHECK((runtime.pipeline.safety.latched_faults & FOC_SAFE_FAULT_SAMPLE_TIMEOUT) != 0U);
     CHECK((runtime.pipeline.safety.latched_faults & FOC_SAFE_FAULT_SAMPLE_INVALID) != 0U);
     CHECK(output.result == FOC_BOARD_INHIBIT_SOFTWARE && output.declined_updates == 0U);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 1200U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 1281U) == FOC_RUNTIME_ERR_ORDER);
+    event = foc_adc_test_event(&clock, 1240U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 1321U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
+        FOC_RUNTIME_ERR_ORDER
+    );
     return 0;
 }
 
@@ -103,7 +141,9 @@ static int test_encoder(void)
     struct foc_board_encoder encoder = {0};
     struct foc_board_adc adc = {0};
     const uint32_t base = UINT32_MAX - 499U;
+    struct foc_adc_test_clock clock = {.epoch = base};
     CHECK(foc_board_init(&runtime, &output, base) == FOC_RUNTIME_OK);
+    CHECK(foc_board_adc_init_timing(&adc, base, base, 0U));
     CHECK(foc_board_encoder_begin(&encoder, base));
     CHECK(
         foc_board_encoder_complete(&runtime, &encoder, base + 70U, FOC_BOARD_ENCODER_OK, 0U) ==
@@ -114,9 +154,11 @@ static int test_encoder(void)
         !runtime.sensor_slots[atomic_load(&runtime.sensor_slot)].sample.electrical_phase_valid
     );
     for (uint32_t offset = 80U; offset < 500U; offset += FOC_BOARD_H0_US) {
-        CHECK(foc_board_adc_begin(&runtime, &adc, base + offset));
+        struct foc_board_adc_event event = foc_adc_test_event(&clock, offset);
+        CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+        event = foc_adc_test_event(&clock, offset + 8U);
         CHECK(
-            foc_board_adc_complete(&runtime, &adc, ranks, 4U, base + offset + 8U) ==
+            foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) ==
             FOC_RUNTIME_ERR_ALIGNMENT
         );
     }
@@ -139,9 +181,13 @@ static int test_encoder(void)
     CHECK(encoder.feedback.quality == FOC_ENCODER_QUALITY_VALID);
     CHECK(encoder.feedback.speed_valid && encoder.feedback.raw_velocity_rad_s > 0.0f);
     CHECK(sample.mechanical_rad_s == encoder.feedback.filtered_velocity_rad_s);
-    CHECK(foc_board_adc_begin(&runtime, &adc, 100U));
-    CHECK(foc_board_adc_complete(&runtime, &adc, ranks, 4U, 108U) == FOC_RUNTIME_IDLE);
-    CHECK(runtime.angle_prediction_us == 100U && runtime.adc.produced_us == 100U);
+    struct foc_board_adc_event event = foc_adc_test_event(&clock, 640U);
+    CHECK(foc_board_adc_begin(&runtime, &adc, &event, false));
+    event = foc_adc_test_event(&clock, 648U);
+    CHECK(
+        foc_board_adc_complete(&runtime, &adc, &output, ranks, 4U, &event, true) == FOC_RUNTIME_IDLE
+    );
+    CHECK(runtime.angle_prediction_us == 140U && runtime.adc.produced_us == 140U);
     CHECK(foc_board_encoder_begin(&encoder, 500U));
     CHECK(!foc_board_encoder_begin(&encoder, 501U));
     CHECK(

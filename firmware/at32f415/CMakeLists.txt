@@ -14,6 +14,13 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+option(FALCONFOC_RT02_TIMING_TRACE "Capture local Board1 execution and ADC/H0 timing" OFF)
+option(FALCONFOC_BOARD_CAPTURE "Enable the locked Board1 SRAM capture recorder" OFF)
+set(FALCONFOC_BOARD_CAPTURE_BUILD_TAG
+    "0"
+    CACHE STRING "Declared recorder build tag (uint32)"
+)
+
 set(repo "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(vendor "${repo}/platform/at/at32f415/vendor")
 set(cmsis "${vendor}/cmsis/cm4")
@@ -23,6 +30,8 @@ add_subdirectory("${repo}/protocol" protocol)
 add_library(
   falconfoc-board1 STATIC
   src/foc_board.c
+  src/foc_board_timing.c
+  src/foc_board_capture.c
   src/foc_serial.c
   src/foc_uart_buffer.c
   "${repo}/core/src/foc_core.c"
@@ -41,6 +50,18 @@ add_library(
   "${repo}/runtime/src/foc_runtime.c"
 )
 target_link_libraries(falconfoc-board1 PUBLIC falconfoc-wire)
+if(FALCONFOC_RT02_TIMING_TRACE)
+  target_compile_definitions(falconfoc-board1 PUBLIC FALCONFOC_RT02_TIMING_TRACE=1)
+endif()
+if(FALCONFOC_BOARD_CAPTURE)
+  if(NOT FALCONFOC_BOARD_CAPTURE_BUILD_TAG MATCHES "^(0|[1-9][0-9]*|0[xX][0-9a-fA-F]+)$")
+    message(FATAL_ERROR "Supply a numeric FALCONFOC_BOARD_CAPTURE_BUILD_TAG")
+  endif()
+  target_compile_definitions(
+    falconfoc-board1 PUBLIC FALCONFOC_BOARD_CAPTURE=1
+                            FOC_CAPTURE_BUILD_TAG=${FALCONFOC_BOARD_CAPTURE_BUILD_TAG}
+  )
+endif()
 target_include_directories(
   falconfoc-board1
   PUBLIC include
@@ -111,6 +132,15 @@ else()
   add_executable(test-foc-board1 tests/test_foc_board.c)
   target_link_libraries(test-foc-board1 PRIVATE falconfoc-board1)
   add_test(NAME test-foc-board1 COMMAND test-foc-board1)
+  add_executable(test-foc-pwm-port tests/test_foc_pwm_port.c src/foc_board_pwm_model.c)
+  target_link_libraries(test-foc-pwm-port PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-pwm-port COMMAND test-foc-pwm-port)
+  add_executable(test-foc-timing tests/test_foc_timing.c)
+  target_link_libraries(test-foc-timing PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-timing COMMAND test-foc-timing)
+  add_executable(test-foc-board-capture tests/test_foc_board_capture.c)
+  target_link_libraries(test-foc-board-capture PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-board-capture COMMAND test-foc-board-capture)
   add_executable(test-foc-board-config tests/test_foc_board_config.c)
   target_link_libraries(test-foc-board-config PRIVATE falconfoc-board1)
   add_test(NAME test-foc-board-config COMMAND test-foc-board-config)
@@ -120,6 +150,18 @@ else()
   add_executable(foc-serial-sim tests/foc_serial_sim.c)
   target_link_libraries(foc-serial-sim PRIVATE falconfoc-board1)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test-foc-capture-import
+           COMMAND "${Python3_EXECUTABLE}" -B
+                   "${repo}/tools/falconfoc-calibration-replay/tests/test_board_capture.py"
+  )
+  set_tests_properties(
+    test-foc-capture-import PROPERTIES ENVIRONMENT
+                                       "FOC_CAPTURE_FIXTURE=$<TARGET_FILE:test-foc-board-capture>"
+  )
+  add_test(NAME test-foc-locked-timing-import
+           COMMAND "${Python3_EXECUTABLE}" -B
+                   "${repo}/tools/falconfoc-calibration-replay/tests/test_locked_timing.py"
+  )
   add_test(NAME test-foc-python COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s
                                         "${repo}/tools/falconfoc-cli" -p test_falconfoc_cli.py -v
   )

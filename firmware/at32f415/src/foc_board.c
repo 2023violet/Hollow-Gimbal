@@ -12,15 +12,47 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#if defined(FALCONFOC_BOARD_CAPTURE)
+#include "foc_board_capture.h"
+#endif
 
 #include <stddef.h>
 
 /* Private Macros --------------------------------------------------------------- */
 
 #define FOC_BOARD_ADC_MAX          4095U
-#define FOC_BOARD_ADC_FRAME_US     80U
+#define FOC_BOARD_CLOCK_HALF       0x80000000U
+#define FOC_BOARD_TICKS_PER_US     (FOC_BOARD_TIMER_HZ / FOC_BOARD_US_HZ)
 #define FOC_BOARD_ENCODER_FRAME_US 100U
 #define FOC_BOARD_ENCODER_GAP_US   2500U
+
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+static bool foc_board_trace_submit(void *argument, const struct foc_device_pwm_request *request)
+{
+    struct foc_board_output *output = argument;
+    if (output == NULL || output->trace_owner == NULL) {
+        return foc_board_output_submit(argument, request);
+    }
+    struct foc_board_adc *adc = output->trace_owner;
+    struct foc_board_adc_trace *trace = &adc->live.transaction.trace;
+    const uint32_t started = adc->trace_cycles();
+    const bool accepted = foc_board_output_submit(argument, request);
+    const uint32_t returned = adc->trace_cycles();
+    trace->adapter_start_cycles = started;
+    trace->adapter_return_cycles = returned;
+    trace->adapter_result = output->result;
+    trace->adapter_accepted = accepted;
+    trace->points |= FOC_BOARD_TRACE_ADAPTER;
+    if (request != NULL && request->action == FOC_DEVICE_OUTPUT_UPDATE) {
+        trace->update_start_cycles = started;
+        trace->update_return_cycles = returned;
+        trace->update_result = output->result;
+        trace->update_accepted = accepted;
+        trace->points |= FOC_BOARD_TRACE_UPDATE;
+    }
+    return accepted;
+}
+#endif
 
 /* Private Constants ------------------------------------------------------------ */
 
@@ -71,7 +103,11 @@ static const struct foc_pipeline_config pipeline_config = {
             .foreground_heartbeat_timeout_us = 1000U,
             .invalid_sample_latch_after = 5U,
         },
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    .output_submit = foc_board_trace_submit,
+#else
     .output_submit = foc_board_output_submit,
+#endif
 };
 
 /* H0/H1 and foreground values are nominal Board1 scheduling budgets in us. */
@@ -161,6 +197,22 @@ static bool foc_board_compares_zero(const struct foc_device_pwm_request *request
 
 /* Public Functions ------------------------------------------------------------- */
 
+#if defined(FALCONFOC_BOARD_CAPTURE)
+_Static_assert(FOC_CAPTURE_BUILD_TAG <= UINT32_MAX, "recorder build tag is uint32");
+
+struct foc_capture_profile foc_board_capture_default_profile(void)
+{
+    _Static_assert((uint64_t)FOC_CAPTURE_BUILD_TAG <= UINT32_MAX, "capture build tag is uint32");
+    return (struct foc_capture_profile){
+        .build_tag = FOC_CAPTURE_BUILD_TAG,
+        .encoder_cpr = encoder_config.counts_per_revolution,
+        .encoder_direction = encoder_config.direction,
+        .pole_pairs = runtime_config.motion.rotor.pole_pairs,
+        .phase_order = pipeline_config.adc.phase_order,
+    };
+}
+#endif
+
 int foc_board_init(struct foc_runtime *runtime, struct foc_board_output *output, uint32_t now_us)
 {
     if (output == NULL) {
@@ -235,44 +287,252 @@ bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_u
     return true;
 }
 
-bool foc_board_adc_begin(struct foc_runtime *runtime, struct foc_board_adc *adc, uint32_t now_us)
+/* ADC timing helpers ----------------------------------------------------------- */
+enum foc_board_adc_snapshot_state {
+    FOC_BOARD_ADC_SNAPSHOT_IDLE,
+    FOC_BOARD_ADC_SNAPSHOT_REQUESTED,
+    FOC_BOARD_ADC_SNAPSHOT_READY,
+};
+
+static void foc_board_adc_add(uint32_t *counter, uint32_t n)
 {
-    if (adc->pending) {
-        adc->expired = true;
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_SAMPLE_TIMEOUT);
+    *counter += n <= UINT32_MAX - *counter ? n : UINT32_MAX - *counter;
+}
+
+static bool foc_board_adc_pending(const struct foc_board_adc_transaction *token)
+{
+    return token->state == FOC_BOARD_ADC_PENDING || token->state == FOC_BOARD_ADC_DRAIN;
+}
+
+static bool
+foc_board_adc_observe(struct foc_board_adc *adc, const struct foc_board_adc_event *event)
+{
+    struct foc_board_adc_diagnostics *view = &adc->live;
+    const uint32_t span = event->now_us - event->before_us;
+    unsigned int expected = 0U;
+    if (event->now_us < adc->last_clock_us) {
+        expected |= FOC_BOARD_TIME_WRAP;
+    }
+    if ((adc->last_clock_us & FOC_BOARD_CLOCK_HALF) == 0U &&
+        (event->now_us & FOC_BOARD_CLOCK_HALF) != 0U) {
+        expected |= FOC_BOARD_TIME_HALF;
+    }
+    if (!view->clock_valid || !event->coherent || span > FOC_BOARD_ADC_BRACKET_US ||
+        event->before_us - adc->last_clock_us >= FOC_BOARD_CLOCK_HALF ||
+        event->now_us - adc->last_clock_us >= FOC_BOARD_CLOCK_HALF ||
+        (event->flags & (FOC_BOARD_TIME_WRAP | FOC_BOARD_TIME_HALF)) != expected ||
+        event->phase_ticks > FOC_BOARD_COMPARE_MAX) {
         return false;
     }
-    adc->pending = true;
-    adc->captured_us = now_us;
+
+    /* now - floor(phase) is the latest possible slot boundary. Intersect
+     * its read bracket (plus one tick of floor error) with the startup
+     * bracket translated by k periods. The brackets are much shorter
+     * than one slot, so an intersection identifies exactly one k. */
+    const uint32_t elapsed =
+        event->now_us - event->phase_ticks / FOC_BOARD_TICKS_PER_US - adc->slot_start_us;
+    if (elapsed >= FOC_BOARD_CLOCK_HALF) {
+        return false;
+    }
+    const uint32_t tolerance = adc->epoch_width_us + span + 1U;
+    const bool rolled = (event->flags & FOC_BOARD_SLOT_WRAP) != 0U;
+    if (elapsed < FOC_BOARD_H0_US) {
+        if (elapsed > tolerance || rolled) {
+            return false;
+        }
+        adc->last_clock_us = event->now_us;
+        if (view->observed_slots == 0U) {
+            view->observed_slots = 1U;
+        }
+        return true;
+    }
+    if (!rolled) {
+        return false;
+    }
+    const uint32_t advance = elapsed < 2U * FOC_BOARD_H0_US ? 1U : elapsed / FOC_BOARD_H0_US;
+    const uint32_t translation = advance * FOC_BOARD_H0_US;
+    if (elapsed - translation > tolerance) {
+        return false;
+    }
+    adc->last_clock_us = event->now_us;
+    foc_board_adc_add(&view->missing_slots, advance - (adc->slot_served ? 1U : 0U));
+    foc_board_adc_add(&view->observed_slots, 1U);
+    view->slot_id += advance;
+    adc->slot_start_us += translation;
+    adc->slot_served = false;
+    adc->trigger_seen = false;
+    return true;
+}
+
+static void foc_board_adc_reject(
+    struct foc_runtime *runtime,
+    struct foc_board_adc_diagnostics *view,
+    enum foc_board_adc_rejection reason,
+    uint32_t faults
+)
+{
+    view->last_rejection = reason;
+    if (reason != FOC_BOARD_ADC_BAD_RANKS) {
+        foc_board_adc_add(&view->timing_rejections, 1U);
+    }
+    if (reason == FOC_BOARD_ADC_AMBIGUOUS_CLOCK) {
+        view->clock_valid = false;
+        foc_board_adc_add(&view->unattributable_events, 1U);
+    }
+    if (reason == FOC_BOARD_ADC_OVERLAP) {
+        foc_board_adc_add(&view->overlap_rejections, 1U);
+    }
+    if (reason == FOC_BOARD_ADC_UNMATCHED_PCCE) {
+        foc_board_adc_add(&view->unmatched_completions, 1U);
+    }
+    if (reason == FOC_BOARD_ADC_LATE) {
+        foc_board_adc_add(&view->late_completions, 1U);
+    }
+    foc_runtime_request_inhibit(runtime, faults);
+}
+
+/* ADC IRQ and foreground entry points -------------------------------------------- */
+bool foc_board_adc_init_timing(
+    struct foc_board_adc *adc,
+    uint32_t before_us,
+    uint32_t after_us,
+    uint32_t initial_phase_ticks
+)
+{
+    if (adc->timing_initialized) {
+        return false;
+    }
+    adc->timing_initialized = true;
+    adc->slot_start_us = before_us;
+    adc->last_clock_us = after_us;
+    adc->epoch_width_us = after_us - before_us;
+    atomic_init(&adc->snapshot_state, FOC_BOARD_ADC_SNAPSHOT_IDLE);
+    adc->live.clock_valid =
+        adc->epoch_width_us <= FOC_BOARD_ADC_BRACKET_US && initial_phase_ticks == 0U;
+    return adc->live.clock_valid;
+}
+
+bool foc_board_adc_begin(
+    struct foc_runtime *runtime,
+    struct foc_board_adc *adc,
+    const struct foc_board_adc_event *event,
+    bool pcce_pending
+)
+{
+    struct foc_board_adc_diagnostics *view = &adc->live;
+    struct foc_board_adc_transaction *token = &view->transaction;
+    enum foc_board_adc_rejection reason = FOC_BOARD_ADC_NO_REJECTION;
+    uint32_t faults = FOC_SAFE_FAULT_FAST_HEARTBEAT;
+    if (!foc_board_adc_observe(adc, event)) {
+        reason = FOC_BOARD_ADC_AMBIGUOUS_CLOCK;
+    } else if (
+        event->phase_ticks < FOC_BOARD_ADC_COMPARE_US * FOC_BOARD_TICKS_PER_US ||
+        event->phase_ticks > FOC_BOARD_ADC_LATEST_US * FOC_BOARD_TICKS_PER_US
+    ) {
+        reason = FOC_BOARD_ADC_TRIGGER_WINDOW;
+    } else if (adc->trigger_seen) {
+        reason = FOC_BOARD_ADC_DUPLICATE_TRIGGER;
+    } else {
+        adc->trigger_seen = true;
+        if (foc_board_adc_pending(token)) {
+            token->state = FOC_BOARD_ADC_DRAIN;
+            reason = FOC_BOARD_ADC_OVERLAP;
+            faults = FOC_SAFE_FAULT_SAMPLE_TIMEOUT;
+        } else if (pcce_pending) {
+            reason = FOC_BOARD_ADC_UNDRAINED_PCCE;
+            faults = FOC_SAFE_FAULT_SAMPLE_INVALID;
+        }
+    }
+    if (reason != FOC_BOARD_ADC_NO_REJECTION) {
+        foc_board_adc_reject(runtime, view, reason, faults);
+        return false;
+    }
+
+    *token = (struct foc_board_adc_transaction){
+        .slot_id = view->slot_id,
+        .generation = adc->next_generation++,
+        .requested_us = event->now_us,
+        .diagnostic_load_us = adc->slot_start_us + FOC_BOARD_H0_US,
+        .state = FOC_BOARD_ADC_PENDING,
+    };
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (adc->trace_cycles != NULL) {
+        token->trace.compare_irq_cycles = event->irq_entry_cycles;
+        token->trace.compare_irq_phase_ticks = event->irq_entry_phase_ticks;
+    }
+#endif
+    foc_board_adc_add(&view->trigger_requests, 1U);
     return true;
 }
 
 int foc_board_adc_complete(
     struct foc_runtime *runtime,
     struct foc_board_adc *adc,
+    struct foc_board_output *output,
     const uint16_t *ranks,
     unsigned int count,
-    uint32_t now_us
+    const struct foc_board_adc_event *event,
+    bool pcce_drained
 )
 {
-    if (!adc->pending) {
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_SAMPLE_INVALID);
-        return FOC_RUNTIME_ERR_ORDER;
-    }
-    adc->pending = false;
-    const uint32_t seq = adc->seq++;
-    if (adc->expired ||
-        !foc_safe_timestamp_fresh(now_us, adc->captured_us, FOC_BOARD_ADC_FRAME_US)) {
-        adc->expired = false;
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_SAMPLE_TIMEOUT);
-        return FOC_RUNTIME_ERR_ORDER;
-    }
-    if (ranks == NULL || count != 4U) {
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_SAMPLE_INVALID);
-        return FOC_RUNTIME_ERR_INPUT;
-    }
-    const bool valid = ranks[0] <= FOC_BOARD_ADC_MAX && ranks[1] <= FOC_BOARD_ADC_MAX &&
+    struct foc_board_adc_diagnostics *view = &adc->live;
+    struct foc_board_adc_transaction *token = &view->transaction;
+    const bool clock_valid = foc_board_adc_observe(adc, event);
+    const bool pending = foc_board_adc_pending(token);
+    const bool complete = ranks != NULL && count == 4U;
+    const bool valid = complete && ranks[0] <= FOC_BOARD_ADC_MAX && ranks[1] <= FOC_BOARD_ADC_MAX &&
         ranks[2] <= FOC_BOARD_ADC_MAX && ranks[3] <= FOC_BOARD_ADC_MAX;
+    uint32_t faults = valid ? 0U : FOC_SAFE_FAULT_SAMPLE_INVALID;
+    enum foc_board_adc_rejection reason = FOC_BOARD_ADC_NO_REJECTION;
+    if (!clock_valid) {
+        reason = FOC_BOARD_ADC_AMBIGUOUS_CLOCK;
+        faults |= FOC_SAFE_FAULT_FAST_HEARTBEAT;
+    } else if (!pending) {
+        reason = FOC_BOARD_ADC_UNMATCHED_PCCE;
+        faults |= FOC_SAFE_FAULT_SAMPLE_INVALID;
+    } else if (!pcce_drained) {
+        reason = FOC_BOARD_ADC_UNDRAINED_PCCE;
+        faults |= FOC_SAFE_FAULT_SAMPLE_INVALID;
+    } else if (
+        token->state == FOC_BOARD_ADC_DRAIN || token->slot_id != view->slot_id ||
+        event->now_us - token->requested_us > FOC_BOARD_ADC_FRAME_US
+    ) {
+        reason = FOC_BOARD_ADC_LATE;
+        faults |= FOC_SAFE_FAULT_SAMPLE_TIMEOUT;
+    }
+
+    if (reason == FOC_BOARD_ADC_NO_REJECTION) {
+        foc_board_adc_add(&view->adc_completions, 1U);
+        if (!valid) {
+            reason = FOC_BOARD_ADC_BAD_RANKS;
+        }
+    }
+    if (pending) {
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+        if (adc->trace_cycles != NULL) {
+            token->trace.pcce_irq_cycles = event->irq_entry_cycles;
+            token->trace.ranks_ready_cycles = event->ranks_ready_cycles;
+            token->trace.points |= FOC_BOARD_TRACE_PCCE_ENTRY;
+        }
+#endif
+        token->completed_us = event->now_us;
+        token->adc_valid = reason == FOC_BOARD_ADC_NO_REJECTION;
+        token->rejection = reason;
+        token->state = !pcce_drained               ? FOC_BOARD_ADC_DRAIN
+            : reason == FOC_BOARD_ADC_NO_REJECTION ? FOC_BOARD_ADC_COMPLETED
+                                                   : FOC_BOARD_ADC_REJECTED;
+    }
+    if (reason != FOC_BOARD_ADC_NO_REJECTION) {
+        foc_board_adc_reject(runtime, view, reason, faults);
+        if (reason != FOC_BOARD_ADC_BAD_RANKS || !complete) {
+            return reason == FOC_BOARD_ADC_BAD_RANKS ? FOC_RUNTIME_ERR_INPUT
+                                                     : FOC_RUNTIME_ERR_ORDER;
+        }
+        /* Preserve the existing timely invalid-frame STOP service, without
+         * granting the frame validity or offering it to the control path. */
+    }
+
+    adc->slot_served = valid;
     const struct foc_runtime_fast_input input = {
         .adc =
             {ranks[0],
@@ -280,14 +540,85 @@ int foc_board_adc_complete(
              ranks[2],
              ranks[3],
              valid ? FOC_DEVICE_SAMPLE_ALL_VALID : 0U,
-             seq,
-             adc->captured_us},
-        .now_us = now_us,
+             token->generation,
+             token->requested_us},
+        .now_us = event->now_us,
     };
-    if (!valid) {
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_SAMPLE_INVALID);
+    const uint32_t updates = runtime->pipeline.mock.updates;
+    const uint32_t declined = output->declined_updates;
+    const bool already_observed = runtime->adc.seen && runtime->adc.seq == token->generation &&
+        runtime->adc.produced_us == token->requested_us;
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (adc->trace_cycles != NULL) {
+        output->trace_owner = adc;
+        token->trace.h0_start_cycles = adc->trace_cycles();
     }
-    return foc_runtime_h0_step(runtime, &input);
+#endif
+    const int result = foc_runtime_h0_step(runtime, &input);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (adc->trace_cycles != NULL) {
+        token->trace.h0_finish_cycles = adc->trace_cycles();
+        token->trace.points |= FOC_BOARD_TRACE_H0;
+        if (runtime->observed_sensor.valid) {
+            token->trace.sensor_used = true;
+            token->trace.sensor_capture_us = runtime->observed_sensor.captured_us;
+            token->trace.sensor_seq = runtime->observed_sensor.seq;
+            token->trace.prediction_us = runtime->angle_prediction_us;
+        }
+        token->trace.motion_session = runtime->motion_session;
+        token->trace.outer_accepted = runtime->accepted_outer_seen;
+        token->trace.accepted_outer_seq = runtime->accepted_outer_seq;
+        output->trace_owner = NULL;
+    }
+#endif
+    token->h0_called = true;
+    token->h0_result = result;
+    token->h0_consumed = valid && !already_observed && runtime->adc.seen &&
+        runtime->adc.seq == token->generation && runtime->adc.produced_us == token->requested_us;
+    token->update_accepted = runtime->pipeline.mock.updates != updates;
+    token->update_declined = output->declined_updates != declined;
+    token->final_output = output->result;
+    if (token->h0_consumed) {
+        foc_board_adc_add(&view->h0_consumed, 1U);
+    }
+    return result;
+}
+
+void foc_board_adc_publish(struct foc_board_adc *adc)
+{
+    if (atomic_load_explicit(&adc->snapshot_state, memory_order_relaxed) ==
+        FOC_BOARD_ADC_SNAPSHOT_REQUESTED) {
+        /* Pair with the reader's release only when it requests a copy. */
+        atomic_thread_fence(memory_order_acquire);
+        adc->published = adc->live;
+        atomic_store_explicit(
+            &adc->snapshot_state,
+            FOC_BOARD_ADC_SNAPSHOT_READY,
+            memory_order_release
+        );
+    }
+}
+
+int foc_board_adc_read(struct foc_board_adc *adc, struct foc_board_adc_diagnostics *diagnostics)
+{
+    const unsigned int state = atomic_load_explicit(&adc->snapshot_state, memory_order_acquire);
+    if (state == FOC_BOARD_ADC_SNAPSHOT_READY) {
+        *diagnostics = adc->published;
+        atomic_store_explicit(
+            &adc->snapshot_state,
+            FOC_BOARD_ADC_SNAPSHOT_IDLE,
+            memory_order_release
+        );
+        return FOC_RUNTIME_OK;
+    }
+    if (state == FOC_BOARD_ADC_SNAPSHOT_IDLE) {
+        atomic_store_explicit(
+            &adc->snapshot_state,
+            FOC_BOARD_ADC_SNAPSHOT_REQUESTED,
+            memory_order_release
+        );
+    }
+    return FOC_RUNTIME_ERR_BUSY;
 }
 
 bool foc_board_encoder_begin(struct foc_board_encoder *encoder, uint32_t now_us)
@@ -318,6 +649,16 @@ int foc_board_encoder_complete(
     }
     encoder->pending = false;
     struct foc_runtime_sensor sample = {.captured_us = encoder->captured_us, .seq = encoder->seq++};
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (encoder->trace_cycles != NULL) {
+        encoder->trace = (struct foc_board_encoder_trace){
+            .capture_us = sample.captured_us,
+            .close_us = now_us,
+            .seq = sample.seq,
+            .decode_start_cycles = encoder->trace_cycles(),
+        };
+    }
+#endif
     if (encoder->result != FOC_BOARD_ENCODER_OVERLAP) {
         encoder->result = transport;
     }
@@ -356,11 +697,27 @@ int foc_board_encoder_complete(
     } else if (encoder->losses < UINT32_MAX) {
         encoder->losses++;
     }
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (encoder->trace_cycles != NULL) {
+        encoder->trace.decode_done_cycles = encoder->trace_cycles();
+    }
+#endif
     if (encoder->result != FOC_BOARD_ENCODER_OK) {
         /* H0 may preempt H1 before the invalid snapshot is published. */
         foc_runtime_request_inhibit(runtime, 0U);
     }
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (encoder->trace_cycles != NULL) {
+        encoder->trace.h1_start_cycles = encoder->trace_cycles();
+    }
+#endif
     const int status = foc_runtime_h1_step(runtime, &sample, now_us, 0U);
+#if defined(FALCONFOC_RT02_TIMING_TRACE)
+    if (encoder->trace_cycles != NULL) {
+        encoder->trace.h1_finish_cycles = encoder->trace_cycles();
+        encoder->trace.h1_status = status;
+    }
+#endif
     if (sample.valid && status != FOC_RUNTIME_OK) {
         foc_runtime_request_inhibit(runtime, 0U);
     }

@@ -182,7 +182,7 @@ static void foc_runtime_publish_snapshot(struct foc_runtime *runtime)
 static int foc_runtime_copy_snapshot(
     struct foc_runtime *runtime,
     struct foc_runtime_snapshot *snapshot,
-    bool inject
+    enum foc_runtime_hook_point hook
 )
 {
     const unsigned int before = atomic_load(&runtime->telemetry_sequence);
@@ -191,8 +191,8 @@ static int foc_runtime_copy_snapshot(
     }
     unsigned int words[WORD_COUNT];
     words[WORD_FLAGS] = atomic_load(&runtime->telemetry_words[WORD_FLAGS]);
-    if (inject) {
-        foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_TELEMETRY_READING);
+    if (hook != FOC_RUNTIME_HOOK_NONE) {
+        foc_runtime_hook(runtime, hook);
     }
     for (unsigned int index = WORD_STATE; index < WORD_COUNT; ++index) {
         words[index] = atomic_load(&runtime->telemetry_words[index]);
@@ -792,20 +792,26 @@ static int foc_runtime_supervise(
     struct foc_runtime_foreground_result *result
 )
 {
-    struct foc_runtime_snapshot snapshot;
-    const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
-    if (status != FOC_RUNTIME_OK) {
-        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_FOREGROUND_HEARTBEAT);
-        return status;
-    }
-
     const struct foc_safe_config config = runtime->pipeline.safety.config;
     const bool previous_seen =
         atomic_load_explicit(&runtime->foreground_seen, memory_order_relaxed) != 0U;
-    const uint32_t previous = atomic_load_explicit(&runtime->foreground_us, memory_order_relaxed);
-    if (previous_seen &&
-        !foc_safe_timestamp_fresh(now_us, previous, config.foreground_heartbeat_timeout_us)) {
+    const uint32_t previous = previous_seen
+        ? atomic_load_explicit(&runtime->foreground_us, memory_order_relaxed)
+        : runtime->boot_us;
+    if (!foc_safe_timestamp_fresh(now_us, previous, config.foreground_heartbeat_timeout_us)) {
         foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_FOREGROUND_HEARTBEAT);
+    }
+
+    struct foc_runtime_snapshot snapshot;
+    const int status =
+        foc_runtime_copy_snapshot(runtime, &snapshot, FOC_RUNTIME_HOOK_CONTROL_SNAPSHOT_READING);
+    if (status != FOC_RUNTIME_OK) {
+        return status;
+    }
+    if (snapshot.fast_seen && !foc_safe_timestamp_fresh(now_us, snapshot.fast_us, UINT32_MAX)) {
+        /* The caller's time precedes a newer H0 publication. Try on the next
+         * scheduled poll and withhold heartbeat and watchdog permission here. */
+        return FOC_RUNTIME_ERR_BUSY;
     }
 
     if (snapshot.fast_seen ||
@@ -1048,7 +1054,7 @@ static int foc_runtime_publish_reference(
     uint32_t source_session = 0U;
     if (protection || (motion->impedance.enabled && command->mode != FOC_RUNTIME_MODE_IMPEDANCE)) {
         struct foc_runtime_snapshot snapshot;
-        const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
+        const int status = foc_runtime_copy_snapshot(runtime, &snapshot, FOC_RUNTIME_HOOK_NONE);
         if (status != FOC_RUNTIME_OK) {
             return status;
         }
@@ -1289,7 +1295,7 @@ int foc_runtime_publish_impedance_command(
         return FOC_RUNTIME_ERR_MOTION_LIMIT;
     }
     struct foc_runtime_snapshot snapshot;
-    const int status = foc_runtime_copy_snapshot(runtime, &snapshot, false);
+    const int status = foc_runtime_copy_snapshot(runtime, &snapshot, FOC_RUNTIME_HOOK_NONE);
     if (status != FOC_RUNTIME_OK) {
         return status;
     }
@@ -1440,7 +1446,16 @@ int foc_runtime_h1_step(
     struct foc_runtime_sensor_slot candidate = {.sample = *sample};
     if (runtime->config.motion.enabled) {
         struct foc_runtime_snapshot view;
-        const int snapshot_status = foc_runtime_copy_snapshot(runtime, &view, false);
+        int snapshot_status =
+            foc_runtime_copy_snapshot(runtime, &view, FOC_RUNTIME_HOOK_CONTROL_SNAPSHOT_READING);
+        if (snapshot_status == FOC_RUNTIME_ERR_BUSY) {
+            /* A completed H0 publication may have interrupted the first copy. */
+            snapshot_status = foc_runtime_copy_snapshot(
+                runtime,
+                &view,
+                FOC_RUNTIME_HOOK_CONTROL_SNAPSHOT_READING
+            );
+        }
         if (snapshot_status != FOC_RUNTIME_OK) {
             return snapshot_status;
         }
@@ -1690,7 +1705,7 @@ int foc_runtime_read_snapshot(struct foc_runtime *runtime, struct foc_runtime_sn
     if (runtime == NULL || !runtime->initialized || snapshot == NULL) {
         return FOC_RUNTIME_ERR_INPUT;
     }
-    return foc_runtime_copy_snapshot(runtime, snapshot, true);
+    return foc_runtime_copy_snapshot(runtime, snapshot, FOC_RUNTIME_HOOK_TELEMETRY_READING);
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

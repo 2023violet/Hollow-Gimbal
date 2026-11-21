@@ -58,7 +58,6 @@ enum foc_virtual_cal_cli_stage {
     CAL_CLI_LIVE_ADC,
     CAL_CLI_LIVE_ENCODER,
     CAL_CLI_REUSE_PLAN,
-    CAL_CLI_REUSE_REFIT,
     CAL_CLI_REUSE_RUNTIME,
     CAL_CLI_QUIESCENT,
     CAL_CLI_COGGING,

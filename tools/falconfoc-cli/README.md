@@ -300,3 +300,43 @@ the matched phase-dependent fit. The measured bootstrap modes use the
 non-cogging calibration lane.
 
 [Bootstrap acceptance and reproduction](../../docs/evidence/2026-11-20-next-cal-boot-01.md)
+
+## Host calibration product modes
+
+The named modes use the existing native runner and explicit review IDs.
+Use a new output path when saving a package, CSV or JSON report.
+
+| Mode | Use |
+| --- | --- |
+| Quick | Validate an identity-matched FCAL v1 and the current Host ADC and encoder chain. After review, apply the numeric configuration and verify all four control modes. |
+| Full | Measure all supported parameters using a new open-circuit Bootstrap and the existing stages. Preview before approval, then apply and verify a fresh Host Runtime. |
+| Selective | Keep reviewed provenance in the current process. Use `plan encoder`, `plan adc`, `plan motor`, `plan load` or `plan kt` to see the dependency effect. Then measure, review and verify the composed candidate. |
+
+```powershell
+python -B $cli calibrate --simulator $exe --calibration-mode full --boot-trace motor-boot.csv
+$bootReview = 'copy-the-full-preview-review-id'
+python -B $cli calibrate --simulator $exe --calibration-mode full --approve-candidate $bootReview --save-config motor.fcal
+
+python -B $cli calibrate --simulator $exe --calibration-mode quick --load-config motor.fcal
+$fcalReview = 'copy-the-quick-preview-review-id'
+python -B $cli calibrate --simulator $exe --calibration-mode quick --load-config motor.fcal --approve-candidate $fcalReview
+
+python -B $cli calibrate --simulator $exe --calibration-mode selective
+```
+
+In Selective, enter `capture` and `approve <review-id>` to establish qualified
+history. Enter `plan <change>`, `measure` and `approve <new-review-id>`
+to replace the affected configuration. `plan same` preserves all compatible
+measurements. A STOP, fault or invalidated dependency revokes pending review.
+After a recoverable fault, use `recover`, plan again and review the new preview.
+Use `quit` to end the session. FCAL v1 `load` preserves the numerical
+compatibility path. A new process still needs fresh or separately
+verified evidence to establish reusable history.
+
+Native `CAL_STAGE` JSON lines report mode, stage, outcome, elapsed simulated
+motor time, monotonic Host wall time, process CPU time, completed/reused/skipped
+stages, remaining work and review state. The default product stream is live.
+Quick and Full with `--json` collect a final JSON report and print the events
+after the runner exits. User interaction and ETA remain unmeasured. FCAL
+restore emits `PRODUCT_FCAL_SOURCE` with `SOURCE_CONFIDENCE_INSUFFICIENT`
+for historical evidence. [Quality acceptance](../../docs/evidence/2026-11-21-next-cal-quality-01.md)

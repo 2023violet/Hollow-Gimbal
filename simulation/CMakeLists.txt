@@ -193,12 +193,33 @@ if(PROJECT_IS_TOP_LEVEL)
     test-foc-virtual-calibration-robustness tests/test_foc_virtual_calibration_robustness.c
   )
   target_include_directories(test-foc-virtual-calibration-robustness PRIVATE src)
-  target_link_libraries(test-foc-virtual-calibration-robustness PRIVATE falconfoc-virtual-calibration)
+  target_link_libraries(
+    test-foc-virtual-calibration-robustness PRIVATE falconfoc-virtual-calibration
+  )
   add_test(NAME test-foc-virtual-calibration-robustness
            COMMAND test-foc-virtual-calibration-robustness
   )
+  add_executable(
+    test-foc-virtual-calibration-quality
+    tests/test_foc_virtual_calibration_quality.c src/falconfoc_virtual_calibrate_bootstrap.c
+    src/falconfoc_virtual_calibrate_timing.c
+  )
+  target_include_directories(
+    test-foc-virtual-calibration-quality PRIVATE src ../components/utils/crc
+  )
+  target_link_libraries(test-foc-virtual-calibration-quality PRIVATE falconfoc-virtual-calibration)
+  add_test(NAME test-foc-virtual-calibration-mechanical-robustness
+           COMMAND test-foc-mechanical-id-virtual --quality
+  )
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME test-foc-virtual-calibration-quality
+      COMMAND
+        "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_virtual_calibration_quality.py"
+        $<TARGET_FILE:test-foc-virtual-calibration-quality>
+    )
     add_test(
       NAME test-foc-virtual-calibration-product-cli
       COMMAND

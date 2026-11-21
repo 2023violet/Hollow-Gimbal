@@ -381,3 +381,20 @@ compatibility path from measured bootstrap. The open-circuit mechanism
 represents a virtual external drive and measurement chain.
 
 [CLI commands](../tools/falconfoc-cli/README.md#host-commutation-bootstrap) · [Acceptance evidence](../docs/evidence/2026-11-20-next-cal-boot-01.md)
+
+## Calibration quality experiments
+
+The standalone Simulation build exercises each named calibration product
+workflow over the original CLI, Workflow, admission path and Runtime.
+The seeded quality fixture varies the sample clock origin, instrument dither,
+starting shaft position and first sweep direction. Independent LUT samples,
+paired prediction across sessions and four closed-loop modes provide separate
+checks against model witnesses. The test seed affects Host capture input
+only. Host systematic-error and thermal-Rs probes report acceptance decisions
+and Oracle errors independently.
+
+```powershell
+ctest --test-dir build/virtual-cal -R 'calibration-(product-cli|quality|robustness|mechanical-robustness)' --output-on-failure
+```
+
+[Quality acceptance and raw data](../docs/evidence/2026-11-21-next-cal-quality-01.md)

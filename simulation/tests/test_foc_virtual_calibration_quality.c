@@ -12,7 +12,10 @@
 
 /* Includes --------------------------------------------------------------------- */
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "falconfoc_virtual_calibrate_internal.h"
+#include "foc_virtual_bootstrap_instrument.h"
 #include "foc_virtual_calibration_trial.h"
 
 #include <inttypes.h>
@@ -178,8 +181,12 @@ static bool validate_lut(
             uint16_t raw;
             uint32_t fixed;
             struct foc_virtual_motor_observation actual;
-            if (foc_virtual_motor_step_open_circuit(&plant, 0.0, 0.0, 0.002173) != 0 ||
-                foc_virtual_current_acquire_encoder(profile, &plant, &raw) != 0 ||
+            for (unsigned int substep = 0U; substep < 3U; ++substep) {
+                if (foc_virtual_motor_step_open_circuit(&plant, 0.0, 0.0, 0.002173 / 3.0) != 0) {
+                    return false;
+                }
+            }
+            if (foc_virtual_current_acquire_encoder(profile, &plant, &raw) != 0 ||
                 foc_encoder_correct_code(&encoder, raw, &fixed) != FOC_ENCODER_STATUS_OK ||
                 foc_virtual_motor_observe(&plant, &actual) != 0) {
                 return false;
@@ -337,6 +344,7 @@ static int run_trial(const char *name, uint32_t session_id, const char *boot_pat
     if (foc_virtual_calibration_profile(name, &profile, &request) != FOC_VIRTUAL_CAL_OK) {
         return 2;
     }
+    profile.runtime.motion.impedance.damping_filter_hz = 48.0f;
     request.session = session_id;
     measure("offset_oracle_rad", profile.motor.electrical_offset_rad,
             profile.motor.electrical_offset_rad);
@@ -418,9 +426,9 @@ int main(int argc, char **argv)
         return 2;
     }
     const struct quality_files files = {
-        .training = fopen(argv[8], "wb"),
-        .validation = fopen(argv[9], "wb"),
-        .control = fopen(argv[10], "wb"),
+        .training = fopen(argv[8], "wbx"),
+        .validation = fopen(argv[9], "wbx"),
+        .control = fopen(argv[10], "wbx"),
     };
     if (files.training == NULL || files.validation == NULL || files.control == NULL) {
         return 2;

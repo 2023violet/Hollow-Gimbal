@@ -51,7 +51,10 @@ enum capture_kind {
     FRICTION,
     MISALIGNED,
     UNQUALIFIED_LPF,
-    LPF
+    LPF,
+    KT_SCALE,
+    VARIABLE_LOAD,
+    STATIONARY
 };
 
 struct study_case {
@@ -87,7 +90,8 @@ static struct foc_mechanical_id_config id_config(const struct study_case *test, 
         .torque_model_id = test->kind == ORACLE ? 92U : 91U,
         .torque_source = test->kind == ORACLE ? FOC_MECHANICAL_ID_TORQUE_EQUIVALENT
                                               : FOC_MECHANICAL_ID_TORQUE_OBSERVED_DQ,
-        .load_source = test->kind == KNOWN_LOAD ? FOC_MECHANICAL_ID_LOAD_OBSERVED
+        .load_source = test->kind == KNOWN_LOAD || test->kind == VARIABLE_LOAD
+            ? FOC_MECHANICAL_ID_LOAD_OBSERVED
                                                 : FOC_MECHANICAL_ID_LOAD_NEGLIGIBLE,
         .min_interval_us = period_us,
         .max_interval_us = period_us,
@@ -246,7 +250,8 @@ static int run_capture(
     profile.motor.inertia_kg_m2 *= test->inertia_scale;
     profile.motor.damping_nm_s = test->damping;
     const float kt = (float)(1.5 * profile.motor.pole_pairs * profile.motor.psi_f_wb);
-    const struct foc_mechanical_id_config policy = id_config(test, kt);
+    const double torque_scale = test->kind == KT_SCALE ? 1.15 : 1.0;
+    const struct foc_mechanical_id_config policy = id_config(test, (float)(kt * torque_scale));
     struct foc_mechanical_id_context id;
     CHECK(foc_mechanical_id_init(&id, &policy, capture_id) == FOC_MECHANICAL_ID_OK);
     struct foc_virtual_current vm;
@@ -293,7 +298,7 @@ static int run_capture(
                 .id_a = center->id,
                 .iq_a = center->iq,
                 .torque_nm = center->truth_torque,
-                .load_nm = test->kind == KNOWN_LOAD ? center->load : 0.0f,
+                .load_nm = policy.load_source == FOC_MECHANICAL_ID_LOAD_OBSERVED ? center->load : 0.0f,
                 .speed_valid = true,
                 .torque_valid = true,
                 .frame_confirmed = true,
@@ -337,7 +342,7 @@ static int run_capture(
                     sample.iq_a,
                     policy.torque_source == FOC_MECHANICAL_ID_TORQUE_EQUIVALENT
                         ? sample.torque_nm
-                        : (double)kt * sample.iq_a,
+                        : (double)policy.torque_constant_nm_per_a * sample.iq_a,
                     sample.load_nm,
                     vm.output.accepted_updates
                 );
@@ -347,7 +352,11 @@ static int run_capture(
         const float request = frozen == NULL
             ? (float)(0.32 * sin(tau * 0.9 * t) + 0.12 * sin(tau * 1.7 * t + 0.4))
             : (float)(0.28 * sin(tau * 0.64 * t + 0.3) + 0.13 * sin(tau * 1.31 * t - 0.6));
-        CHECK(foc_virtual_current_publish_iq(&vm, 0.0f, request) == FOC_RUNTIME_OK);
+        CHECK(foc_virtual_current_publish_iq(&vm, 0.0f, test->kind == STATIONARY ? 0.0f : request) ==
+              FOC_RUNTIME_OK);
+        if (test->kind == VARIABLE_LOAD) {
+            CHECK(foc_virtual_motor_set_load(&vm.motor, 0.008 * sin(tau * 0.61 * t)) == 0);
+        }
         if (test->kind == FRICTION) {
             CHECK(
                 foc_virtual_motor_set_load(
@@ -359,7 +368,7 @@ static int run_capture(
     }
     CHECK(
         id.result.windows == 40U && id.result.samples == FIT_INTERVALS + 1U &&
-        id.result.accel_windows > 0U && id.result.decel_windows > 0U
+        (test->kind == STATIONARY || (id.result.accel_windows > 0U && id.result.decel_windows > 0U))
     );
     const uint32_t updates = vm.output.accepted_updates;
     CHECK(foc_virtual_current_request_stop(&vm) == FOC_RUNTIME_OK);
@@ -425,6 +434,16 @@ static int run_capture(
     if (!qualified) {
         counterfactual(test, &id);
     }
+    if (test->kind == KT_SCALE) {
+        CHECK(result.usable && j_error > 12.0 && j_error < 18.0 &&
+              b_error > 12.0 && b_error < 18.0);
+    }
+    if (test->kind == VARIABLE_LOAD) {
+        CHECK(quality);
+    }
+    if (test->kind == STATIONARY) {
+        CHECK(!result.usable && result.failure == FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE);
+    }
     if (test->kind == FRICTION || test->kind == OMIT_LOAD) {
         CHECK(
             !result.usable &&
@@ -469,6 +488,17 @@ int main(int argc, char **argv)
                 return 2;
             }
             CHECK(run_capture(&cases[i], 200U + i, &frozen, trace) == 0);
+        }
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--quality") == 0) {
+        static const struct study_case quality_cases[] = {
+            {"kt-scale-plus-15pct", 1.0, 0.006, KT_SCALE},
+            {"variable-observed-load", 1.0, 0.006, VARIABLE_LOAD},
+            {"stationary-insufficient-excitation", 1.0, 0.006, STATIONARY},
+        };
+        for (unsigned i = 0U; i < sizeof quality_cases / sizeof quality_cases[0]; ++i) {
+            CHECK(run_capture(&quality_cases[i], 400U + i, NULL, trace) == 0);
         }
         return 0;
     }

@@ -32,6 +32,7 @@ struct reuse_runtime {
 
 struct reuse_session {
     const char *bootstrap;
+    struct foc_virtual_cal_cli_timing *timing;
     struct foc_virtual_calibration measurement;
     struct foc_cal_workflow_bundle qualified;
     struct foc_virtual_cal_flux_result qualified_flux;
@@ -122,20 +123,24 @@ static void use_qualified_stages(struct reuse_session *reuse, uint32_t mask)
     const struct {
         enum foc_cal_workflow_stage stage;
         uint32_t required;
+        uint32_t timed;
     } groups[] = {
-        {FOC_CAL_WORKFLOW_ADC, REUSE_BIT(FOC_CAL_REUSE_ADC)},
-        {FOC_CAL_WORKFLOW_ELECTRICAL, REUSE_BIT(FOC_CAL_REUSE_RS) | REUSE_BIT(FOC_CAL_REUSE_RL)},
-        {FOC_CAL_WORKFLOW_ROTOR, REUSE_BIT(FOC_CAL_REUSE_POLES) | REUSE_BIT(FOC_CAL_REUSE_OFFSET)},
-        {FOC_CAL_WORKFLOW_OFFSET, REUSE_BIT(FOC_CAL_REUSE_OFFSET)},
-        {FOC_CAL_WORKFLOW_LUT, REUSE_BIT(FOC_CAL_REUSE_LUT)},
-        {FOC_CAL_WORKFLOW_MECHANICAL, REUSE_BIT(FOC_CAL_REUSE_JB)},
-        {FOC_CAL_WORKFLOW_TUNING, REUSE_BIT(FOC_CAL_REUSE_SERVO)},
+        {FOC_CAL_WORKFLOW_ADC, REUSE_BIT(FOC_CAL_REUSE_ADC), CAL_CLI_BIT(CAL_CLI_ADC)},
+        {FOC_CAL_WORKFLOW_ELECTRICAL, REUSE_BIT(FOC_CAL_REUSE_RS) | REUSE_BIT(FOC_CAL_REUSE_RL),
+         CAL_CLI_BIT(CAL_CLI_ELECTRICAL_D) | CAL_CLI_BIT(CAL_CLI_ELECTRICAL_Q)},
+        {FOC_CAL_WORKFLOW_ROTOR, REUSE_BIT(FOC_CAL_REUSE_POLES) | REUSE_BIT(FOC_CAL_REUSE_OFFSET),
+         CAL_CLI_BIT(CAL_CLI_ROTOR)},
+        {FOC_CAL_WORKFLOW_OFFSET, REUSE_BIT(FOC_CAL_REUSE_OFFSET), CAL_CLI_BIT(CAL_CLI_OFFSET)},
+        {FOC_CAL_WORKFLOW_LUT, REUSE_BIT(FOC_CAL_REUSE_LUT), CAL_CLI_BIT(CAL_CLI_LUT)},
+        {FOC_CAL_WORKFLOW_MECHANICAL, REUSE_BIT(FOC_CAL_REUSE_JB), CAL_CLI_BIT(CAL_CLI_MECHANICAL)},
+        {FOC_CAL_WORKFLOW_TUNING, REUSE_BIT(FOC_CAL_REUSE_SERVO), CAL_CLI_BIT(CAL_CLI_TUNE)},
     };
     for (size_t i = 0; i < sizeof groups / sizeof groups[0]; ++i) {
         if ((mask & groups[i].required) != groups[i].required) {
             continue;
         }
         const enum foc_cal_workflow_stage stage = groups[i].stage;
+        foc_virtual_cal_cli_timing_omit(reuse->timing, groups[i].timed, CAL_CLI_REUSED);
         const uint32_t bit = FOC_CAL_WORKFLOW_STAGE_BIT(stage);
         bundle->stages[stage] = old->stages[stage];
         bundle->passed |= bit;
@@ -184,6 +189,7 @@ static void use_qualified_stages(struct reuse_session *reuse, uint32_t mask)
         }
     }
     if ((mask & REUSE_BIT(FOC_CAL_REUSE_FLUX)) != 0U) {
+        foc_virtual_cal_cli_timing_omit(reuse->timing, CAL_CLI_BIT(CAL_CLI_FLUX), CAL_CLI_REUSED);
         session->flux = reuse->qualified_flux;
         reuse->flux_evidence = reuse->qualified_flux_evidence;
         session->flux.kt.identity = bundle->request.identity;
@@ -274,6 +280,9 @@ static bool change_reuse_target(struct reuse_session *reuse, const char *change)
 
 static void revoke_reuse_review(struct reuse_session *reuse)
 {
+    if (reuse->authorized) {
+        foc_virtual_cal_cli_timing_omit(reuse->timing, CAL_CLI_BIT(CAL_CLI_REVIEW), CAL_CLI_FAILED);
+    }
     reuse->revoked |= reuse->pending;
     reuse->pending = false;
     reuse->authorized = false;
@@ -444,7 +453,16 @@ static int prepare_reuse(struct reuse_session *reuse, bool capture_all)
     if (!capture_all && !reuse->historic) {
         return foc_virtual_cal_cli_error("HISTORY_REQUIRED", "REUSE", -1);
     }
-    if (!disabled_runtime(reuse, &reuse->reviewed_original)) {
+    struct foc_virtual_cal_cli_timing *timing = reuse->timing;
+    foc_virtual_cal_cli_timing_reset(
+        timing, CAL_CLI_CAPTURE_STAGES | CAL_CLI_BOOTSTRAP_STAGES | CAL_CLI_APPLY_STAGES |
+            CAL_CLI_BIT(CAL_CLI_QUIESCENT) | CAL_CLI_BIT(CAL_CLI_GAIN_CANDIDATE) |
+            CAL_CLI_BIT(CAL_CLI_POST_APPLY_QUIESCENT) | CAL_CLI_BIT(CAL_CLI_REUSE_RUNTIME)
+    );
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_QUIESCENT);
+    const bool safe = disabled_runtime(reuse, &reuse->reviewed_original);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_QUIESCENT, safe, 0);
+    if (!safe) {
         return foc_virtual_cal_cli_error("ORIGINAL_RUNTIME_UNSAFE", "REUSE", -1);
     }
     if (reuse->reference_required) {
@@ -463,17 +481,20 @@ static int prepare_reuse(struct reuse_session *reuse, bool capture_all)
             REUSE_BIT(FOC_CAL_REUSE_POLES) | REUSE_BIT(FOC_CAL_REUSE_OFFSET);
         reuse->boot_signature = reuse->qualified_boot_signature;
         if ((reuse->retained & commutation) != commutation) {
-            const int bootstrap_status = foc_virtual_cal_cli_bootstrap(
+            const int bootstrap_status = foc_virtual_cal_cli_bootstrap_timed(
                 reuse->bootstrap,
                 "nominal",
                 NULL,
                 &reuse->target,
                 &reuse->request,
-                &reuse->boot_signature
+                &reuse->boot_signature,
+                timing
             );
             if (bootstrap_status != 0) {
                 return bootstrap_status;
             }
+        } else {
+            foc_virtual_cal_cli_timing_omit(timing, CAL_CLI_BOOTSTRAP_STAGES, CAL_CLI_REUSED);
         }
     }
     *session = (struct foc_virtual_calibration){0};
@@ -493,9 +514,19 @@ static int prepare_reuse(struct reuse_session *reuse, bool capture_all)
     };
     while (session->status == FOC_VIRTUAL_CAL_PENDING) {
         const enum foc_virtual_calibration_stage stage = session->stage;
+        const bool captured = stage != FOC_VIRTUAL_CAL_REVIEW;
+        const enum foc_virtual_cal_cli_stage timed_stage = (enum foc_virtual_cal_cli_stage)stage;
+        const uint32_t begin_us = session->time_us;
+        if (captured) {
+            foc_virtual_cal_cli_timing_start(timing, timed_stage);
+        }
         result = reuse->bootstrap != NULL
             ? foc_virtual_calibration_poll_referenced(session, &flux_options, &reuse->flux_evidence)
             : foc_virtual_calibration_poll_observed(session, &flux_options, &reuse->flux_evidence);
+        if (captured) {
+            foc_virtual_cal_cli_timing_finish(timing, timed_stage, result >= 0,
+                                             (uint32_t)(session->time_us - begin_us));
+        }
         if (result < 0) {
             return foc_virtual_cal_cli_error(
                 "CAPTURE_FAILED",
@@ -525,11 +556,14 @@ static int prepare_reuse(struct reuse_session *reuse, bool capture_all)
         reuse->policy.cogging_lut = &reuse->cogging.lut;
         reuse->policy.cogging_iq_limit_a = 0.15f;
     }
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_GAIN_CANDIDATE);
     result = foc_virtual_cal_cli_draft(session, &reuse->policy, &reuse->candidate);
-    if (result != FOC_CAL_APPLICATION_PREPARED || !record_proposed(reuse) ||
-        !reuse_flux_agrees(reuse) ||
-        foc_virtual_calibration_package_id(session, &reuse->candidate, &reuse->numerical_id) !=
-            FOC_VIRTUAL_PACKAGE_OK) {
+    const bool drafted = result == FOC_CAL_APPLICATION_PREPARED && record_proposed(reuse) &&
+        reuse_flux_agrees(reuse) &&
+        foc_virtual_calibration_package_id(session, &reuse->candidate, &reuse->numerical_id) ==
+            FOC_VIRTUAL_PACKAGE_OK;
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_GAIN_CANDIDATE, drafted, 0);
+    if (!drafted) {
         return foc_virtual_cal_cli_error("COMBINATION_NOT_ADMITTED", "REUSE", result);
     }
     /* The owner only mutates setup/history by invalidating a pending revision.
@@ -629,6 +663,7 @@ static int apply_reuse(struct reuse_session *reuse)
         .candidate = &exact,
     };
     const struct foc_encoder_cal_result *lut = &session->workflow.result.lut;
+    foc_virtual_cal_cli_timing_start(reuse->timing, CAL_CLI_REUSE_RUNTIME);
     if (foc_virtual_current_init_with(
             &fresh->driver,
             &reuse->target,
@@ -643,8 +678,10 @@ static int apply_reuse(struct reuse_session *reuse)
             lut->nodes * sizeof lut->offsets[0]
         ) != 0) {
         revoke_reuse_review(reuse);
+        foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_REUSE_RUNTIME, false, 0);
         return foc_virtual_cal_cli_error("FRESH_RUNTIME_INIT_FAILED", "APPLICATION", -1);
     }
+    foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_REUSE_RUNTIME, true, 0);
     struct calibrated_init trials = {
         .application = &session->application,
         .policy = &reuse->policy,
@@ -652,8 +689,11 @@ static int apply_reuse(struct reuse_session *reuse)
     };
     struct foc_virtual_current_profile trial_profile = reuse->target;
     const int result =
-        foc_virtual_cal_cli_verify(&trial_profile, &trials, session, NULL, NULL, false);
-    if (result != 0 || !matches_reviewed_original(reuse)) {
+        foc_virtual_cal_cli_verify(&trial_profile, &trials, session, NULL, NULL, false, reuse->timing);
+    foc_virtual_cal_cli_timing_start(reuse->timing, CAL_CLI_POST_APPLY_QUIESCENT);
+    const bool original_matches = result == 0 && matches_reviewed_original(reuse);
+    foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_POST_APPLY_QUIESCENT, original_matches, 0);
+    if (!original_matches) {
         revoke_reuse_review(reuse);
         return result != 0 ? result
                            : foc_virtual_cal_cli_error("REVIEW_BINDING_REVOKED", "APPLICATION", -1);
@@ -719,13 +759,19 @@ static int exercise_original(struct reuse_session *reuse, const char *action)
 static int reuse_command(struct reuse_session *reuse, const char *command, char *argument)
 {
     if (strcmp(command, "plan") == 0) {
-        return plan_reuse(reuse, argument);
+        foc_virtual_cal_cli_timing_reset(reuse->timing, CAL_CLI_BIT(CAL_CLI_REUSE_PLAN));
+        foc_virtual_cal_cli_timing_start(reuse->timing, CAL_CLI_REUSE_PLAN);
+        const int status = plan_reuse(reuse, argument);
+        foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_REUSE_PLAN, status == 0, 0);
+        return status;
     }
     if (strcmp(command, "capture") == 0 || strcmp(command, "measure") == 0) {
         return prepare_reuse(reuse, strcmp(command, "capture") == 0);
     }
     if (strcmp(command, "review") == 0 || strcmp(command, "approve") == 0) {
+        foc_virtual_cal_cli_timing_start(reuse->timing, CAL_CLI_REVIEW);
         const int status = authorize_reuse(reuse, argument);
+        foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_REVIEW, status == 0, 0);
         return status == 0 && strcmp(command, "approve") == 0 ? apply_reuse(reuse) : status;
     }
     if (strcmp(command, "reject") == 0) {
@@ -770,8 +816,11 @@ static int reuse_command(struct reuse_session *reuse, const char *command, char 
         if (reuse->history.setup.id[FOC_CAL_REUSE_ID_CONTROL_LIMITS] != 1U) {
             return foc_virtual_cal_cli_error("FCAL_POLICY_NOT_REPRESENTED", "SAVE_CONFIG", -1);
         }
+        foc_virtual_cal_cli_timing_start(reuse->timing, CAL_CLI_FCAL_SAVE);
         const int status =
             foc_virtual_calibration_package_save(argument, &reuse->measurement, &reuse->candidate);
+        foc_virtual_cal_cli_timing_finish(reuse->timing, CAL_CLI_FCAL_SAVE,
+                                         status == FOC_VIRTUAL_PACKAGE_OK, 0);
         if (status != FOC_VIRTUAL_PACKAGE_OK) {
             return foc_virtual_cal_cli_error(
                 foc_virtual_calibration_package_reason(status),
@@ -799,12 +848,19 @@ static int reuse_command(struct reuse_session *reuse, const char *command, char 
             approval = NULL;
         }
         struct foc_virtual_current_profile restored_profile = reuse->target;
+        foc_virtual_cal_cli_timing_reset(
+            reuse->timing, CAL_CLI_APPLY_STAGES | CAL_CLI_BIT(CAL_CLI_FCAL_LOAD) |
+                CAL_CLI_BIT(CAL_CLI_QUIESCENT) | CAL_CLI_BIT(CAL_CLI_LIVE_ADC) |
+                CAL_CLI_BIT(CAL_CLI_LIVE_ENCODER)
+        );
         const int status = foc_virtual_cal_cli_restore(
             argument,
             &restored_profile,
             &reuse->request.identity,
             approval,
-            NULL
+            NULL,
+            reuse->timing,
+            "nominal"
         );
         if (status == 0) {
             puts("{\"event\":\"REUSE_LEGACY_FCAL\",\"dependency_history_imported\":false}");
@@ -842,9 +898,14 @@ static bool known_reuse_command(const char *command)
 
 /* Public Functions ------------------------------------------------------------- */
 
-int foc_virtual_cal_cli_reuse_session(const char *name, bool cogging, const char *bootstrap)
+int foc_virtual_cal_cli_reuse_session(
+    const char *name,
+    bool cogging,
+    const char *bootstrap,
+    struct foc_virtual_cal_cli_timing *timing
+)
 {
-    struct reuse_session reuse = {.use_cogging = cogging, .bootstrap = bootstrap};
+    struct reuse_session reuse = {.use_cogging = cogging, .bootstrap = bootstrap, .timing = timing};
     if (foc_virtual_calibration_profile(name, &reuse.target, &reuse.request) !=
         FOC_VIRTUAL_CAL_OK) {
         return foc_virtual_cal_cli_error("INVALID_PROFILE_OR_RUNTIME", "SETUP", -1);

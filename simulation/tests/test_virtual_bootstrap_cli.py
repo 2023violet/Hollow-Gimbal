@@ -250,7 +250,7 @@ def verify_source_boundary():
     assert not re.search(truth, qualified)
     for api in ("foc_encoder_correct_code", "foc_rotor_phase_from_counts", "foc_virtual_motor_measure_shaft"):
         assert api in qualified, api
-    assert "return poll(session, options, evidence, true);" in calibration
+    assert "return poll(session, options, evidence, true, NULL);" in calibration
 
 
 if __name__ == "__main__":

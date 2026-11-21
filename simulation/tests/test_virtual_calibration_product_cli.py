@@ -157,7 +157,7 @@ def verify_profile(product, output):
 
     quick = product.run("quick-preview", "quick", "--load-config", fcal)
     assert_preview(quick)
-    assert one(quick, "PRODUCT_FCAL_SOURCE")["status"] == "SOURCE_CONFIDENCE_INSUFFICIENT"
+    assert one(quick, "PRODUCT_FCAL_SOURCE")["quality"] == "SOURCE_CONFIDENCE_INSUFFICIENT"
     assert not find(quick, "BOOTSTRAP_CAPTURE")
     quick_progress = stages(quick, "quick")
     assert {"FCAL_LOAD", "LIVE_ADC_CHECK", "LIVE_ENCODER_CHECK"} <= {
@@ -175,6 +175,14 @@ def verify_profile(product, output):
                            "--approve-candidate", numerical)
     assert assert_accepted(restored) == expected
     assert fcal.read_bytes() == saved
+    rejected = product.run("quick-encoder-rejection", "quick", "--load-config", fcal,
+                           "--approve-candidate", numerical, "--boot-scenario", "encoder", status=2)
+    assert any(row.get("error") == "ENCODER_MEASUREMENT_INVALID" for row in rejected)
+    assert_preview(rejected)
+    cancelled = product.run("full-cancelled", "full", "--cancel-after", "FLUX",
+                            "--approve-candidate", reviewed, status=2)
+    assert any(row.get("error") == "CALIBRATION_CANCELLED" for row in cancelled)
+    assert_preview(cancelled)
     damaged = output / "damaged.fcal"
     damaged.write_bytes(saved[:12] + bytes([saved[12] ^ 1]) + saved[13:])
     rows = product.run("quick-checksum-rejection", "quick", "--load-config", damaged, status=2)

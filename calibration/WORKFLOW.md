@@ -81,3 +81,11 @@ Host 先核对电机、装配、编码器、相序和 ADC 采样身份，再检�
 Encoder LUT 使用独立轴角训练和 Holdout 采集。后续 Rotor 与 Offset 使用新的端电压窗口、原始码和经 Holdout 验证的 LUT，再由有向整数计数生成 R/L 和 Flux 的 d/q 参考。J/B 使用独立等效转矩与负载读数。完整组合仍经过显式审核与原 Calibration Application。用此路径获得的 Ld/Lq 和 Flux/Kt 随所用 LUT 或 Offset 失效。独立角度见证的历史路径沿用原复用规则。
 
 [CLI 用法](../tools/falconfoc-cli/README.md#host-commutation-bootstrap) · [初始化验收](../docs/evidence/2026-11-20-next-cal-boot-01.md)
+
+## Host 产品校准模式
+
+`calibrate --calibration-mode quick` 读取身份和 CRC 匹配的 FCAL v1。在软件输出确认抑制时复核 ADC 零偏、母线和编码器读数，验证包内的换相映射可解码，再接受当前审核。Quick 从 FCAL 恢复数值，原始采集、独立 Holdout 与依赖历史仍需原证据。
+
+`full` 通过开路 Bootstrap 建立未知电机的磁轴参考，再执行已有 Workflow 的 ADC、Encoder LUT、Rotor/Offset、分轴 R/L、Flux/Kt、J/B 和整定。`selective` 通过同一进程内已有参数记录进行依赖计划和必要重采。每次应用都经过正式审核、隔离的新 Runtime 读回与闭环验证。失败时由原 Output/Safety 和 Calibration Application 保有准入所有权。
+
+Host `CAL_STAGE` 事件报告当前阶段、已经执行或复用的阶段、未执行和余下的阶段、审核状态及三条时间轴。模拟电机时间从实际观测区间取得，Host 墙钟和进程 CPU 时间由本机计时器取得，用户审核等待和剩余时间用 `null` 表示未测。 [产品使用](../tools/falconfoc-cli/README.md#host-calibration-product-modes) · [质量验收](../docs/evidence/2026-11-21-next-cal-quality-01.md)

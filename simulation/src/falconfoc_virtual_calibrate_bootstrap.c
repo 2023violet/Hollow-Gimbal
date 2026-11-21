@@ -16,6 +16,7 @@
 #include "foc_virtual_bootstrap_capture.h"
 #include "foc_virtual_bootstrap_instrument.h"
 #include "foc_virtual_calibration_trial.h"
+#include "foc_virtual_calibration_package.h"
 #include "crc.h"
 
 #include <inttypes.h>
@@ -73,7 +74,8 @@ static int permit_scan(void *argument, uint32_t aperture_us)
 static bool verify_adc(
     struct foc_virtual_current *owner,
     const struct foc_virtual_current_profile *profile,
-    const struct foc_calibration_identity *identity
+    const struct foc_calibration_identity *identity,
+    struct foc_calibration_adc_result *observed
 )
 {
     struct foc_calibration_adc_context context;
@@ -116,7 +118,13 @@ static bool verify_adc(
         }
     }
     struct foc_calibration_adc_result result;
-    return foc_calibration_adc_finalize(&context, &result) == 0 && result.usable;
+    if (foc_calibration_adc_finalize(&context, &result) != 0 || !result.usable) {
+        return false;
+    }
+    if (observed != NULL) {
+        *observed = result;
+    }
+    return true;
 }
 
 static const char *status_name(enum foc_bootstrap_status status)
@@ -210,14 +218,15 @@ static int setup_fixture(
 
 /* Public Functions ------------------------------------------------------------- */
 
-int foc_virtual_cal_cli_bootstrap_sampled(
+static int bootstrap(
     const char *mode,
     const char *scenario,
     const char *trace,
     struct foc_virtual_current_profile *profile,
     struct foc_cal_workflow_request *request,
     uint32_t *signature,
-    const struct foc_virtual_cal_trial *trial
+    const struct foc_virtual_cal_trial *trial,
+    struct foc_virtual_cal_cli_timing *timing
 )
 {
     const bool inspect = strcmp(mode, "inspect") == 0;
@@ -274,9 +283,12 @@ int foc_virtual_cal_cli_bootstrap_sampled(
     if (strcmp(scenario, "phase") == 0) {
         observed.acquisition.phase_order ^= 1U;
     }
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_BOOTSTRAP_ADC);
+    const bool adc_verified = verify_adc(&original, &instrument, &identity.acquisition, NULL);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_BOOTSTRAP_ADC, adc_verified,
+                                     adc_verified ? 9600 : -1);
     const struct foc_bootstrap_prerequisites preconditions = {
-        .current_mapping_and_zero_verified =
-            verify_adc(&original, &instrument, &identity.acquisition),
+        .current_mapping_and_zero_verified = adc_verified,
         .phase_and_direction_verified = instrument.adc.phase_order == instrument.pwm.phase_order,
         .encoder_and_clock_verified = instrument.encoder.counts_per_revolution ==
             identity.acquisition.encoder_counts_per_revolution,
@@ -313,12 +325,17 @@ int foc_virtual_cal_cli_bootstrap_sampled(
         .trial = trial,
     };
     struct foc_virtual_bootstrap_capture_result capture;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_BOOTSTRAP_SCAN);
     const int acquired =
         foc_virtual_bootstrap_capture(&original.motor, &instrument, &capture_policy, &capture);
-    if (!write_capture(trace, &capture)) {
+    const bool trace_saved = write_capture(trace, &capture);
+    const bool original_safe = safe_original(&original);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_BOOTSTRAP_SCAN,
+                                     acquired == 0 && original_safe && trace_saved,
+                                     (uint32_t)(capture.completed_us - capture_policy.started_us));
+    if (!trace_saved) {
         return foc_virtual_cal_cli_error("TRACE_IO", "BOOTSTRAP_SCAN", -1);
     }
-    const bool original_safe = safe_original(&original);
     if (!original_safe) {
         /* Service a pending STOP/fault on the old disabled owner. It has no
          * motion configuration and can only continue to inhibit. */
@@ -362,9 +379,12 @@ int foc_virtual_cal_cli_bootstrap_sampled(
         .maximum_motion_error_rad = 0.003f,
     };
     struct foc_bootstrap_result result;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_BOOTSTRAP_FIT);
     status = foc_bootstrap_fit(&fit_policy, capture.samples, capture.count, &result);
-    if (status != FOC_BOOTSTRAP_REFERENCE_REVIEW_REQUIRED ||
-        result.quality != FOC_BOOTSTRAP_COARSE_ELECTRICAL_REFERENCE) {
+    const bool fitted = status == FOC_BOOTSTRAP_REFERENCE_REVIEW_REQUIRED &&
+        result.quality == FOC_BOOTSTRAP_COARSE_ELECTRICAL_REFERENCE;
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_BOOTSTRAP_FIT, fitted, 0);
+    if (!fitted) {
         return foc_virtual_cal_cli_error(status_name(status), "BOOTSTRAP_FIT", (int)status);
     }
     request->identity.acquisition.pole_pairs = result.pole_pairs;
@@ -423,8 +443,87 @@ int foc_virtual_cal_cli_bootstrap(
     uint32_t *signature
 )
 {
-    return foc_virtual_cal_cli_bootstrap_sampled(mode, scenario, trace, profile, request, signature,
-                                                NULL);
+    return bootstrap(mode, scenario, trace, profile, request, signature, NULL, NULL);
+}
+
+int foc_virtual_cal_cli_bootstrap_sampled(
+    const char *mode,
+    const char *scenario,
+    const char *trace,
+    struct foc_virtual_current_profile *profile,
+    struct foc_cal_workflow_request *request,
+    uint32_t *signature,
+    const struct foc_virtual_cal_trial *trial
+)
+{
+    return bootstrap(mode, scenario, trace, profile, request, signature, trial, NULL);
+}
+
+int foc_virtual_cal_cli_bootstrap_timed(
+    const char *mode,
+    const char *scenario,
+    const char *trace,
+    struct foc_virtual_current_profile *profile,
+    struct foc_cal_workflow_request *request,
+    uint32_t *signature,
+    struct foc_virtual_cal_cli_timing *timing
+)
+{
+    return bootstrap(mode, scenario, trace, profile, request, signature, NULL, timing);
+}
+
+int foc_virtual_cal_cli_quick_check(
+    const struct foc_virtual_current_profile *profile,
+    const struct foc_cal_workflow_identity *identity,
+    const struct foc_virtual_calibration_package *package,
+    const char *scenario,
+    struct foc_virtual_cal_cli_timing *timing
+)
+{
+    const bool encoder_lost = scenario != NULL && strcmp(scenario, "encoder") == 0;
+    if (scenario != NULL && strcmp(scenario, "nominal") != 0 && !encoder_lost) {
+        return foc_virtual_cal_cli_error("INVALID_QUICK_SCENARIO", "MEASUREMENT_CHECK", -1);
+    }
+    struct foc_virtual_current_profile instrument = *profile;
+    struct foc_virtual_current owner = {0};
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_QUIESCENT);
+    const bool safe = setup_fixture("nominal", &instrument, &owner) == 0 && safe_original(&owner);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_QUIESCENT, safe, 0);
+    if (!safe) {
+        return foc_virtual_cal_cli_error("SAFETY_BLOCKED", "MEASUREMENT_CHECK", -1);
+    }
+
+    const struct foc_device_adc_config *saved = &package->candidate.pipeline.adc;
+    struct foc_calibration_adc_result measured;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_LIVE_ADC);
+    const bool sample_valid = verify_adc(&owner, &instrument, &identity->acquisition, &measured);
+    const bool adc_matches = sample_valid &&
+        fabsf(measured.offset_a_counts - saved->phase_a_offset_count) <= 6.0f &&
+        fabsf(measured.offset_b_counts - saved->phase_b_offset_count) <= 6.0f &&
+        fabsf(measured.offset_c_counts - saved->phase_c_offset_count) <= 6.0f &&
+        instrument.adc.phase_order == saved->phase_order &&
+        instrument.vbus_v >= instrument.current.pwm.vbus_min_v;
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_LIVE_ADC, adc_matches,
+                                     sample_valid ? 9600 : -1);
+    if (!adc_matches) {
+        return foc_virtual_cal_cli_error("ADC_MEASUREMENT_REQUIRES_RECALIBRATION", "MEASUREMENT_CHECK", -1);
+    }
+
+    struct foc_encoder_context encoder = {0};
+    struct foc_encoder_feedback feedback;
+    uint16_t code;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_LIVE_ENCODER);
+    const bool read_encoder = !encoder_lost &&
+        foc_virtual_current_acquire_encoder(&instrument, &owner.motor, &code) == 0 &&
+        foc_encoder_init_with_lut(&encoder, &package->candidate.encoder, identity->encoder_id,
+                                  package->candidate.has_lut ? &package->lut : NULL) == FOC_ENCODER_STATUS_OK &&
+        foc_encoder_update(&encoder, 9600U, code, FOC_ENCODER_TRANSPORT_OK, &feedback) ==
+            FOC_ENCODER_STATUS_OK && feedback.captured_us == 9600U && safe_original(&owner);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_LIVE_ENCODER, read_encoder, 0);
+    if (!read_encoder) {
+        return foc_virtual_cal_cli_error("ENCODER_MEASUREMENT_INVALID", "MEASUREMENT_CHECK", -1);
+    }
+    return 0;
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

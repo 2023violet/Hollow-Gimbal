@@ -514,6 +514,101 @@ static int test_electrical(const char *name, bool trace)
     return 0;
 }
 
+static int permit_angle_capture(void *argument, uint32_t aperture_us)
+{
+    (void)aperture_us;
+    struct foc_virtual_current *owner = argument;
+    struct foc_runtime_snapshot view;
+    return foc_virtual_current_snapshot(owner, &view) == FOC_RUNTIME_OK &&
+        view.state == FOC_SAFE_STATE_DISABLED && view.faults == 0U &&
+        view.output_confirmed && view.action == FOC_DEVICE_OUTPUT_INHIBIT &&
+        owner->output.accepted_updates == 0U ? 0 : -1;
+}
+
+static void rotate_terminal(struct foc_bootstrap_sample *sample, double angle)
+{
+    const double x = sample->emf_alpha_v;
+    const double y = sample->emf_beta_v;
+    sample->emf_alpha_v = (float)(x * cos(angle) - y * sin(angle));
+    sample->emf_beta_v = (float)(x * sin(angle) + y * cos(angle));
+}
+
+static int test_reference(const char *name, bool trace)
+{
+    struct foc_virtual_current_profile profile;
+    struct foc_cal_workflow_request request;
+    CHECK(foc_virtual_calibration_profile(name, &profile, &request) == FOC_VIRTUAL_CAL_OK);
+    struct foc_virtual_current original;
+    CHECK(foc_virtual_current_init(&original, &profile) == 0);
+    struct foc_cal_workflow_identity identity = request.identity;
+    identity.acquisition.pole_pairs = 0U;
+    identity.acquisition.encoder_direction = 0;
+    const struct foc_virtual_bootstrap_capture_request schedule = {
+        .identity = identity, .capture = 81U, .started_us = 9600U,
+        .permit = permit_angle_capture, .argument = &original,
+    };
+    const struct foc_bootstrap_config config = {
+        .identity = identity, .capture = schedule.capture,
+        .source = FOC_CAL_WORKFLOW_HOST_VIRTUAL_MEASUREMENT,
+        .minimum_pole_pairs = 1U, .maximum_pole_pairs = 14U,
+        .minimum_samples_per_sweep = 40U, .maximum_interval_us = 5000U,
+        .minimum_mechanical_span_rad = 0.7f, .maximum_residual_rad = 0.085f,
+        .minimum_candidate_separation_rad = 0.08f, .maximum_offset_disagreement_rad = 0.10f,
+        .minimum_emf_v = 0.04f, .minimum_abs_speed_rad_s = 1.0f,
+        .maximum_abs_speed_rad_s = 10.0f, .maximum_motion_error_rad = 0.003f,
+    };
+    struct foc_virtual_bootstrap_capture_result capture;
+    CHECK(foc_virtual_bootstrap_capture(&original.motor, &profile, &schedule, &capture) == 0);
+    CHECK(capture.count == FOC_BOOTSTRAP_SWEEPS * FOC_VIRTUAL_BOOTSTRAP_SAMPLES_PER_SWEEP);
+    struct foc_bootstrap_result nominal;
+    CHECK(foc_bootstrap_fit(&config, capture.samples, capture.count, &nominal) ==
+          FOC_BOOTSTRAP_REFERENCE_REVIEW_REQUIRED);
+    static const char *const names[] = {"constant-reference-phase-plus-0.08rad",
+                                       "directional-reference-phase-plus-minus-0.09rad",
+                                       "limited-scan"};
+    static const enum foc_bootstrap_status expected[] = {FOC_BOOTSTRAP_REFERENCE_REVIEW_REQUIRED,
+        FOC_BOOTSTRAP_REFERENCE_UNIDENTIFIABLE, FOC_BOOTSTRAP_INSUFFICIENT_EXCITATION};
+    for (unsigned int experiment = 0U; experiment < sizeof names / sizeof names[0]; ++experiment) {
+        struct foc_virtual_bootstrap_capture_result changed = capture;
+        uint32_t count = changed.count;
+        if (experiment < 2U) {
+            for (uint32_t i = 0U; i < count; ++i) {
+                struct foc_bootstrap_sample *row = &changed.samples[i];
+                rotate_terminal(row, experiment == 0U ? 0.08 : copysign(0.09, row->shaft_rad_s));
+                if (trace) {
+                    printf("BOOT_ROW,%s,%s,%u,%u,%u,%u,%.9g,%.9g,%.9g\n", name, names[experiment],
+                           row->sequence, row->sweep, row->captured_us, row->raw_code,
+                           (double)row->shaft_rad_s, (double)row->emf_alpha_v,
+                           (double)row->emf_beta_v);
+                }
+            }
+        } else {
+            count = 0U;
+            for (uint32_t i = 0U; i < capture.count; ++i) {
+                if (i % FOC_VIRTUAL_BOOTSTRAP_SAMPLES_PER_SWEEP < 16U) {
+                    changed.samples[count] = capture.samples[i];
+                    changed.samples[count].sequence = count + 1U;
+                    ++count;
+                }
+            }
+        }
+        struct foc_bootstrap_result result;
+        const enum foc_bootstrap_status status = foc_bootstrap_fit(&config, changed.samples, count, &result);
+        const double delta = status == FOC_BOOTSTRAP_REFERENCE_REVIEW_REQUIRED
+            ? remainder(result.electrical_offset_rad - nominal.electrical_offset_rad, tau) : 0.0;
+        printf("BOOT_REF,%s,%s,%u,%u,%.9g,%.9g,%.9g,%.9g\n", name, names[experiment],
+               (unsigned int)status, count, (double)nominal.electrical_offset_rad,
+               (double)result.electrical_offset_rad, delta, (double)result.maximum_residual_rad);
+        CHECK(status == expected[experiment]);
+        if (experiment == 0U) {
+            CHECK(fabs(delta - 0.08) < 0.00001 &&
+                  fabs(result.maximum_residual_rad - nominal.maximum_residual_rad) < 0.00001);
+        }
+    }
+    CHECK(permit_angle_capture(&original, capture.completed_us) == 0);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -524,6 +619,8 @@ int main(int argc, char **argv)
     }
     CHECK(test_electrical("GENERIC_RESEARCH_MOTOR", trace) == 0);
     CHECK(test_electrical("CALIBRATION_SALIENT_MOTOR", trace) == 0);
+    CHECK(test_reference("GENERIC_RESEARCH_MOTOR", trace) == 0);
+    CHECK(test_reference("CALIBRATION_SALIENT_MOTOR", trace) == 0);
     return 0;
 }
 

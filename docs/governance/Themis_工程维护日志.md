@@ -3115,3 +3115,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 新增 C11 初始化资格和粗参考辨识。Host 在软件输出抑制期间，通过独立虚拟机械驱动、同步原始编码器码、有符号轴速与开路端电压获得磁轴参考，再复用 Rotor、LUT 和 Offset 估计器。
 - 细化电角进入 R/L、Flux/Kt、J/B 与显式审核后的 Runtime。复用按 LUT 和 Offset 依赖传播失效，FCAL v1 沿用原数值审核。锁定 ARM 复建镜像与基线相同。 [验收报告](../evidence/2026-11-20-next-cal-boot-01.md)
+
+## 2026-11-21 · NEXT-CAL-QUALITY-01 Host 校准产品验收
+
+- Quick、Full、Selective 复用原 CLI、Workflow 与审核应用。记录模拟电机、Host 墙钟及进程 CPU 时间。FCAL v1 重载复核当前 Host 测量链，跨进程来源和依赖历史单独标记。
+- 两套电机按不同种子、采样起点和轴角独立采集。归档数值误差、独立 Holdout、源偏差、热态 Rs、闭环与复用耗时。保留历史品质失败和锁定板端镜像。 [验收报告](../evidence/2026-11-21-next-cal-quality-01.md)

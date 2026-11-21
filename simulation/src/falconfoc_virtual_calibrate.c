@@ -2099,7 +2099,10 @@ int main(int argc, char *argv[])
         const enum foc_virtual_cal_cli_stage timed_stage =
             (enum foc_virtual_cal_cli_stage)session.stage;
         const uint32_t before = session.time_us;
-        foc_virtual_cal_cli_timing_start(timing, timed_stage);
+        const bool measured_stage = session.stage != FOC_VIRTUAL_CAL_REVIEW;
+        if (measured_stage) {
+            foc_virtual_cal_cli_timing_start(timing, timed_stage);
+        }
         const int status = measured_boot
             ? foc_virtual_calibration_poll_referenced(&session, &flux_options, &flux_evidence)
             : foc_virtual_calibration_poll_observed(
@@ -2107,9 +2110,11 @@ int main(int argc, char *argv[])
                   flux_trace ? &flux_options : NULL,
                   &flux_evidence
               );
-        foc_virtual_cal_cli_timing_finish(
-            timing, timed_stage, status >= 0 && !trace.failed, session.time_us - before
-        );
+        if (measured_stage) {
+            foc_virtual_cal_cli_timing_finish(
+                timing, timed_stage, status >= 0 && !trace.failed, session.time_us - before
+            );
+        }
         if (status < 0 || trace.failed) {
             if (trace.file != NULL) {
                 fclose(trace.file);

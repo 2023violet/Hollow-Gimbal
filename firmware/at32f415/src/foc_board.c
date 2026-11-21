@@ -213,6 +213,32 @@ struct foc_capture_profile foc_board_capture_default_profile(void)
 }
 #endif
 
+void foc_board_calibration_identity(uint16_t pole_pairs, struct foc_calibration_identity *identity)
+{
+    if (identity == NULL) {
+        return;
+    }
+    *identity = (struct foc_calibration_identity){
+        .adc_full_scale_counts = FOC_BOARD_ADC_MAX,
+        .current_a_per_count = pipeline_config.adc.current_a_per_count,
+        .encoder_counts_per_revolution = encoder_config.counts_per_revolution,
+        .encoder_direction = encoder_config.direction,
+        .phase_order = pipeline_config.adc.phase_order,
+        .pole_pairs = pole_pairs,
+    };
+}
+
+void foc_board_encoder_policy(
+    const struct foc_board_encoder *encoder,
+    struct foc_encoder_config *config
+)
+{
+    if (config == NULL) {
+        return;
+    }
+    *config = encoder != NULL && encoder->config_valid ? encoder->config : encoder_config;
+}
+
 int foc_board_init(struct foc_runtime *runtime, struct foc_board_output *output, uint32_t now_us)
 {
     if (output == NULL) {
@@ -232,9 +258,12 @@ int foc_board_init_with_calibration(
     uint32_t now_us
 )
 {
+    /* Resolve the Sensor direction once: raw source frame times CAL-01 rotor sign. */
     if (runtime == NULL || output == NULL || encoder == NULL ||
         !foc_calibration_snapshot_valid(snapshot) || encoder->sensor.initialized ||
         encoder->config_valid ||
+        snapshot->runtime_encoder_direction !=
+            snapshot->source_identity.encoder_direction * snapshot->calibration_direction ||
         !foc_calibration_identity_matches(
             &snapshot->source_identity,
             &(struct foc_calibration_identity){

@@ -29,6 +29,32 @@
 
 /* Public Types ---------------------------------------------------------------- */
 
+/** Startup readback exposed through read-only PARAM_READ IDs 32–45. */
+struct foc_serial_boot_readback {
+    /** Effective configuration, calibration input and rejection codes. */
+    uint32_t configuration;
+    uint32_t calibration;
+    uint32_t rejection;
+    uint32_t admission_failure;
+    /** Supply and review identities, zero when absent. */
+    uint32_t supply_id;
+    uint32_t review_id;
+    /** Effective physical phase A/B/C decode offsets in raw ADC counts. */
+    float phase_offset_count[3];
+    /** Effective Sensor counts per mechanical revolution. */
+    uint32_t encoder_counts_per_revolution;
+    /** Runtime, raw source and calibration directions: +1, -1, or 0 for none. */
+    int32_t runtime_direction;
+    int32_t source_direction;
+    int32_t calibration_direction;
+    /** Physical current measurement qualification. */
+    bool current_measurement_qualified;
+};
+
+/** Fill a readback from a ready startup report; false when none is ready. */
+typedef bool (*foc_serial_boot_reader)(const void *context,
+                                       struct foc_serial_boot_readback *readback);
+
 /** Fixed UART queue depth and default number of bytes examined per poll. */
 enum foc_serial_limits {
     FOC_UART_RX_CAPACITY = 256,
@@ -103,6 +129,9 @@ struct foc_serial {
     enum foc_serial_target_policy target_policy;
     /** Monotonic lifecycle request identity, separate from wire sequence. */
     uint32_t lifecycle_sequence;
+    /** Optional read-only startup readback source and its context. */
+    foc_serial_boot_reader boot_reader;
+    const void *boot_context;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -129,6 +158,11 @@ void foc_serial_init(struct foc_serial *serial, const struct foc_runtime *runtim
 void foc_serial_init_with_policy(struct foc_serial *serial,
                                  const struct foc_runtime *runtime,
                                  enum foc_serial_target_policy policy);
+
+/** Expose a startup readback through read-only PARAM_READ IDs 32–45. */
+void foc_serial_attach_boot(struct foc_serial *serial,
+                            foc_serial_boot_reader reader,
+                            const void *context);
 
 /** Read the Runtime lifecycle result associated with the latest Host request. */
 int foc_serial_read_lifecycle_result(const struct foc_serial *serial,

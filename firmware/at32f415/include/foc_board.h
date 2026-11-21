@@ -307,6 +307,13 @@ int foc_board_init_with_calibration(struct foc_runtime *runtime,
                                     const struct foc_calibration_snapshot *snapshot,
                                     uint32_t now_us);
 
+/** Board1 calibration identity from immutable ADC, phase and raw encoder facts. */
+void foc_board_calibration_identity(uint16_t pole_pairs, struct foc_calibration_identity *identity);
+
+/** Sensor policy this encoder instance uses: explicit calibrated or Board1 nominal. */
+void foc_board_encoder_policy(const struct foc_board_encoder *encoder,
+                              struct foc_encoder_config *config);
+
 /** Convert an inclusive half-range-valid interval to seconds. */
 bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_us, float *seconds);
 

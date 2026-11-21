@@ -13,6 +13,7 @@
 
 #include "at32f415.h"
 #include "foc_board.h"
+#include "foc_board_boot.h"
 #include "foc_board_timing.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
@@ -62,6 +63,7 @@ static struct foc_runtime runtime;
 static struct foc_board_output output;
 static struct foc_board_adc adc;
 static struct foc_board_encoder encoder;
+static struct foc_board_boot boot;
 static enum foc_spi_phase spi_phase;
 static uint16_t spi_word;
 static uint32_t spi_rx_us;
@@ -191,8 +193,10 @@ static void foc_at32_capture_foreground(void)
     const unsigned int state = atomic_load_explicit(&capture->state, memory_order_relaxed);
     if (state == FOC_CAPTURE_IDLE) {
         const uint32_t request = falconfoc_capture_request;
-        if (request != 0U) {
-            const struct foc_capture_profile profile = foc_board_capture_default_profile();
+        struct foc_capture_profile profile;
+        /* Metadata follows the effective boot configuration, not the nominal constants. */
+        if (request != 0U &&
+            foc_board_boot_capture_profile(&boot, FOC_CAPTURE_BUILD_TAG, &profile)) {
             (void)foc_board_capture_start(
                 capture,
                 request,
@@ -422,6 +426,21 @@ static bool foc_at32_clock_init(void)
     return remaining != 0U && system_core_clock == FOC_BOARD_TIMER_HZ;
 }
 
+/* Select the configuration after the output lock and before any producer or IRQ. */
+static bool foc_at32_boot(void)
+{
+    const struct foc_board_calibration_expectation expected = foc_board_calibration_expectation();
+    return foc_board_boot_select(
+               &boot,
+               &runtime,
+               &output,
+               &encoder,
+               foc_board_calibration_supply(),
+               &expected,
+               0U
+           ) == FOC_RUNTIME_OK;
+}
+
 static bool foc_at32_adc_init(void)
 {
     gpio_init_type pins;
@@ -587,11 +606,11 @@ int main(void)
 {
     __disable_irq();
     foc_at32_lock_output();
-    if (foc_at32_clock_init() && foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK &&
-        foc_at32_adc_init()) {
+    if (foc_at32_clock_init() && foc_at32_boot() && foc_at32_adc_init()) {
         foc_at32_spi_init();
         foc_at32_timers_init();
         foc_serial_init(&serial, &runtime);
+        foc_serial_attach_boot(&serial, foc_board_boot_serial_readback, &boot);
         foc_at32_uart_init();
         foc_at32_irq_enable();
 #if defined(FALCONFOC_RT02_TIMING_TRACE)

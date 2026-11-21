@@ -12,7 +12,7 @@
 
 /* Includes --------------------------------------------------------------------- */
 
-#include "foc_board.h"
+#include "foc_board_boot.h"
 #include "foc_serial.h"
 
 #include <stdio.h>
@@ -37,14 +37,27 @@ int main(void)
     (void)_setmode(_fileno(stdin), _O_BINARY);
     (void)_setmode(_fileno(stdout), _O_BINARY);
 #endif
-    struct foc_runtime runtime;
-    struct foc_board_output output;
+    static struct foc_runtime runtime;
+    static struct foc_board_output output;
+    static struct foc_board_encoder encoder;
+    static struct foc_board_boot boot;
     struct foc_serial serial;
     struct foc_uart_buffer uart = {0};
-    if (foc_board_init(&runtime, &output, 0U) != FOC_RUNTIME_OK) {
+    /* Same startup selection and build-time supply interface as the MCU main(). */
+    const struct foc_board_calibration_expectation expected = foc_board_calibration_expectation();
+    if (foc_board_boot_select(
+            &boot,
+            &runtime,
+            &output,
+            &encoder,
+            foc_board_calibration_supply(),
+            &expected,
+            0U
+        ) != FOC_RUNTIME_OK) {
         return 1;
     }
     foc_serial_init(&serial, &runtime);
+    foc_serial_attach_boot(&serial, foc_board_boot_serial_readback, &boot);
     int byte;
     while ((byte = getchar()) != EOF) {
         struct foc_runtime_foreground_result result;

@@ -3120,3 +3120,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - Quick、Full、Selective 复用原 CLI、Workflow 与审核应用。记录模拟电机、Host 墙钟及进程 CPU 时间。FCAL v1 重载复核当前 Host 测量链，跨进程来源和依赖历史单独标记。
 - 两套电机按不同种子、采样起点和轴角独立采集。归档数值误差、独立 Holdout、源偏差、热态 Rs、闭环与复用耗时。保留历史品质失败和锁定板端镜像。 [验收报告](../evidence/2026-11-21-next-cal-quality-01.md)
+
+## 2026-11-21 · NEXT-FW-INTEG-01 Board1 启动校准快照接入
+
+- V2 Board1 启动链变更：`main()` 在输出锁和时钟之后、ADC/SPI/定时器/UART/IRQ 之前调用 `foc_board_boot_select()`。新增构建期只读供应接口 `foc_board_calibration_supply()` 与独立期望 `foc_board_calibration_expectation()`。默认构建无供应，报告 NOMINAL_CONFIGURATION + CALIBRATION_NOT_AVAILABLE，Runtime 与原 `foc_board_init()` 一致。
+- 供应须通过格式、身份、RAW_NO_LUT 坐标、Board 事实下重算的 `foc_calibration_admit()`、快照逐位一致、方向乘积和 Board 窗口检查，才进入 `foc_board_init_with_calibration()`。拒绝或初始化失败时清除候选并重建标称配置；标称也失败则锁定停机。PARAM_READ 新增只读 ID 32–45 读回生效值。采集元数据改用生效配置。
+- 新增独立命名的合成验证 ARM 镜像。两组镜像保持原 TMR1/GPIO 锁定、UART 拒绝与适配器 UPDATE 拒绝。物理输出、目标 WCET 未验证，G3-PWR LOCKED。 [验收报告](../evidence/2026-11-21-next-fw-integ-01.md)

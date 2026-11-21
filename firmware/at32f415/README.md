@@ -60,6 +60,53 @@ PWM. The calibration source direction and CAL-01 rotor direction are multiplied
 once to resolve the Sensor raw-code direction; the Core continues to receive a
 positive-pole-pair mechanical coordinate.
 
+## Startup calibration selection
+
+`main()` calls `foc_board_boot_select()` after `foc_at32_lock_output()` and the
+clock, and before ADC, SPI, timers, UART and IRQs start. The selection reads a
+build-time, read-only supply through `foc_board_calibration_supply()` and the
+independent `foc_board_calibration_expectation()` (accepted supply identity and
+expected motor pole pairs, set by CMake, never by the supply).
+
+- Default build (`FALCONFOC_BOARD_CALIBRATION_SUPPLY=NONE`): no supply. The
+  report is `NOMINAL_CONFIGURATION` + `CALIBRATION_NOT_AVAILABLE`, with the same
+  Runtime as `foc_board_init()`.
+- A supply carries the existing admission candidates (ADC zero, rotor, offset),
+  their limits and the recorded snapshot. Startup checks format, supply identity
+  and the encoder coordinate (only `RAW_NO_LUT` is accepted), recomputes
+  `foc_calibration_admit()` with Board facts and the expected pole pairs,
+  requires the recomputed snapshot to equal the supplied one bit for bit, checks
+  runtime direction = source direction × calibration direction and the Board
+  window (offsets 1536–2560 counts, 1–64 pole pairs), then calls
+  `foc_board_init_with_calibration()`. Success gives `CALIBRATED_CONFIGURATION`.
+- Any rejection or initialization failure scrubs the Runtime, output journal
+  and encoder and initializes the nominal configuration from scratch:
+  `NOMINAL_CONFIGURATION` + `CALIBRATION_REJECTED` and the reason. If nominal
+  initialization fails too, nothing is reported ready and `main()` stays in the
+  locked `__WFI()` loop with no producer.
+
+Only the three ADC offsets, encoder direction, pole pairs and rotor electrical
+offset are consumed. R/L, flux, Kt, J/B, PI and LUT stay outside Board1 startup
+and FCAL is not parsed. UART reads the result with PARAM_READ IDs 32–45 (see
+the protocol README). The optional capture recorder takes its CPR, direction,
+pole pairs and phase order from the effective configuration.
+
+The synthetic verification image is a separate, explicitly named build:
+
+```powershell
+cmake -S firmware/at32f415 -B build/fw-integ-verify -G Ninja `
+  -DCMAKE_TOOLCHAIN_FILE="$($PWD.Path)/tools/cmake/arm-gcc-toolchain.cmake" `
+  -DMCU_CPU=cortex-m4 -DMCU_FLOAT=soft -DMCU_FPU=none `
+  -DFALCONFOC_BOARD_CALIBRATION_SUPPLY=VERIFICATION
+cmake --build build/fw-integ-verify
+```
+
+It emits `falconfoc-v2-at32f415-calibration-verification.{elf,bin,hex,map}`
+and links `src/foc_board_supply_verification.c`, which is synthetic test data,
+not a board or motor measurement. Both images keep the same output lock.
+`test-foc-board-boot` and `test-foc-board-boot-default` link the same supply
+units on the Host.
+
 ## Periodic phase source
 
 Encoder completion publishes the same Feedback's directed integer

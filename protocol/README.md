@@ -150,8 +150,8 @@ unverified.
 A parameter response is result, ID u16, type u8, unit u8, attributes u8, minimum,
 maximum and value. The final three values occupy four bytes each and use the
 declared type. Types are u32 1 and f32 2. Units are dimensionless 0, A 1, rad 2,
-rad/s 3. Attribute bits are writable 0, applied to RAM 1 and calibration
-required 2.
+rad/s 3, raw ADC counts 4. Attribute bits are writable 0, applied to RAM 1 and
+calibration required 2.
 
 | ID | Parameter | Type | Range / initial value |
 | --- | --- | --- | --- |
@@ -161,6 +161,32 @@ required 2.
 | 16 | Pole pairs | u32, read only | Board1 nominal 7 |
 | 17 | Electrical offset | f32 rad, read only | Uncalibrated nominal 0 |
 | 18 | Velocity-reference limit | f32 rad/s, read only | Runtime configured 12 |
+
+IDs 32–45 are a read-only startup readback, added without changing the frame
+format, message IDs, response length or field meaning. They exist only after a
+Board1 startup selection completed and the adapter was given its report;
+otherwise they return INVALID_ARGUMENT like any unknown ID. Values are read from
+the live Runtime and encoder policy. Writes return NOT_SUPPORTED. Minimum and
+maximum equal the value. IDs 16 and 17 report the effective pole pairs and
+electrical offset of the selected configuration.
+
+| ID | Readback | Type | Values |
+| --- | --- | --- | --- |
+| 32 | Effective configuration | u32 | 0 none, 1 NOMINAL_CONFIGURATION, 2 CALIBRATED_CONFIGURATION |
+| 33 | Calibration input | u32 | 1 NOT_AVAILABLE, 2 ACCEPTED, 3 REJECTED |
+| 34 | Rejection | u32 | 0 none, 1 format, 2 supply identity, 3 coordinate, 4 admission, 5 snapshot mismatch, 6 Board identity, 7 Board range, 8 direction product, 9 initialization |
+| 35 | Admission failure | u32 | `foc_calibration_admission_failure` code, 0 none |
+| 36 | Supply identity | u32 | 0 when absent |
+| 37 | Review identity | u32 | 0 when absent |
+| 38–40 | Phase A/B/C ADC offset | f32 counts | Effective decode offsets |
+| 41 | Encoder counts per revolution | u32 | Effective Sensor policy |
+| 42 | Runtime encoder direction | u32 | 1 = +1, 2 = −1 |
+| 43 | Raw source encoder direction | u32 | 1 = +1, 2 = −1 |
+| 44 | Calibration direction | u32 | 0 none, 1 = +1, 2 = −1 |
+| 45 | Physical current measurement qualified | u32 | Always 0 in the locked image |
+
+Accepting calibration parameters does not qualify physical current
+measurement. The TELEMETRY_READ validity bits stay zero.
 
 Writes require a coherent DISABLED view with software inhibition acknowledged
 and no pending stop. The three writable policies belong to Foreground and take

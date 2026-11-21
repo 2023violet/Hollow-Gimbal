@@ -26,12 +26,32 @@ enum {
     PARAM_POLE_PAIRS = 16,
     PARAM_ELECTRICAL_OFFSET = 17,
     PARAM_VELOCITY_LIMIT = 18,
+    /* Read-only startup readback, valid only with an attached ready report. */
+    PARAM_BOOT_CONFIGURATION = 32,
+    PARAM_CALIBRATION_INPUT = 33,
+    PARAM_CALIBRATION_REJECTION = 34,
+    PARAM_ADMISSION_FAILURE = 35,
+    PARAM_SUPPLY_ID = 36,
+    PARAM_REVIEW_ID = 37,
+    PARAM_PHASE_A_OFFSET = 38,
+    PARAM_PHASE_B_OFFSET = 39,
+    PARAM_PHASE_C_OFFSET = 40,
+    PARAM_ENCODER_CPR = 41,
+    PARAM_RUNTIME_DIRECTION = 42,
+    PARAM_SOURCE_DIRECTION = 43,
+    PARAM_CALIBRATION_DIRECTION = 44,
+    PARAM_MEASUREMENT_QUALIFIED = 45,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
     UNIT_AMPERE = 1,
     UNIT_RADIAN = 2,
     UNIT_RAD_S = 3,
+    UNIT_COUNT = 4,
+    /* Direction codes on the wire: none, +1 and -1. */
+    DIRECTION_NONE = 0,
+    DIRECTION_POSITIVE = 1,
+    DIRECTION_NEGATIVE = 2,
     FLAG_LOCKED = 1,
     FLAG_SOFTWARE_ACK = 2,
     FLAG_SENSOR_VALID = 4,
@@ -125,6 +145,76 @@ static int foc_serial_status(
     return FOC_PROTO_OK;
 }
 
+static uint32_t foc_serial_direction_code(int32_t direction)
+{
+    return direction == 1 ? DIRECTION_POSITIVE
+        : direction == -1 ? DIRECTION_NEGATIVE
+                          : DIRECTION_NONE;
+}
+
+/* Values come from the bound live Runtime and encoder policy, never a copy. */
+static bool foc_serial_boot_parameter(
+    const struct foc_serial *serial,
+    uint16_t id,
+    struct foc_serial_parameter *parameter
+)
+{
+    struct foc_serial_boot_readback view;
+    if (id < PARAM_BOOT_CONFIGURATION || id > PARAM_MEASUREMENT_QUALIFIED ||
+        serial->boot_reader == NULL || !serial->boot_reader(serial->boot_context, &view)) {
+        return false;
+    }
+    *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
+    switch (id) {
+    case PARAM_BOOT_CONFIGURATION:
+        parameter->value = view.configuration;
+        break;
+    case PARAM_CALIBRATION_INPUT:
+        parameter->value = view.calibration;
+        break;
+    case PARAM_CALIBRATION_REJECTION:
+        parameter->value = view.rejection;
+        break;
+    case PARAM_ADMISSION_FAILURE:
+        parameter->value = view.admission_failure;
+        break;
+    case PARAM_SUPPLY_ID:
+        parameter->value = view.supply_id;
+        break;
+    case PARAM_REVIEW_ID:
+        parameter->value = view.review_id;
+        break;
+    case PARAM_PHASE_A_OFFSET:
+    case PARAM_PHASE_B_OFFSET:
+    case PARAM_PHASE_C_OFFSET:
+        parameter->type = PARAM_F32;
+        parameter->unit = UNIT_COUNT;
+        parameter->value =
+            foc_serial_float_bits(view.phase_offset_count[id - PARAM_PHASE_A_OFFSET]);
+        parameter->calibration_required = true;
+        break;
+    case PARAM_ENCODER_CPR:
+        parameter->value = view.encoder_counts_per_revolution;
+        break;
+    case PARAM_RUNTIME_DIRECTION:
+        parameter->value = foc_serial_direction_code(view.runtime_direction);
+        parameter->calibration_required = true;
+        break;
+    case PARAM_SOURCE_DIRECTION:
+        parameter->value = foc_serial_direction_code(view.source_direction);
+        break;
+    case PARAM_CALIBRATION_DIRECTION:
+        parameter->value = foc_serial_direction_code(view.calibration_direction);
+        parameter->calibration_required = true;
+        break;
+    default:
+        parameter->value = view.current_measurement_qualified ? 1U : 0U;
+        break;
+    }
+    parameter->minimum = parameter->maximum = parameter->value;
+    return true;
+}
+
 static bool foc_serial_parameter_read(
     const struct foc_serial *serial,
     const struct foc_runtime *runtime,
@@ -132,6 +222,9 @@ static bool foc_serial_parameter_read(
     struct foc_serial_parameter *parameter
 )
 {
+    if (foc_serial_boot_parameter(serial, id, parameter)) {
+        return true;
+    }
     *parameter = (struct foc_serial_parameter){.type = PARAM_F32};
     switch (id) {
     case PARAM_RX_BUDGET:
@@ -456,6 +549,18 @@ void foc_serial_init_with_policy(
 void foc_serial_init(struct foc_serial *serial, const struct foc_runtime *runtime)
 {
     foc_serial_init_with_policy(serial, runtime, FOC_SERIAL_TARGET_LOCKED);
+}
+
+void foc_serial_attach_boot(
+    struct foc_serial *serial,
+    foc_serial_boot_reader reader,
+    const void *context
+)
+{
+    if (serial != NULL) {
+        serial->boot_reader = reader;
+        serial->boot_context = context;
+    }
 }
 
 int foc_serial_read_lifecycle_result(

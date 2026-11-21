@@ -20,6 +20,27 @@ set(FALCONFOC_BOARD_CAPTURE_BUILD_TAG
     "0"
     CACHE STRING "Declared recorder build tag (uint32)"
 )
+set(FALCONFOC_BOARD_CALIBRATION_SUPPLY
+    "NONE"
+    CACHE STRING "Build-time calibration supply of the ARM image: NONE or VERIFICATION"
+)
+set_property(CACHE FALCONFOC_BOARD_CALIBRATION_SUPPLY PROPERTY STRINGS NONE VERIFICATION)
+set(FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID
+    "0x56464331"
+    CACHE STRING "Supply identity accepted by the synthetic verification build"
+)
+set(FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS
+    "11"
+    CACHE STRING "Expected motor pole pairs of the synthetic verification build"
+)
+if(NOT FALCONFOC_BOARD_CALIBRATION_SUPPLY MATCHES "^(NONE|VERIFICATION)$")
+  message(FATAL_ERROR "FALCONFOC_BOARD_CALIBRATION_SUPPLY must be NONE or VERIFICATION")
+endif()
+if(NOT FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID MATCHES "^0[xX][0-9a-fA-F]+$"
+   OR NOT FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS MATCHES "^[1-9][0-9]*$"
+)
+  message(FATAL_ERROR "Supply a hexadecimal supply ID and a positive pole-pair count")
+endif()
 
 set(repo "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(vendor "${repo}/platform/at/at32f415/vendor")
@@ -30,6 +51,7 @@ add_subdirectory("${repo}/protocol" protocol)
 add_library(
   falconfoc-board1 STATIC
   src/foc_board.c
+  src/foc_board_boot.c
   src/foc_board_timing.c
   src/foc_board_capture.c
   src/foc_serial.c
@@ -80,6 +102,32 @@ if(NOT WIN32 AND NOT MSVC)
   target_link_libraries(falconfoc-board1 PUBLIC m)
 endif()
 
+# Read-only calibration supply. The default carries none; the synthetic
+# verification supply is test data and is never linked by the default image.
+add_library(
+  falconfoc-board1-supply-none STATIC src/foc_board_supply_none.c src/foc_board_expectation.c
+)
+target_link_libraries(falconfoc-board1-supply-none PUBLIC falconfoc-board1)
+target_compile_definitions(
+  falconfoc-board1-supply-none PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=0U
+                                       FOC_BOARD_EXPECTED_POLE_PAIRS=7U
+)
+add_library(
+  falconfoc-board1-supply-verification STATIC src/foc_board_supply_verification.c
+                                              src/foc_board_expectation.c
+)
+target_link_libraries(falconfoc-board1-supply-verification PUBLIC falconfoc-board1)
+target_compile_definitions(
+  falconfoc-board1-supply-verification
+  PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=${FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID}U
+          FOC_BOARD_EXPECTED_POLE_PAIRS=${FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS}U
+)
+foreach(supply falconfoc-board1-supply-none falconfoc-board1-supply-verification)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${supply} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endforeach()
+
 if(CMAKE_CROSSCOMPILING)
   if(NOT MCU_CPU STREQUAL "cortex-m4"
      OR NOT MCU_FLOAT STREQUAL "soft"
@@ -87,7 +135,13 @@ if(CMAKE_CROSSCOMPILING)
   )
     message(FATAL_ERROR "Use MCU_CPU=cortex-m4, MCU_FLOAT=soft and MCU_FPU=none")
   endif()
-  set(image falconfoc-v2-at32f415)
+  if(FALCONFOC_BOARD_CALIBRATION_SUPPLY STREQUAL "VERIFICATION")
+    set(image falconfoc-v2-at32f415-calibration-verification)
+    set(supply falconfoc-board1-supply-verification)
+  else()
+    set(image falconfoc-v2-at32f415)
+    set(supply falconfoc-board1-supply-none)
+  endif()
   set(linker "${startup}/linker/AT32F415xB_FLASH.ld")
   set(stack "${CMAKE_CURRENT_LIST_DIR}/stack-budget.ld")
   add_executable(
@@ -108,8 +162,9 @@ if(CMAKE_CROSSCOMPILING)
   target_include_directories(
     ${image} PRIVATE "${cmsis}/core_support" "${cmsis}/device_support" "${vendor}/drivers/inc"
   )
-  target_link_libraries(${image} PRIVATE falconfoc-board1)
+  target_link_libraries(${image} PRIVATE ${supply} falconfoc-board1)
   target_compile_options(falconfoc-board1 PRIVATE -Os -fstack-usage)
+  target_compile_options(${supply} PRIVATE -Os -fstack-usage)
   target_compile_options(${image} PRIVATE $<$<COMPILE_LANGUAGE:C>:-Os;-fstack-usage;-Wextra>)
   target_link_options(
     ${image}
@@ -144,11 +199,19 @@ else()
   add_executable(test-foc-board-config tests/test_foc_board_config.c)
   target_link_libraries(test-foc-board-config PRIVATE falconfoc-board1)
   add_test(NAME test-foc-board-config COMMAND test-foc-board-config)
+  add_executable(test-foc-board-boot tests/test_foc_board_boot.c)
+  target_link_libraries(test-foc-board-boot PRIVATE falconfoc-board1-supply-verification)
+  add_test(NAME test-foc-board-boot COMMAND test-foc-board-boot)
+  add_executable(test-foc-board-boot-default tests/test_foc_board_boot_default.c)
+  target_link_libraries(test-foc-board-boot-default PRIVATE falconfoc-board1-supply-none)
+  add_test(NAME test-foc-board-boot-default COMMAND test-foc-board-boot-default)
   add_executable(test-foc-serial tests/test_foc_serial.c)
   target_link_libraries(test-foc-serial PRIVATE falconfoc-board1)
   add_test(NAME test-foc-serial COMMAND test-foc-serial)
   add_executable(foc-serial-sim tests/foc_serial_sim.c)
-  target_link_libraries(foc-serial-sim PRIVATE falconfoc-board1)
+  target_link_libraries(foc-serial-sim PRIVATE falconfoc-board1-supply-none)
+  add_executable(foc-serial-sim-verification tests/foc_serial_sim.c)
+  target_link_libraries(foc-serial-sim-verification PRIVATE falconfoc-board1-supply-verification)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME test-foc-capture-import
            COMMAND "${Python3_EXECUTABLE}" -B

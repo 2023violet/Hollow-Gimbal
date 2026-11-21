@@ -72,6 +72,18 @@ class DeviceTests(unittest.TestCase):
             self.assertFalse(telemetry["current_valid"])
             self.assertFalse(telemetry["physical_applied"])
             self.assertEqual(telemetry["crc_errors"], 0)
+            # Startup readback: default supply gives NOMINAL (1) + NOT_AVAILABLE (1).
+            boot = foc.describe(client.call("param-read", foc.parameter_read(32)))
+            self.assertEqual((boot["result"], boot["value"], boot["writable"]), ("OK", 1, False))
+            source = foc.describe(client.call("param-read", foc.parameter_read(33)))
+            self.assertEqual(source["value"], 1)
+            offset = foc.describe(client.call("param-read", foc.parameter_read(38)))
+            self.assertEqual((offset["parameter_type"], offset["unit"], offset["value"]),
+                             ("f32", 4, 2048.0))
+            qualified = foc.describe(client.call("param-read", foc.parameter_read(45)))
+            self.assertEqual(qualified["value"], 0)
+            denied = foc.describe(client.call("param-write", foc.parameter_write(38, "f32", 2000.0)))
+            self.assertEqual(denied["result"], "NOT_SUPPORTED")
 
     def test_cli(self):
         tool = ROOT / "tools/falconfoc-cli/falconfoc_cli.py"

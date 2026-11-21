@@ -16,7 +16,11 @@
 #include "foc_pmsm_reachability.h"
 #include "foc_virtual_calibration.h"
 #include "foc_virtual_calibration_package.h"
+#include "foc_virtual_calibration_flux.h"
+#include "foc_virtual_calibration_reference.h"
+#include "falconfoc_virtual_calibrate_internal.h"
 #include "foc_virtual_cogging.h"
+#include "crc.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -26,14 +30,6 @@
 #include <string.h>
 
 /* Private Types ---------------------------------------------------------------- */
-
-struct calibrated_init {
-    const struct foc_cal_application *application;
-    const struct foc_cal_application_tuning_policy *policy;
-    const struct foc_cal_application_candidate *candidate;
-    const struct foc_encoder_lut *restored_lut;
-    struct foc_cal_application_sensor sensor;
-};
 
 struct current_stimulus {
     uint32_t change_us;
@@ -65,12 +61,13 @@ struct control_metrics {
     uint32_t updates;
     uint32_t saturated;
     uint32_t faults;
+    uint32_t virtual_us;
     bool stopped;
 };
 
 /* Private Constants ------------------------------------------------------------ */
 
-static const struct foc_cal_application_tuning_policy tuning = {
+const struct foc_cal_application_tuning_policy foc_virtual_cal_cli_tuning = {
     .current =
         {
             .bandwidth_hz = 130.0f,
@@ -95,19 +92,19 @@ static const char *const mode_name[] = {"current", "velocity", "position", "impe
 
 static struct foc_cal_application_tuning_policy legacy_tuning(void)
 {
-    struct foc_cal_application_tuning_policy policy = tuning;
+    struct foc_cal_application_tuning_policy policy = foc_virtual_cal_cli_tuning;
     policy.current.bandwidth_hz = 36.0f;
     policy.current.available_voltage_v = 0.4f;
     return policy;
 }
 
-static int error(const char *reason, const char *stage, int native)
+int foc_virtual_cal_cli_error(const char *reason, const char *stage, int native)
 {
     printf("{\"error\":\"%s\",\"stage\":\"%s\",\"native_status\":%d}\n", reason, stage, native);
     return 2;
 }
 
-static int calibrated(
+int foc_virtual_cal_cli_initialize(
     void *argument,
     struct foc_runtime *runtime,
     struct foc_encoder_context *encoder,
@@ -146,8 +143,11 @@ static int calibrated(
     return 0;
 }
 
-static bool
-readback(struct foc_virtual_current *driver, const struct foc_cal_application_candidate *candidate)
+bool foc_virtual_cal_cli_readback(
+    struct foc_virtual_current *driver,
+    const struct foc_cal_application_candidate *candidate,
+    bool emit
+)
 {
     struct foc_runtime_diagnostic view;
     struct foc_runtime *runtime = &driver->runtime;
@@ -166,6 +166,11 @@ readback(struct foc_virtual_current *driver, const struct foc_cal_application_ca
         motion->impedance.torque_constant_nm_per_a ==
             expected->impedance.torque_constant_nm_per_a &&
         motion->impedance.damping_filter_hz == expected->impedance.damping_filter_hz &&
+        motion->impedance.mechanical_frame_id == expected->impedance.mechanical_frame_id &&
+        motion->impedance.torque_limit_nm == expected->impedance.torque_limit_nm &&
+        motion->iq_limit_a == expected->iq_limit_a &&
+        adc->current_a_per_count == candidate->pipeline.adc.current_a_per_count &&
+        adc->phase_order == candidate->pipeline.adc.phase_order &&
         adc->phase_a_offset_count == candidate->pipeline.adc.phase_a_offset_count &&
         adc->phase_b_offset_count == candidate->pipeline.adc.phase_b_offset_count &&
         adc->phase_c_offset_count == candidate->pipeline.adc.phase_c_offset_count &&
@@ -176,7 +181,7 @@ readback(struct foc_virtual_current *driver, const struct foc_cal_application_ca
         driver->encoder.lut_offsets != NULL &&
         motion->cogging.enabled == expected->cogging.enabled && view.snapshot.output_confirmed &&
         view.snapshot.state == FOC_SAFE_STATE_DISABLED;
-    if (match) {
+    if (match && emit) {
         printf(
             "{\"event\":\"CONFIGURATION_APPLIED\",\"adc\":[%.6f,%.6f,%.6f],"
             "\"pole_pairs\":%u,\"electrical_offset_rad\":%.8f,\"lut_nodes\":%" PRIu32 ","
@@ -379,10 +384,8 @@ static int startup_cycle(
         view.action == FOC_DEVICE_OUTPUT_UPDATE && driver->fault_events.last_update_seen &&
         driver->fault_events.last_accepted_update_us == view.trigger_us;
     const double voltage = hypot(driver->output.v_alpha_v, driver->output.v_beta_v);
-    const double cap = fmin(
-        pipeline->current.config.pwm.voltage_limit_v,
-        driver->profile.vbus_v / sqrt(3.0)
-    );
+    const double cap =
+        fmin(pipeline->current.config.pwm.voltage_limit_v, driver->profile.vbus_v / sqrt(3.0));
     /* The Host adapter applies the two voltage components in its accepted UPDATE call. */
     return fprintf(
                trace->output,
@@ -465,7 +468,7 @@ static int compare_run(
     if (foc_virtual_current_init_with(
             &driver,
             profile,
-            init != NULL ? calibrated : foc_virtual_calibration_baseline,
+            init != NULL ? foc_virtual_cal_cli_initialize : foc_virtual_calibration_baseline,
             &trial
         ) != 0 ||
         (mode != FOC_RUNTIME_MODE_CURRENT &&
@@ -474,8 +477,7 @@ static int compare_run(
         publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
         advance_with_startup_trace(&driver, 1300U, trace) != 0 ||
         !lifecycle(&driver, FOC_RUNTIME_ACTION_ARM, mode, 1400U) ||
-        (trace != NULL && trace->startup &&
-         startup_cycle(trace, &driver, &driver.target_a) != 0) ||
+        (trace != NULL && trace->startup && startup_cycle(trace, &driver, &driver.target_a) != 0) ||
         publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
         advance_with_startup_trace(&driver, 1600U, trace) != 0 ||
         !lifecycle(&driver, FOC_RUNTIME_ACTION_START, mode, start_us)) {
@@ -577,12 +579,14 @@ static int compare_run(
             return -4;
         }
     }
+    result->virtual_us = driver.virtual_time_us;
     return result->stopped && result->updates > 0U ? 0 : -5;
 }
 
 static bool verify_recovery(
     const struct foc_virtual_current_profile *profile,
-    const struct calibrated_init *init
+    const struct calibrated_init *init,
+    uint32_t *virtual_us
 )
 {
     struct calibrated_init trial = {
@@ -594,7 +598,8 @@ static bool verify_recovery(
     struct foc_virtual_current driver = {0};
     struct foc_runtime_snapshot view;
     const enum foc_runtime_mode mode = FOC_RUNTIME_MODE_CURRENT;
-    if (foc_virtual_current_init_with(&driver, profile, calibrated, &trial) != 0 ||
+    if (foc_virtual_current_init_with(&driver, profile, foc_virtual_cal_cli_initialize, &trial) !=
+            0 ||
         foc_virtual_current_run_until(&driver, 700U) != 0 ||
         foc_virtual_current_publish_iq(&driver, 0.0f, 0.25f) != FOC_RUNTIME_OK ||
         foc_virtual_current_run_until(&driver, 1300U) != 0 ||
@@ -644,6 +649,95 @@ static bool verify_recovery(
         fault_updates,
         recovered
     );
+    *virtual_us += driver.virtual_time_us;
+    return true;
+}
+
+static bool verify_calibrated_torque_limit(
+    const struct foc_virtual_current_profile *profile,
+    const struct calibrated_init *init,
+    uint32_t *virtual_us
+)
+{
+    const enum foc_runtime_mode mode = FOC_RUNTIME_MODE_IMPEDANCE;
+    for (int sign = -1; sign <= 1; sign += 2) {
+        struct calibrated_init trial = {
+            .application = init->application,
+            .policy = init->policy,
+            .candidate = init->candidate,
+            .restored_lut = init->restored_lut,
+        };
+        struct foc_virtual_current driver = {0};
+        const struct foc_cal_application_gains *gains = &init->candidate->gains;
+        const float target = 20.0f * sign;
+        if (foc_virtual_current_init_with(
+                &driver,
+                profile,
+                foc_virtual_cal_cli_initialize,
+                &trial
+            ) != 0 ||
+            !lifecycle(&driver, FOC_RUNTIME_ACTION_SET_MODE, mode, 0U) ||
+            foc_virtual_current_run_until(&driver, 700U) != 0 ||
+            publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
+            foc_virtual_current_run_until(&driver, 1300U) != 0 ||
+            !lifecycle(&driver, FOC_RUNTIME_ACTION_ARM, mode, 1400U) ||
+            publish(&driver, mode, target, gains) != FOC_RUNTIME_OK ||
+            foc_virtual_current_run_until(&driver, 1600U) != 0 ||
+            !lifecycle(&driver, FOC_RUNTIME_ACTION_START, mode, 1800U) ||
+            publish(&driver, mode, target, gains) != FOC_RUNTIME_OK) {
+            return false;
+        }
+        const struct foc_runtime_motion_config *motion = &driver.runtime.config.motion;
+        const float kt = motion->impedance.torque_constant_nm_per_a;
+        const float torque = motion->impedance.torque_limit_nm;
+        const float cap = fminf(motion->iq_limit_a, torque / kt);
+        const double load = 1.25 * torque * sign;
+        struct foc_virtual_current_observation view = {0};
+        const int load_status = foc_virtual_motor_set_load(&driver.motor, load);
+        const int advance = foc_virtual_current_run_until(&driver, 2600U);
+        const int observation = foc_virtual_current_observe(&driver, &view);
+        if (load_status != 0 || advance != 0 || observation != 0 ||
+            view.safety_state != FOC_SAFE_STATE_RUNNING || view.faults != 0U ||
+            view.accepted_updates == 0U || sign * view.iq_ref_a < 0.85f * cap ||
+            fabsf(view.iq_ref_a) > cap + 1e-6f) {
+            fprintf(
+                stderr,
+                "torque-limit load=%d advance=%d observe=%d state=%d faults=%" PRIu32
+                " updates=%" PRIu32 " target=%.8g cap=%.8g\n",
+                load_status,
+                advance,
+                observation,
+                view.safety_state,
+                view.faults,
+                view.accepted_updates,
+                (double)view.iq_ref_a,
+                (double)cap
+            );
+            return false;
+        }
+        if (foc_virtual_current_request_stop(&driver) != FOC_RUNTIME_OK ||
+            foc_virtual_current_run_until(&driver, 3200U) != 0 ||
+            driver.output.mode != FOC_VIRTUAL_OUTPUT_HIGH_Z ||
+            driver.output.accepted_updates != view.accepted_updates) {
+            fprintf(
+                stderr,
+                "torque-limit STOP mode=%d updates before=%" PRIu32 " after=%" PRIu32 "\n",
+                driver.output.mode,
+                view.accepted_updates,
+                driver.output.accepted_updates
+            );
+            return false;
+        }
+        printf(
+            "{\"event\":\"CALIBRATED_TORQUE_LIMIT_VERIFIED\",\"load_nm\":%.9g,"
+            "\"kt\":%.9g,\"iq_ref_a\":%.9g,\"cap_a\":%.9g,\"stop_confirmed\":true}\n",
+            load,
+            (double)kt,
+            (double)view.iq_ref_a,
+            (double)cap
+        );
+        *virtual_us += driver.virtual_time_us;
+    }
     return true;
 }
 
@@ -684,8 +778,11 @@ static void print_metrics(
     );
 }
 
-static bool
-verify_control(const struct foc_virtual_current_profile *profile, struct calibrated_init *init)
+static bool verify_control(
+    const struct foc_virtual_current_profile *profile,
+    struct calibrated_init *init,
+    int64_t *virtual_us
+)
 {
     /* New small-signal acceptance cases. The installed historical suites retain
      * their own references, horizons and acceptance thresholds. */
@@ -734,6 +831,11 @@ verify_control(const struct foc_virtual_current_profile *profile, struct calibra
             }
             print_metrics(mode, "before", ref, &baseline, base_status);
             print_metrics(mode, "after", ref, &tuned, tuned_status);
+            if (baseline.virtual_us == 0U || tuned.virtual_us == 0U) {
+                *virtual_us = -1;
+            } else if (*virtual_us >= 0) {
+                *virtual_us += baseline.virtual_us + tuned.virtual_us;
+            }
             if (base_status != 0 || tuned_status != 0 || tuned.tail_rms > cases[i].tolerance ||
                 tuned.overshoot > cases[i].overshoot ||
                 tuned.last_outside_us >= cases[i].duration_us * 3U / 4U) {
@@ -742,7 +844,8 @@ verify_control(const struct foc_virtual_current_profile *profile, struct calibra
         }
     }
     const bool benefit = applied_current_rms < baseline_current_rms;
-    const bool recommended = init->policy->current.bandwidth_hz == tuning.current.bandwidth_hz;
+    const bool recommended =
+        init->policy->current.bandwidth_hz == foc_virtual_cal_cli_tuning.current.bandwidth_hz;
     printf(
         "{\"event\":\"CURRENT_BENEFIT_%s\",\"policy_hz\":%.6g,"
         "\"baseline_worst_rms_a\":%.8g,\"applied_worst_rms_a\":%.8g}\n",
@@ -1077,7 +1180,107 @@ static void print_parameters(const struct foc_virtual_calibration *session)
     );
 }
 
-static void cogging_fixture(struct foc_virtual_current_profile *profile)
+uint32_t foc_virtual_cal_cli_flux_signature(const struct foc_flux_id_result *fit)
+{
+    const struct foc_flux_id_identity *id = &fit->identity;
+    const uint32_t fields[] = {
+        id->session,
+        id->capture,
+        id->motor,
+        id->dq_frame,
+        id->current_chain,
+        id->voltage_chain,
+        id->speed_chain,
+        id->clock,
+        id->rl_revision,
+        id->poles_revision,
+        id->phase_order,
+        id->pole_pairs,
+        fit->state,
+        fit->failure,
+        fit->source,
+        fit->voltage_source,
+        fit->flux_provenance,
+        fit->kt_provenance,
+        fit->first_us,
+        fit->last_us,
+        fit->intervals,
+        fit->positive.windows,
+        fit->negative.windows,
+    };
+    const double measurements[] = {
+        fit->rl.rs_ohm,
+        fit->rl.ld_h,
+        fit->rl.lq_h,
+        fit->flux_wb,
+        fit->ke_phase_peak_v_per_mechanical_rad_s,
+        fit->kt_nm_per_peak_q_amp,
+        fit->positive.flux_wb,
+        fit->negative.flux_wb,
+        fit->positive.residual_rms_v,
+        fit->negative.residual_rms_v,
+        fit->positive.minimum_abs_speed_rad_s,
+        fit->positive.maximum_abs_speed_rad_s,
+        fit->negative.minimum_abs_speed_rad_s,
+        fit->negative.maximum_abs_speed_rad_s,
+        fit->residual_rms_v,
+        fit->omega_e_rms_rad_s,
+        fit->direction_difference_relative,
+    };
+    const uint32_t crc = crc32_ieee(UINT32_MAX, (const uint8_t *)fields, sizeof fields);
+    return crc32_ieee(crc, (const uint8_t *)measurements, sizeof measurements) ^ UINT32_MAX;
+}
+
+void foc_virtual_cal_cli_flux_preview(const struct foc_flux_id_result *fit)
+{
+    const struct foc_flux_id_identity *id = &fit->identity;
+    printf(
+        "{\"event\":\"FLUX_CANDIDATE\",\"flux_origin\":\"FLUX_FROM_MEASUREMENT\","
+        "\"kt_origin\":\"KT_DERIVED_FROM_FLUX\",\"voltage_source\":\"VIRTUAL_TERMINAL\","
+        "\"session\":%" PRIu32 ",\"capture\":%" PRIu32 ",\"motor\":%" PRIu32 ","
+        "\"pole_pairs\":%u,\"rl_revision\":%" PRIu32 ",\"poles_revision\":%" PRIu32 ","
+        "\"current_revision\":%" PRIu32 ",\"dq_frame\":%" PRIu32 ","
+        "\"voltage_chain\":%" PRIu32 ",\"phase_order\":%" PRIu32 ","
+        "\"flux_wb\":%.9g,\"kt_nm_per_peak_q_amp\":%.9g,"
+        "\"ke_phase_peak_v_per_mechanical_rad_s\":%.9g,\"residual_rms_v\":%.17g,"
+        "\"direction_difference_relative\":%.17g,\"signed_flux_wb\":[%.17g,%.17g],"
+        "\"signed_residual_rms_v\":[%.17g,%.17g],\"windows\":[%" PRIu32 ",%" PRIu32 "],"
+        "\"positive_speed_rad_s\":[%.8g,%.8g],\"negative_speed_rad_s\":[%.8g,%.8g],"
+        "\"intervals\":%" PRIu32 ",\"aperture_us\":[%" PRIu32 ",%" PRIu32 "],"
+        "\"evidence_id\":\"%08" PRIx32 "\"}\n",
+        id->session,
+        id->capture,
+        id->motor,
+        (unsigned int)id->pole_pairs,
+        id->rl_revision,
+        id->poles_revision,
+        id->current_chain,
+        id->dq_frame,
+        id->voltage_chain,
+        id->phase_order,
+        (double)fit->flux_wb,
+        (double)fit->kt_nm_per_peak_q_amp,
+        (double)fit->ke_phase_peak_v_per_mechanical_rad_s,
+        fit->residual_rms_v,
+        fit->direction_difference_relative,
+        fit->positive.flux_wb,
+        fit->negative.flux_wb,
+        fit->positive.residual_rms_v,
+        fit->negative.residual_rms_v,
+        fit->positive.windows,
+        fit->negative.windows,
+        fit->positive.minimum_abs_speed_rad_s,
+        fit->positive.maximum_abs_speed_rad_s,
+        -fit->negative.maximum_abs_speed_rad_s,
+        -fit->negative.minimum_abs_speed_rad_s,
+        fit->intervals,
+        fit->first_us,
+        fit->last_us,
+        foc_virtual_cal_cli_flux_signature(fit)
+    );
+}
+
+void foc_virtual_cal_cli_cogging_fixture(struct foc_virtual_current_profile *profile)
 {
     profile->cogging_amplitude_nm = 0.012;
     profile->cogging_cycles_per_turn = 3U;
@@ -1089,7 +1292,7 @@ static bool permit_cogging(void *argument)
     return foc_virtual_calibration_poll(argument) == FOC_VIRTUAL_CAL_OK;
 }
 
-static int cogging_capture(
+int foc_virtual_cal_cli_cogging_capture(
     const struct foc_virtual_current_profile *profile,
     struct foc_virtual_calibration *session,
     struct foc_virtual_cogging_result *capture
@@ -1129,24 +1332,30 @@ static int cogging_capture(
     return status;
 }
 
-static int run_control(
+int foc_virtual_cal_cli_verify(
     struct foc_virtual_current_profile *profile,
     struct calibrated_init *init,
     struct foc_virtual_calibration *session,
     const char *save_config,
     const char *current_study_path,
-    bool startup_study
+    bool startup_study,
+    struct foc_virtual_cal_cli_timing *timing
 )
 {
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_APPLICATION);
     struct foc_virtual_current driver = {0};
     if (init->candidate->runtime.config.motion.cogging.enabled) {
-        cogging_fixture(profile);
+        foc_virtual_cal_cli_cogging_fixture(profile);
     }
-    if (foc_virtual_current_init_with(&driver, profile, calibrated, init) != 0 ||
-        !readback(&driver, init->candidate)) {
-        return error("FRESH_RUNTIME_INIT_FAILED", "APPLICATION", -1);
+    if (foc_virtual_current_init_with(&driver, profile, foc_virtual_cal_cli_initialize, init) !=
+            0 ||
+        !foc_virtual_cal_cli_readback(&driver, init->candidate, true)) {
+        foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_APPLICATION, false, 0);
+        return foc_virtual_cal_cli_error("FRESH_RUNTIME_INIT_FAILED", "APPLICATION", -1);
     }
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_APPLICATION, true, 0);
     if (current_study_path != NULL) {
+        foc_virtual_cal_cli_timing_start(timing, CAL_CLI_CONTROL_DIAGNOSTIC);
         FILE *trace = NULL;
 #if defined(_MSC_VER)
         (void)fopen_s(&trace, current_study_path, "wbx");
@@ -1154,26 +1363,49 @@ static int run_control(
         trace = fopen(current_study_path, "wbx");
 #endif
         if (trace == NULL) {
-            return error("CURRENT_STUDY_IO", "CONTROL", -1);
+            foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_CONTROL_DIAGNOSTIC, false, 0);
+            return foc_virtual_cal_cli_error("CURRENT_STUDY_IO", "CONTROL", -1);
         }
         const int status = startup_study
             ? current_startup_study(trace, profile, init->candidate, session)
             : current_study(trace, profile, init, session);
         const int closed = fclose(trace);
+        foc_virtual_cal_cli_timing_finish(
+            timing, CAL_CLI_CONTROL_DIAGNOSTIC, status == 0 && closed == 0, -1
+        );
         if (status != 0 || closed != 0) {
-            return error("CURRENT_STUDY_FAILED", "CONTROL", status);
+            return foc_virtual_cal_cli_error("CURRENT_STUDY_FAILED", "CONTROL", status);
         }
     }
-    if (!verify_recovery(profile, init)) {
-        return error("FAULT_RECOVERY_FAILED", "CONTROL", -1);
+    uint32_t safety_us = 0U;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_CONTROL_SAFETY);
+    if (!verify_recovery(profile, init, &safety_us)) {
+        foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_CONTROL_SAFETY, false, -1);
+        return foc_virtual_cal_cli_error("FAULT_RECOVERY_FAILED", "CONTROL", -1);
     }
-    const bool quality = verify_control(profile, init);
+    if (!verify_calibrated_torque_limit(profile, init, &safety_us)) {
+        foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_CONTROL_SAFETY, false, -1);
+        return foc_virtual_cal_cli_error("CALIBRATED_TORQUE_LIMIT_FAILED", "CONTROL", -1);
+    }
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_CONTROL_SAFETY, true, safety_us);
+    int64_t holdout_us = 0;
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_CONTROL_HOLDOUT);
+    const bool quality = verify_control(profile, init, &holdout_us);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_CONTROL_HOLDOUT, quality, holdout_us);
     bool persisted = init->restored_lut != NULL;
     if (save_config != NULL && quality) {
+        foc_virtual_cal_cli_timing_start(timing, CAL_CLI_FCAL_SAVE);
         const int status =
             foc_virtual_calibration_package_save(save_config, session, init->candidate);
+        foc_virtual_cal_cli_timing_finish(
+            timing, CAL_CLI_FCAL_SAVE, status == FOC_VIRTUAL_PACKAGE_OK, 0
+        );
         if (status != FOC_VIRTUAL_PACKAGE_OK) {
-            return error(foc_virtual_calibration_package_reason(status), "SAVE_CONFIG", status);
+            return foc_virtual_cal_cli_error(
+                foc_virtual_calibration_package_reason(status),
+                "SAVE_CONFIG",
+                status
+            );
         }
         persisted = true;
     }
@@ -1190,8 +1422,10 @@ static int run_control(
     return quality ? 0 : 3;
 }
 
-static void
-print_candidate(const struct foc_cal_application_candidate *candidate, uint32_t review_id)
+void foc_virtual_cal_cli_preview(
+    const struct foc_cal_application_candidate *candidate,
+    uint32_t review_id
+)
 {
     const struct foc_cal_application_gains *gains = &candidate->gains;
     const struct foc_device_adc_config *adc = &candidate->pipeline.adc;
@@ -1217,14 +1451,14 @@ print_candidate(const struct foc_cal_application_candidate *candidate, uint32_t 
     );
 }
 
-static bool review_matches(const char *approved, uint32_t review_id)
+bool foc_virtual_cal_cli_review_matches(const char *approved, uint32_t review_id)
 {
     char expected[9];
     (void)snprintf(expected, sizeof expected, "%08" PRIx32, review_id);
     return strcmp(expected, approved) == 0;
 }
 
-static int draft_candidate(
+int foc_virtual_cal_cli_draft(
     const struct foc_virtual_calibration *session,
     const struct foc_cal_application_tuning_policy *policy,
     struct foc_cal_application_candidate *candidate
@@ -1372,20 +1606,34 @@ static void report_reachability(
     puts("]}");
 }
 
-static int restore(
+int foc_virtual_cal_cli_restore(
     const char *path,
     struct foc_virtual_current_profile *profile,
     const struct foc_cal_workflow_identity *identity,
     const char *approved,
-    const struct foc_pmsm_operating_point *diagnostic
+    const struct foc_pmsm_operating_point *diagnostic,
+    struct foc_virtual_cal_cli_timing *timing,
+    const char *quick_scenario
 )
 {
     struct foc_virtual_calibration_package package;
     const struct foc_cal_application_tuning_policy legacy = legacy_tuning();
-    const int status =
-        foc_virtual_calibration_package_load(path, profile, identity, &tuning, &legacy, &package);
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_FCAL_LOAD);
+    const int status = foc_virtual_calibration_package_load(
+        path,
+        profile,
+        identity,
+        &foc_virtual_cal_cli_tuning,
+        &legacy,
+        &package
+    );
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_FCAL_LOAD, status == FOC_VIRTUAL_PACKAGE_OK, 0);
     if (status != FOC_VIRTUAL_PACKAGE_OK) {
-        return error(foc_virtual_calibration_package_reason(status), "LOAD_CONFIG", status);
+        return foc_virtual_cal_cli_error(
+            foc_virtual_calibration_package_reason(status),
+            "LOAD_CONFIG",
+            status
+        );
     }
     printf(
         "{\"event\":\"CONFIGURATION_LOADED\",\"source\":\"HOST_CONFIG_V1\","
@@ -1402,30 +1650,95 @@ static int restore(
         report_reachability(&package, diagnostic);
         return 0;
     }
-    print_candidate(&package.candidate, package.review_id);
+    if (timing != NULL) {
+        puts(
+            "{\"event\":\"PRODUCT_FCAL_SOURCE\",\"format\":\"FCAL_V1\","
+            "\"numerical_config\":true,\"measurement_sources_restored\":false,"
+            "\"dependency_history_restored\":false,\"independent_holdout_restored\":false,"
+            "\"review_history_restored\":false,\"quality\":\"SOURCE_CONFIDENCE_INSUFFICIENT\"}"
+        );
+        const int live = foc_virtual_cal_cli_quick_check(
+            profile, identity, &package, quick_scenario, timing
+        );
+        if (live != 0) {
+            return live;
+        }
+        foc_virtual_cal_cli_timing_omit(
+            timing, CAL_CLI_BOOTSTRAP_STAGES | CAL_CLI_BIT(CAL_CLI_FCAL_SAVE), CAL_CLI_SKIPPED
+        );
+        foc_virtual_cal_cli_timing_omit(
+            timing, CAL_CLI_CAPTURE_STAGES | CAL_CLI_BIT(CAL_CLI_GAIN_CANDIDATE), CAL_CLI_REUSED
+        );
+    }
+    foc_virtual_cal_cli_preview(&package.candidate, package.review_id);
     if (approved == NULL) {
         puts("{\"event\":\"REVIEW_REQUIRED\",\"configuration_applied\":false}");
         return 0;
     }
-    if (!review_matches(approved, package.review_id)) {
-        return error("REVIEW_ID_MISMATCH", "LOAD_CONFIG", -1);
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_REVIEW);
+    const bool review_matches = foc_virtual_cal_cli_review_matches(approved, package.review_id);
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_REVIEW, review_matches, 0);
+    if (!review_matches) {
+        return foc_virtual_cal_cli_error("REVIEW_ID_MISMATCH", "LOAD_CONFIG", -1);
     }
     printf(
         "{\"event\":\"CANDIDATE_REVIEWED\",\"review_id\":\"%08" PRIx32 "\"}\n",
         package.review_id
     );
     struct calibrated_init init = {
-        .policy = package.uses_legacy_policy ? &legacy : &tuning,
+        .policy = package.uses_legacy_policy ? &legacy : &foc_virtual_cal_cli_tuning,
         .candidate = &package.candidate,
         .restored_lut = &package.lut,
     };
-    return run_control(profile, &init, NULL, NULL, NULL, false);
+    return foc_virtual_cal_cli_verify(profile, &init, NULL, NULL, NULL, false, timing);
 }
 
 struct endpoint_trace {
     FILE *file;
     bool failed;
 };
+
+static void trace_flux_interval(void *argument, const struct foc_flux_id_interval *sample)
+{
+    struct endpoint_trace *trace = argument;
+    const struct foc_flux_id_identity *id = &sample->identity;
+    if (fprintf(
+            trace->file,
+            "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ","
+            "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ","
+            "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ","
+            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%d,%d,%d,%d,%d,%d,%d\n",
+            id->session,
+            id->capture,
+            id->motor,
+            sample->sequence,
+            sample->begin_us,
+            sample->end_us,
+            sample->voltage_begin_us,
+            sample->voltage_end_us,
+            sample->speed_begin_us,
+            sample->speed_end_us,
+            id->rl_revision,
+            id->poles_revision,
+            id->current_chain,
+            sample->id_begin_a,
+            sample->iq_begin_a,
+            sample->id_end_a,
+            sample->iq_end_a,
+            sample->mean_omega_e_rad_s,
+            sample->mean_vq_v,
+            (int)sample->voltage_source,
+            sample->current_valid,
+            sample->voltage_valid,
+            sample->speed_valid,
+            sample->frame_confirmed,
+            sample->output_confirmed,
+            sample->terminal_voltage_witnessed,
+            sample->saturated
+        ) < 0) {
+        trace->failed = true;
+    }
+}
 
 static void
 trace_rl(void *argument, enum foc_motor_id_axis axis, const struct foc_motor_id_sample *sample)
@@ -1453,6 +1766,72 @@ trace_rl(void *argument, enum foc_motor_id_axis axis, const struct foc_motor_id_
     }
 }
 
+static int review_parameters(
+    const char *selected,
+    const struct foc_virtual_current_profile *profile,
+    struct foc_cal_workflow_request *request,
+    const char *approved
+)
+{
+    const bool rs = strcmp(selected, "rs") == 0;
+    if (!rs && strcmp(selected, "jb") != 0) {
+        return foc_virtual_cal_cli_error("INVALID_PARAMETER_SELECTION", "SETUP", -1);
+    }
+    request->profile = FOC_CAL_WORKFLOW_SELECTED_STAGES;
+    request->require_dual_axis = false;
+    request->stages = rs ? FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ADC) |
+            FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ELECTRICAL)
+                         : FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_MECHANICAL);
+    struct foc_virtual_calibration session = {0};
+    int status = foc_virtual_calibration_start(&session, profile, request);
+    while (status == FOC_VIRTUAL_CAL_PENDING) {
+        status = foc_virtual_calibration_poll(&session);
+    }
+    const struct foc_cal_workflow_bundle *bundle = &session.workflow.result;
+    if (status != FOC_VIRTUAL_CAL_OK || !bundle->complete || bundle->applicable) {
+        return foc_virtual_cal_cli_error("PARAMETER_CAPTURE_FAILED", "REVIEW", status);
+    }
+    const float first = rs ? bundle->electrical.rs_ohm : bundle->mechanical.inertia_kg_m2;
+    const float second = rs ? 0.0f : bundle->mechanical.damping_nm_s;
+    const uint32_t capture = rs ? bundle->electrical.capture_id : bundle->mechanical.capture_id;
+    const uint32_t identity[] = {
+        request->session,
+        request->identity.motor_setup_id,
+        request->identity.encoder_id,
+        request->identity.mechanical_frame_id,
+        request->stages,
+        capture,
+    };
+    const float values[] = {first, second};
+    const uint32_t crc = crc32_ieee(UINT32_MAX, (const uint8_t *)identity, sizeof identity);
+    const uint32_t id = crc32_ieee(crc, (const uint8_t *)values, sizeof values) ^ UINT32_MAX;
+    printf(
+        "{\"event\":\"PARAMETER_PREVIEW\",\"parameter\":\"%s\","
+        "\"review_id\":\"%08" PRIx32 "\",\"source\":\"HOST_VIRTUAL\","
+        "\"capture\":%" PRIu32 ",\"values\":[%.9g,%.9g],\"runtime_applicable\":false}\n",
+        rs ? "RS" : "JB",
+        id,
+        capture,
+        (double)first,
+        (double)second
+    );
+    if (approved == NULL) {
+        return 0;
+    }
+    if (!foc_virtual_cal_cli_review_matches(approved, id) ||
+        foc_cal_workflow_review(&session.workflow, request->session, &request->identity, true) !=
+            FOC_CAL_WORKFLOW_OK) {
+        return foc_virtual_cal_cli_error("REVIEW_ID_MISMATCH", "REVIEW", -1);
+    }
+    struct foc_cal_application_candidate impossible;
+    if (foc_cal_application_prepare(&session.application, &impossible) !=
+        FOC_CAL_APPLICATION_ERR_REVIEW) {
+        return foc_virtual_cal_cli_error("UNADMITTED_CONFIGURATION", "APPLICATION", -1);
+    }
+    puts("{\"event\":\"PARAMETER_REVIEWED\",\"runtime_applicable\":false}");
+    return 0;
+}
+
 /* Public Functions ------------------------------------------------------------- */
 
 int main(int argc, char *argv[])
@@ -1461,12 +1840,19 @@ int main(int argc, char *argv[])
     const char *cancel_after = NULL;
     const char *save_config = NULL;
     const char *load_config = NULL;
+    const char *bootstrap = NULL;
+    const char *boot_scenario = "nominal";
+    const char *boot_trace = NULL;
     const char *trace_path = NULL;
     const char *current_study_path = NULL;
     const char *approved = NULL;
+    const char *selected = NULL;
+    bool reuse_session = false;
+    bool flux_trace = false;
     bool use_cogging = false;
     bool startup_study = false;
     bool capabilities = false;
+    bool product_timing = false;
     struct foc_pmsm_operating_point point;
     const struct foc_pmsm_operating_point *diagnostic = NULL;
     for (int i = 1; i < argc; ++i) {
@@ -1480,44 +1866,97 @@ int main(int argc, char *argv[])
             save_config = argv[++i];
         } else if (strcmp(argv[i], "--load-config") == 0 && i + 1 < argc) {
             load_config = argv[++i];
+        } else if (strcmp(argv[i], "--bootstrap") == 0 && i + 1 < argc && bootstrap == NULL) {
+            bootstrap = argv[++i];
+        } else if (strcmp(argv[i], "--boot-scenario") == 0 && i + 1 < argc) {
+            boot_scenario = argv[++i];
+        } else if (strcmp(argv[i], "--boot-trace") == 0 && i + 1 < argc && boot_trace == NULL) {
+            boot_trace = argv[++i];
         } else if (strcmp(argv[i], "--capabilities") == 0) {
             capabilities = true;
-        } else if (strcmp(argv[i], "--reachability") == 0 ||
-                   strcmp(argv[i], "--reachability-torque") == 0) {
+        } else if (strcmp(argv[i], "--stages") == 0 && i + 1 < argc && selected == NULL) {
+            selected = argv[++i];
+        } else if (strcmp(argv[i], "--reuse-session") == 0) {
+            reuse_session = true;
+        } else if (strcmp(argv[i], "--product-timing") == 0) {
+            product_timing = true;
+        } else if (
+            strcmp(argv[i], "--reachability") == 0 || strcmp(argv[i], "--reachability-torque") == 0
+        ) {
             const bool torque = strcmp(argv[i], "--reachability-torque") == 0;
             if (diagnostic != NULL || argc - i <= 4 ||
                 !read_operating_point(
-                    &argv[i + 1], torque ? FOC_PMSM_TARGET_TORQUE : FOC_PMSM_TARGET_CURRENT, &point
+                    &argv[i + 1],
+                    torque ? FOC_PMSM_TARGET_TORQUE : FOC_PMSM_TARGET_CURRENT,
+                    &point
                 )) {
-                return error("INVALID_REACHABILITY_POINT", "SETUP", -1);
+                return foc_virtual_cal_cli_error("INVALID_REACHABILITY_POINT", "SETUP", -1);
             }
             if (torque && point.id_a != 0.0f) {
-                return error("IMPEDANCE_REQUIRES_ZERO_ID", "SETUP", -1);
+                return foc_virtual_cal_cli_error("IMPEDANCE_REQUIRES_ZERO_ID", "SETUP", -1);
             }
             diagnostic = &point;
             i += 4;
-        } else if ((strcmp(argv[i], "--cq-current-csv") == 0 ||
-                    strcmp(argv[i], "--cq-startup-csv") == 0) &&
-                   i + 1 < argc && current_study_path == NULL) {
+        } else if (
+            (strcmp(argv[i], "--cq-current-csv") == 0 ||
+             strcmp(argv[i], "--cq-startup-csv") == 0) &&
+            i + 1 < argc && current_study_path == NULL
+        ) {
             startup_study = strcmp(argv[i], "--cq-startup-csv") == 0;
             current_study_path = argv[++i];
-        } else if (strcmp(argv[i], "--trace") == 0 && i + 1 < argc) {
+        } else if (
+            (strcmp(argv[i], "--trace") == 0 || strcmp(argv[i], "--flux-trace") == 0) &&
+            i + 1 < argc && trace_path == NULL
+        ) {
+            flux_trace = strcmp(argv[i], "--flux-trace") == 0;
             trace_path = argv[++i];
         } else if (strcmp(argv[i], "--cancel-after") == 0 && i + 1 < argc) {
             cancel_after = argv[++i];
         } else {
-            return error("INVALID_ARGUMENT", "SETUP", -1);
+            return foc_virtual_cal_cli_error("INVALID_ARGUMENT", "SETUP", -1);
         }
     }
     puts("{\"event\":\"PHYSICAL_CALIBRATION_NOT_VERIFIED\"}");
     struct foc_virtual_current_profile profile;
     struct foc_cal_workflow_request request;
     struct foc_virtual_calibration session = {0};
+    const bool known_boot = bootstrap != NULL && strcmp(bootstrap, "known") == 0;
+    const bool measured_boot = bootstrap != NULL && !known_boot;
+    if (product_timing && !known_boot && (!measured_boot || strcmp(bootstrap, "unknown") != 0)) {
+        return foc_virtual_cal_cli_error("INVALID_PRODUCT_ARGUMENTS", "SETUP", -1);
+    }
+    struct foc_virtual_cal_cli_timing product = {
+        .mode = reuse_session ? "selective" : known_boot ? "quick" : "full",
+    };
+    struct foc_virtual_cal_cli_timing *timing = product_timing ? &product : NULL;
+    if ((bootstrap == NULL && (boot_trace != NULL || strcmp(boot_scenario, "nominal") != 0)) ||
+        (known_boot &&
+         (load_config == NULL || boot_trace != NULL ||
+          (!product_timing && strcmp(boot_scenario, "nominal") != 0))) ||
+        (measured_boot && (load_config != NULL || selected != NULL || use_cogging)) ||
+        (bootstrap != NULL && (capabilities || diagnostic != NULL || selected != NULL))) {
+        return foc_virtual_cal_cli_error("BOOTSTRAP_ARGUMENT_CONFLICT", "SETUP", -1);
+    }
+    if (reuse_session) {
+        if (bootstrap != NULL && strcmp(bootstrap, "offset") != 0 &&
+            strcmp(bootstrap, "unknown") != 0) {
+            return foc_virtual_cal_cli_error("BOOTSTRAP_ARGUMENT_CONFLICT", "SETUP", -1);
+        }
+        if (load_config != NULL || approved != NULL || save_config != NULL || capabilities ||
+            current_study_path != NULL || trace_path != NULL || cancel_after != NULL ||
+            diagnostic != NULL || selected != NULL) {
+            return foc_virtual_cal_cli_error("REUSE_SESSION_ARGUMENT_CONFLICT", "SETUP", -1);
+        }
+        if (boot_trace != NULL || strcmp(boot_scenario, "nominal") != 0) {
+            return foc_virtual_cal_cli_error("BOOTSTRAP_ARGUMENT_CONFLICT", "SETUP", -1);
+        }
+        return foc_virtual_cal_cli_reuse_session(profile_name, use_cogging, bootstrap, timing);
+    }
     if (capabilities) {
         if (load_config != NULL || approved != NULL || save_config != NULL ||
             current_study_path != NULL || trace_path != NULL || cancel_after != NULL ||
-            use_cogging || diagnostic != NULL) {
-            return error("CAPABILITIES_IS_READ_ONLY", "SETUP", -1);
+            use_cogging || diagnostic != NULL || selected != NULL) {
+            return foc_virtual_cal_cli_error("CAPABILITIES_IS_READ_ONLY", "SETUP", -1);
         }
         puts(
             "{\"event\":\"HOST_CAPABILITIES\",\"version\":1,\"source\":\"HOST_VIRTUAL\","
@@ -1530,23 +1969,85 @@ int main(int argc, char *argv[])
         return 0;
     }
     if (diagnostic != NULL && (load_config == NULL || approved != NULL)) {
-        return error("REACHABILITY_REQUIRES_LOAD_ONLY", "SETUP", -1);
+        return foc_virtual_cal_cli_error("REACHABILITY_REQUIRES_LOAD_ONLY", "SETUP", -1);
     }
     if ((save_config != NULL && approved == NULL) ||
         (current_study_path != NULL && (approved == NULL || load_config != NULL)) ||
         (load_config != NULL &&
          (save_config != NULL || cancel_after != NULL || trace_path != NULL || use_cogging))) {
-        return error("EXPLICIT_REVIEW_REQUIRED", "SETUP", -1);
+        return foc_virtual_cal_cli_error("EXPLICIT_REVIEW_REQUIRED", "SETUP", -1);
     }
     if (foc_virtual_calibration_profile(profile_name, &profile, &request) != 0) {
-        return error("INVALID_PROFILE_OR_RUNTIME", "SETUP", -1);
+        return foc_virtual_cal_cli_error("INVALID_PROFILE_OR_RUNTIME", "SETUP", -1);
     }
     profile.runtime.motion.impedance.damping_filter_hz = 48.0f;
-    if (load_config != NULL) {
-        return restore(load_config, &profile, &request.identity, approved, diagnostic);
+    if (selected != NULL) {
+        if (load_config != NULL || save_config != NULL || current_study_path != NULL ||
+            trace_path != NULL || cancel_after != NULL || use_cogging || diagnostic != NULL) {
+            return foc_virtual_cal_cli_error("PARAMETER_REVIEW_ONLY", "SETUP", -1);
+        }
+        return review_parameters(selected, &profile, &request, approved);
     }
-    if (foc_virtual_calibration_start(&session, &profile, &request) != FOC_VIRTUAL_CAL_PENDING) {
-        return error("INVALID_PROFILE_OR_RUNTIME", "SETUP", session.status);
+    if (load_config != NULL) {
+        foc_virtual_cal_cli_timing_reset(
+            timing,
+            CAL_CLI_APPLY_STAGES | CAL_CLI_CAPTURE_STAGES | CAL_CLI_BOOTSTRAP_STAGES |
+                CAL_CLI_BIT(CAL_CLI_QUIESCENT) | CAL_CLI_BIT(CAL_CLI_LIVE_ADC) |
+                CAL_CLI_BIT(CAL_CLI_LIVE_ENCODER) | CAL_CLI_BIT(CAL_CLI_GAIN_CANDIDATE) |
+                CAL_CLI_BIT(CAL_CLI_FCAL_LOAD) | CAL_CLI_BIT(CAL_CLI_FCAL_SAVE)
+        );
+        const int status = foc_virtual_cal_cli_restore(
+            load_config,
+            &profile,
+            &request.identity,
+            approved,
+            diagnostic,
+            timing,
+            boot_scenario
+        );
+        if (known_boot && status == 0) {
+            printf(
+                "{\"event\":\"BOOTSTRAP_TRUSTED_REFERENCE\",\"status\":\"%s\","
+                "\"mechanical_scan_required\":false,\"electrical_drive\":false}\n",
+                approved == NULL ? "REFERENCE_REVIEW_REQUIRED" : "READY_WITH_TRUSTED_REFERENCE"
+            );
+        }
+        return status;
+    }
+    uint32_t boot_signature = 0U;
+    foc_virtual_cal_cli_timing_reset(
+        timing,
+        CAL_CLI_APPLY_STAGES | CAL_CLI_CAPTURE_STAGES | CAL_CLI_BOOTSTRAP_STAGES |
+            CAL_CLI_BIT(CAL_CLI_QUIESCENT) | CAL_CLI_BIT(CAL_CLI_GAIN_CANDIDATE) |
+            CAL_CLI_BIT(CAL_CLI_FCAL_SAVE) | CAL_CLI_BIT(CAL_CLI_FCAL_LOAD) |
+            (current_study_path != NULL ? CAL_CLI_BIT(CAL_CLI_CONTROL_DIAGNOSTIC) : 0U)
+    );
+    foc_virtual_cal_cli_timing_omit(
+        timing,
+        CAL_CLI_BIT(CAL_CLI_FCAL_LOAD) | (save_config == NULL ? CAL_CLI_BIT(CAL_CLI_FCAL_SAVE) : 0U),
+        CAL_CLI_SKIPPED
+    );
+    if (measured_boot) {
+        const int status = foc_virtual_cal_cli_bootstrap_timed(
+            bootstrap,
+            boot_scenario,
+            boot_trace,
+            &profile,
+            &request,
+            &boot_signature,
+            timing
+        );
+        if (status != 0 || strcmp(bootstrap, "inspect") == 0) {
+            return status;
+        }
+    }
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_QUIESCENT);
+    const int started = foc_virtual_calibration_start(&session, &profile, &request);
+    foc_virtual_cal_cli_timing_finish(
+        timing, CAL_CLI_QUIESCENT, started == FOC_VIRTUAL_CAL_PENDING, 0
+    );
+    if (started != FOC_VIRTUAL_CAL_PENDING) {
+        return foc_virtual_cal_cli_error("INVALID_PROFILE_OR_RUNTIME", "SETUP", session.status);
     }
     printf(
         "{\"event\":\"CALIBRATION_STARTED\",\"profile_id\":\"%s\",\"session\":%" PRIu32 "}\n",
@@ -1554,6 +2055,16 @@ int main(int argc, char *argv[])
         request.session
     );
     struct endpoint_trace trace = {0};
+    struct foc_flux_id_result flux_evidence;
+    const struct foc_virtual_flux_options flux_options = {
+        .rl_revision = request.session,
+        .poles_revision = request.session,
+        .current_revision = request.session,
+        .voltage_chain = 1U,
+        .angle_reference = measured_boot ? 402U : 1U,
+        .interval = flux_trace ? trace_flux_interval : NULL,
+        .argument = &trace,
+    };
     if (trace_path != NULL) {
 #if defined(_MSC_VER)
         (void)fopen_s(&trace.file, trace_path, "wbx");
@@ -1562,33 +2073,56 @@ int main(int argc, char *argv[])
 #endif
         if (trace.file == NULL) {
             foc_virtual_calibration_cancel(&session);
-            return error("TRACE_IO", "SETUP", -1);
+            return foc_virtual_cal_cli_error("TRACE_IO", "SETUP", -1);
         }
-        trace.failed =
-            fputs(
-                "axis,motor_setup_id,capture_id,sequence,aperture_us,begin_us,end_us,"
-                "current_a,terminal_v,voltage_source,voltage_valid,stationary,output_confirmed\n",
-                trace.file
-            ) < 0;
-        session.electrical.rl_endpoint = trace_rl;
-        session.electrical.rl_endpoint_argument = &trace;
+        trace.failed = flux_trace
+            ? fputs(
+                  "session,capture,motor,sequence,begin_us,end_us,voltage_begin_us,voltage_end_us,"
+                  "speed_begin_us,speed_end_us,rl_revision,poles_revision,current_revision,"
+                  "id_begin_a,iq_begin_a,id_end_a,iq_end_a,omega_e_rad_s,mean_vq_v,voltage_source,"
+                  "current_valid,voltage_valid,speed_valid,frame_confirmed,output_confirmed,"
+                  "terminal_voltage_witnessed,saturated\n",
+                  trace.file
+              ) < 0
+            : fputs(
+                  "axis,motor_setup_id,capture_id,sequence,aperture_us,begin_us,end_us,"
+                  "current_a,terminal_v,voltage_source,voltage_valid,stationary,output_confirmed\n",
+                  trace.file
+              ) < 0;
+        if (!flux_trace) {
+            session.electrical.rl_endpoint = trace_rl;
+            session.electrical.rl_endpoint_argument = &trace;
+        }
     }
     while (session.status == FOC_VIRTUAL_CAL_PENDING) {
         const char *stage = foc_virtual_calibration_stage_name(session.stage);
-        const int status = foc_virtual_calibration_poll(&session);
+        const enum foc_virtual_cal_cli_stage timed_stage =
+            (enum foc_virtual_cal_cli_stage)session.stage;
+        const uint32_t before = session.time_us;
+        foc_virtual_cal_cli_timing_start(timing, timed_stage);
+        const int status = measured_boot
+            ? foc_virtual_calibration_poll_referenced(&session, &flux_options, &flux_evidence)
+            : foc_virtual_calibration_poll_observed(
+                  &session,
+                  flux_trace ? &flux_options : NULL,
+                  &flux_evidence
+              );
+        foc_virtual_cal_cli_timing_finish(
+            timing, timed_stage, status >= 0 && !trace.failed, session.time_us - before
+        );
         if (status < 0 || trace.failed) {
             if (trace.file != NULL) {
                 fclose(trace.file);
             }
             if (trace.failed) {
                 foc_virtual_calibration_cancel(&session);
-                return error("TRACE_IO", stage, -1);
+                return foc_virtual_cal_cli_error("TRACE_IO", stage, -1);
             }
             const char *reason = status == FOC_VIRTUAL_CAL_ERR_REFERENCE ? "REFERENCE_REQUIRED"
                 : status == FOC_VIRTUAL_CAL_ERR_TIMEOUT                  ? "CALIBRATION_TIMEOUT"
                 : status == FOC_VIRTUAL_CAL_ERR_TERMINATED               ? "SESSION_TERMINATED"
                                                                          : "CAPTURE_FAILED";
-            return error(reason, stage, session.native_status);
+            return foc_virtual_cal_cli_error(reason, stage, session.native_status);
         }
         printf(
             "{\"event\":\"%s\",\"stage\":\"%s\",\"virtual_us\":%" PRIu32 "}\n",
@@ -1601,58 +2135,101 @@ int main(int argc, char *argv[])
                 fclose(trace.file);
             }
             foc_virtual_calibration_cancel(&session);
-            return error("CALIBRATION_CANCELLED", stage, session.status);
+            return foc_virtual_cal_cli_error("CALIBRATION_CANCELLED", stage, session.status);
         }
     }
     if (trace.file != NULL && fclose(trace.file) != 0) {
         foc_virtual_calibration_cancel(&session);
-        return error("TRACE_IO", "ELECTRICAL", -1);
+        return foc_virtual_cal_cli_error("TRACE_IO", "ELECTRICAL", -1);
     }
     if (cancel_after != NULL) {
         foc_virtual_calibration_cancel(&session);
-        return error("UNKNOWN_CANCEL_STAGE", "SETUP", -1);
+        return foc_virtual_cal_cli_error("UNKNOWN_CANCEL_STAGE", "SETUP", -1);
     }
-    struct foc_cal_application_tuning_policy policy = tuning;
+    struct foc_cal_application_tuning_policy policy = foc_virtual_cal_cli_tuning;
     struct foc_virtual_cogging_result cogging;
     if (use_cogging) {
-        cogging_fixture(&profile);
-        const int status = cogging_capture(&profile, &session, &cogging);
+        foc_virtual_cal_cli_cogging_fixture(&profile);
+        const int status = foc_virtual_cal_cli_cogging_capture(&profile, &session, &cogging);
         if (status != FOC_VIRTUAL_COGGING_OK) {
             foc_virtual_calibration_cancel(&session);
-            return error("COGGING_CAPTURE_OR_HOLDOUT_FAILED", "COGGING", status);
+            return foc_virtual_cal_cli_error(
+                "COGGING_CAPTURE_OR_HOLDOUT_FAILED",
+                "COGGING",
+                status
+            );
         }
         policy.cogging_lut = &cogging.lut;
         policy.cogging_iq_limit_a = 0.15f;
     }
+    if (!foc_virtual_flux_agrees(&session, &flux_evidence) ||
+        flux_evidence.identity.session != request.session) {
+        return foc_virtual_cal_cli_error("FLUX_EVIDENCE_MISMATCH", "REVIEW", -1);
+    }
+    foc_virtual_cal_cli_flux_preview(&flux_evidence);
     print_parameters(&session);
     puts("{\"event\":\"CALIBRATION_QUALIFIED\"}");
     struct foc_cal_application_candidate candidate;
     uint32_t review_id;
-    const int prepared = draft_candidate(&session, &policy, &candidate);
-    if (prepared != FOC_CAL_APPLICATION_PREPARED ||
-        foc_virtual_calibration_package_id(&session, &candidate, &review_id) !=
-            FOC_VIRTUAL_PACKAGE_OK) {
-        return error("GAIN_ADMISSION_FAILED", "REVIEW", prepared);
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_GAIN_CANDIDATE);
+    const int prepared = foc_virtual_cal_cli_draft(&session, &policy, &candidate);
+    const bool gain_candidate = prepared == FOC_CAL_APPLICATION_PREPARED &&
+        foc_virtual_calibration_package_id(&session, &candidate, &review_id) ==
+            FOC_VIRTUAL_PACKAGE_OK;
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_GAIN_CANDIDATE, gain_candidate, 0);
+    if (!gain_candidate) {
+        return foc_virtual_cal_cli_error("GAIN_ADMISSION_FAILED", "REVIEW", prepared);
     }
-    print_candidate(&candidate, review_id);
+    if (measured_boot) {
+        const uint32_t numerical_id = review_id;
+        review_id ^= boot_signature ^ foc_virtual_cal_cli_flux_signature(&flux_evidence);
+        printf(
+            "{\"event\":\"BOOTSTRAP_FINAL_REFERENCE\",\"quality\":\"QUALIFIED_OFFSET_CANDIDATE\","
+            "\"pole_pairs\":%u,\"encoder_direction\":%d,\"relative_direction\":%d,"
+            "\"offset_rad\":%.9g,\"offset_rms_rad\":%.9g,\"lut_holdout_rms_rad\":%.9g,"
+            "\"fcal_review_id\":\"%08" PRIx32 "\",\"review_id\":\"%08" PRIx32 "\"}\n",
+            (unsigned int)session.workflow.result.rotor.pole_pairs,
+            (int)session.workflow.result.snapshot.runtime_encoder_direction,
+            (int)session.workflow.result.rotor.direction,
+            (double)session.workflow.result.offset.electrical_offset_rad,
+            (double)session.workflow.result.offset.residual_rms_rad,
+            session.workflow.result.lut.holdout_rms_rad,
+            numerical_id,
+            review_id
+        );
+    }
+    foc_virtual_cal_cli_preview(&candidate, review_id);
     if (approved == NULL) {
         puts("{\"event\":\"REVIEW_REQUIRED\",\"configuration_applied\":false}");
         return 0;
     }
-    if (!review_matches(approved, review_id)) {
-        return error("REVIEW_ID_MISMATCH", "REVIEW", -1);
+    foc_virtual_cal_cli_timing_start(timing, CAL_CLI_REVIEW);
+    if (!foc_virtual_cal_cli_review_matches(approved, review_id)) {
+        foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_REVIEW, false, 0);
+        return foc_virtual_cal_cli_error("REVIEW_ID_MISMATCH", "REVIEW", -1);
     }
     if (foc_virtual_calibration_poll(&session) != FOC_VIRTUAL_CAL_OK ||
+        !foc_virtual_flux_agrees(&session, &flux_evidence) ||
         foc_cal_workflow_review(&session.workflow, request.session, &request.identity, true) != 0) {
-        return error("REVIEW_BINDING_REVOKED", "REVIEW", -1);
+        foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_REVIEW, false, 0);
+        return foc_virtual_cal_cli_error("REVIEW_BINDING_REVOKED", "REVIEW", -1);
     }
+    foc_virtual_cal_cli_timing_finish(timing, CAL_CLI_REVIEW, true, 0);
     printf("{\"event\":\"CANDIDATE_REVIEWED\",\"review_id\":\"%08" PRIx32 "\"}\n", review_id);
     struct calibrated_init init = {
         .application = &session.application,
         .policy = &policy,
         .candidate = &candidate,
     };
-    return run_control(&profile, &init, &session, save_config, current_study_path, startup_study);
+    return foc_virtual_cal_cli_verify(
+        &profile,
+        &init,
+        &session,
+        save_config,
+        current_study_path,
+        startup_study,
+        timing
+    );
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

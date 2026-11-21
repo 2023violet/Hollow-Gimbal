@@ -214,3 +214,89 @@ output permissions and physical calibration to their respective evidence.
 Runner start failure, timeout and malformed runner output have stable
 `HOST_RUNNER` diagnostics. FCAL, runtime control and UART V1 messages retain
 their existing formats.
+
+## Host parameter review and reuse
+
+`--stages rs` and `--stages jb` produce `PARAMETER_PREVIEW` with a review ID,
+source and capture. Repeat the command with `--approve-candidate <review-id>`
+to approve that result. These two modes report `runtime_applicable:false`.
+
+```powershell
+python -B $cli calibrate --simulator $exe --stages jb
+python -B $cli calibrate --simulator $exe --reuse-session --profile-id GENERIC_RESEARCH_MOTOR
+```
+
+The reuse session reads one command per line and flushes a JSON-lines response
+ending in `REUSE_COMMAND_RESULT`. Start with `capture`. Use the
+`REUSE_PREVIEW.review_id` in `review <review-id>`, then send `apply`. The
+`approve <review-id>` command performs both steps. Apply publishes a fresh
+Host Runtime after readback and closed-loop verification.
+
+| Command | Behavior |
+| --- | --- |
+| `plan same` | Show eligible records and their original source, session, capture and revision. |
+| `plan encoder`, `plan load`, `plan motor`, `plan adc` | Select a virtual device change and see which records require a new capture. |
+| `plan phase`, `plan home`, `plan offset`, `plan lut`, `plan kt`, `plan limits` | Inspect a wiring, coordinate, reference or policy change. |
+| `plan voltage`, `plan angle`, `plan torque`, `plan temperature` | Inspect an unsupported reference or operating point. `measure` returns `NEW_REFERENCE_REQUIRED`. |
+| `measure` | Capture the required stages and preview the composed configuration. |
+| `reject <review-id>` | Reject the current preview and revoke its application authorization. |
+| `invalidate <parameter>` | Revoke one record and any pending review. Use names from `REUSE_PARAMETER`. |
+| `stop`, `fault`, `recover` | Exercise software INHIBIT, command-timeout fault and restricted recovery. A pending review is revoked. |
+| `save <path>` | Exclusively create an FCAL v1 numerical package from a still-qualified applied configuration. |
+| `load <path>`, `load <path> <fcal-review-id>` | Inspect or verify a v1 package against the selected fixture, with its original explicit review. Dependencies remain process-local. |
+| `quit` | End the session. |
+
+The two profiles are virtual fixtures, including the zero-speed mechanical
+origin and their local motion-limit policy. A source change that requires
+external data cannot be fulfilled by those fixtures. FCAL v1 does not encode
+dependency provenance or local Runtime policy changes. Such policy changes can
+be reviewed and applied in memory, with FCAL export refused when local policy
+would change the configuration on reload. See the [acceptance evidence](../../docs/evidence/2026-11-20-next-cal-arch-02.md).
+
+## Host flux evidence
+
+The full calibration preview and the reuse session show one
+`FLUX_CANDIDATE` event with measured flux, derived Kt and Ke, signed fit
+residuals, applied-terminal source, revisions and electrical speed range.
+Use `--flux-trace` with a new path to export the accepted terminals and
+paired aperture data from a full Host capture.
+
+```powershell
+python -B $cli calibrate --simulator $exe --profile-id CALIBRATION_SALIENT_MOTOR --flux-trace salient-flux.csv
+```
+
+The reuse review binds the flux evidence to the composed configuration.
+FCAL v1 reload retains the numeric compatibility path. Direction quality,
+source and dependency metadata remain part of the Host capture or live
+reuse session. [FLUX-01 acceptance evidence](../../docs/evidence/2026-11-20-next-cal-flux-01.md)
+
+
+## Host commutation bootstrap
+
+Use `inspect` for prerequisite status, `known` with an identity-matched
+FCAL v1, `offset` with the selected fixture's declared pole count and encoder
+direction, or `unknown` to infer all three commutation parameters from
+observations. Offset and unknown require an open-circuit scan with enough
+shaft travel and terminal signal. The preview reports the coarse reference,
+the final post-LUT offset, and any rejected prerequisite or capture.
+
+```powershell
+python -B $cli calibrate --simulator $exe --bootstrap inspect
+python -B $cli calibrate --simulator $exe --bootstrap unknown --boot-trace bootstrap.csv
+python -B $cli calibrate --simulator $exe --bootstrap unknown --approve-candidate <review-id> --save-config motor.fcal
+python -B $cli calibrate --simulator $exe --bootstrap known --load-config motor.fcal
+python -B $cli calibrate --simulator $exe --bootstrap known --load-config motor.fcal --approve-candidate <fcal-review-id>
+python -B $cli calibrate --simulator $exe --reuse-session --bootstrap unknown
+```
+
+Use `CANDIDATE_PREVIEW.review_id` from the corresponding preview. A fresh
+bootstrap review binds the scan and measured Flux/Kt to the full candidate.
+FCAL v1 keeps its numerical fingerprint and requires its own review on reload.
+`--boot-trace` creates a new CSV with synchronized scan observations and
+identity. Use `--profile-id CALIBRATION_SALIENT_MOTOR` to select the other
+fixture. In reuse sessions `capture` uses the measured path, `plan same`
+and `measure` retain compatible records, and encoder changes invalidate
+the matched phase-dependent fit. The measured bootstrap modes use the
+non-cogging calibration lane.
+
+[Bootstrap acceptance and reproduction](../../docs/evidence/2026-11-20-next-cal-boot-01.md)

@@ -13,6 +13,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_virtual_motor.h"
+#include "foc_virtual_bootstrap_instrument.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -161,6 +162,12 @@ static double foc_virtual_wrap(double angle_rad)
         wrapped += FOC_VIRTUAL_TWO_PI;
     }
     return wrapped;
+}
+
+static bool foc_virtual_open_winding(const struct foc_virtual_motor *motor)
+{
+    return motor != NULL && motor->initialized && motor->state.id_a == 0.0 &&
+        motor->state.iq_a == 0.0 && motor->v_alpha_v == 0.0 && motor->v_beta_v == 0.0;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -422,6 +429,90 @@ int foc_virtual_motor_make_encoder_code(
         code = 0U;
     }
     *raw_code = (uint16_t)code;
+    return 0;
+}
+
+/* Private Host Instruments ----------------------------------------------------- */
+
+int foc_virtual_motor_step_open_circuit(
+    struct foc_virtual_motor *motor,
+    double target_rad_s,
+    double torque_limit_nm,
+    double dt_s
+)
+{
+    if (!foc_virtual_open_winding(motor) || !isfinite(target_rad_s) || !isfinite(torque_limit_nm) ||
+        torque_limit_nm < 0.0 || !isfinite(dt_s) || dt_s <= 0.0 || dt_s > 0.001) {
+        return -1;
+    }
+    const double position = motor->state.mechanical_position_rad;
+    const double speed = motor->state.mechanical_velocity_rad_s;
+    const double drive_torque =
+        fmax(-torque_limit_nm, fmin(torque_limit_nm, 0.4 * (target_rad_s - speed)));
+    const double net_torque = drive_torque - foc_virtual_load(motor, position) +
+        foc_virtual_cogging(motor, position) - motor->params.damping_nm_s * speed;
+    /* An existing imposed-speed fixture takes precedence. Bootstrap always
+     * uses the bounded drive and admits only an initially stationary shaft. */
+    const double next_speed =
+        motor->fixture_active ? speed : speed + dt_s * net_torque / motor->params.inertia_kg_m2;
+    const double next_position = position + 0.5 * dt_s * (speed + next_speed);
+    if (!isfinite(next_speed) || !isfinite(next_position)) {
+        return -1;
+    }
+    motor->state.mechanical_velocity_rad_s = next_speed;
+    motor->state.mechanical_position_rad = next_position;
+    return 0;
+}
+
+int foc_virtual_motor_measure_shaft(
+    const struct foc_virtual_motor *motor,
+    struct foc_virtual_bootstrap_shaft *shaft
+)
+{
+    if (motor == NULL || !motor->initialized || shaft == NULL) {
+        return -1;
+    }
+    const double radians_per_count = FOC_VIRTUAL_TWO_PI / 262144.0;
+    const double position = foc_virtual_wrap(motor->state.mechanical_position_rad);
+    const double speed = round(motor->state.mechanical_velocity_rad_s * 1000.0) / 1000.0;
+    const double torque_nm = round(foc_virtual_motor_torque(motor, &motor->state) * 1.0e6) / 1.0e6;
+    const double load_nm =
+        round(foc_virtual_load(motor, motor->state.mechanical_position_rad) * 1.0e6) / 1.0e6;
+    if (!isfinite(position) || !isfinite(speed) || !isfinite(torque_nm) || !isfinite(load_nm)) {
+        return -1;
+    }
+    *shaft = (struct foc_virtual_bootstrap_shaft){
+        .position_rad = foc_virtual_wrap(round(position / radians_per_count) * radians_per_count),
+        .speed_rad_s = speed,
+        .equivalent_torque_nm = torque_nm,
+        .load_nm = load_nm,
+        .zero_current = hypot(motor->state.id_a, motor->state.iq_a) < 1.0e-6,
+    };
+    return 0;
+}
+
+int foc_virtual_motor_measure_open_circuit(
+    const struct foc_virtual_motor *motor,
+    double *emf_alpha_v,
+    double *emf_beta_v
+)
+{
+    if (!foc_virtual_open_winding(motor) || emf_alpha_v == NULL || emf_beta_v == NULL) {
+        return -1;
+    }
+    const double pole_pairs = motor->params.pole_pairs;
+    const double position = foc_virtual_wrap(motor->state.mechanical_position_rad);
+    const double theta = pole_pairs * position + motor->params.electrical_offset_rad;
+    const double amplitude =
+        pole_pairs * motor->state.mechanical_velocity_rad_s * motor->params.psi_f_wb;
+    /* With i_d = i_q = 0, terminal voltage is d(psi_f [cos(theta), sin(theta)])/dt. */
+    const double alpha = round(-sin(theta) * amplitude * 1.0e6) / 1.0e6;
+    const double beta = round(cos(theta) * amplitude * 1.0e6) / 1.0e6;
+    if (!isfinite(alpha) || !isfinite(beta)) {
+        return -1;
+    }
+    *emf_alpha_v = alpha;
+    *emf_beta_v = beta;
     return 0;
 }
 

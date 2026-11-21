@@ -290,6 +290,13 @@ and retains the original 0.039 N*m overload failure.
 
 The top-level Simulation build provides `falconfoc-virtual-calibrate` for
 [the calibrate CLI](../tools/falconfoc-cli/README.md#host-motor-calibration-and-foc).
+The same executable supports independent Rs/J/B review and a Foreground session
+for reviewing and reusing historical virtual measurements. See
+[Host parameter review and reuse](../tools/falconfoc-cli/README.md#host-parameter-review-and-reuse).
+The virtual fixture submits observed terminal intervals to the portable C11
+flux estimator. The application previews measured Flux and derived Kt/Ke
+alongside the existing candidate. See [Host flux evidence](../tools/falconfoc-cli/README.md#host-flux-evidence)
+for the CSV export and evidence boundaries.
 It drives a dedicated, bounded calibration fixture and then verifies the
 approved values in new production Runtime and Encoder instances. The model
 supports an imposed virtual reference-fixture shaft speed, standstill and an
@@ -353,3 +360,24 @@ The signed Salient 2.20 A sustained steps retain their V1 failures. See the
 The Python calibration entry adds `--startup-trace`, `--capabilities` and
 read-only Current and torque reachability queries against reviewed FCAL v1
 data. See the [Host workflow](../tools/falconfoc-cli/README.md#host-capability-and-reachability-diagnostics).
+
+
+## Host commutation bootstrap
+
+The `--bootstrap offset` and `--bootstrap unknown` paths use a dedicated
+open-circuit capture. A torque-limited external drive moves the virtual shaft
+in four alternating legs. The runner reads raw encoder counts, an independent
+signed shaft tachometer, and modeled floating-terminal alpha/beta voltage at
+the same aperture. The original Runtime remains inhibited and the scan uses a
+separate Plant copy. Insufficient motion, weak voltage, conflicting fits and
+loss of inhibition stop the capture.
+
+The bootstrap fitter passes qualified observations to the existing Rotor
+estimator. A fresh shaft-angle LUT and fresh terminal measurements feed the
+existing fine Rotor and Offset stages. The final count-based reference feeds
+R/L, Flux/Kt and J/B. The default historical calibration fixture still uses
+an ideal simulated angle instrument for reproducibility. It is a separate
+compatibility path from measured bootstrap. The open-circuit mechanism
+represents a virtual external drive and measurement chain.
+
+[CLI commands](../tools/falconfoc-cli/README.md#host-commutation-bootstrap) · [Acceptance evidence](../docs/evidence/2026-11-20-next-cal-boot-01.md)

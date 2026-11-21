@@ -13,7 +13,8 @@
 
 /* Includes --------------------------------------------------------------------- */
 
-#include "foc_virtual_calibration_electrical.h"
+#include "foc_virtual_calibration_reference.h"
+#include "foc_virtual_calibration_trial.h"
 
 #include <math.h>
 
@@ -28,14 +29,6 @@
 #define FRAME_TOLERANCE_RAD       0.01
 #define FLUX_VD                   0.15
 #define FLUX_VQ                   0.12
-
-/* Private Types ---------------------------------------------------------------- */
-
-struct flux_fit {
-    double speed2;
-    double voltage2;
-    double voltage_speed;
-};
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -68,15 +61,20 @@ static bool current_at_aperture(
     uint32_t sequence,
     uint32_t aperture_us,
     double angle_rad,
-    struct foc_vector_dq *current
+    struct foc_vector_dq *current,
+    const struct foc_virtual_phase_source *reference
 )
 {
     struct foc_device_adc_raw raw;
     struct foc_device_measurement measured;
     struct foc_vector_alpha_beta current_ab;
+    const struct foc_virtual_cal_trial *trial = reference != NULL ? reference->trial : NULL;
+    const struct foc_device_adc_config sensed = trial != NULL
+        ? foc_virtual_cal_trial_adc(&config->sensor_adc, trial->seed, aperture_us)
+        : config->sensor_adc;
     return foc_virtual_motor_make_adc(
                motor,
-               &config->sensor_adc,
+               &sensed,
                config->vbus_v,
                sequence,
                aperture_us,
@@ -172,80 +170,91 @@ static bool capture_available(const struct foc_cal_workflow_bundle *bundle, uint
     return true;
 }
 
-static enum foc_calibration_failure fit_flux(
-    const struct flux_fit fits[2],
-    struct foc_virtual_cal_flux_result *result,
-    uint16_t pole_pairs
-)
-{
-    const double windows = 4.0 * (double)FLUX_WINDOWS_PER_SPEED;
-    const double speed2 = fits[0].speed2 + fits[1].speed2;
-    result->omega_e_rms_rad_s = sqrt(speed2 / windows);
-    if (fits[0].speed2 <= 0.0 || fits[1].speed2 <= 0.0 || result->omega_e_rms_rad_s < 5.0) {
-        return FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE;
-    }
-    const double dot = fits[0].voltage_speed + fits[1].voltage_speed;
-    const double flux_wb = dot / speed2;
-    const double energy = fits[0].voltage2 + fits[1].voltage2;
-    result->residual_rms_v = sqrt(fmax(0.0, energy - flux_wb * dot) / windows);
-    if (!isfinite(flux_wb) || !isfinite(result->residual_rms_v)) {
-        return FOC_CALIBRATION_FAILURE_NUMERIC;
-    }
-    if (flux_wb < 0.001 || flux_wb > 0.2) {
-        return FOC_CALIBRATION_FAILURE_RANGE;
-    }
-    if (result->residual_rms_v > 0.02 ||
-        fabs(fits[0].voltage_speed / fits[0].speed2 - fits[1].voltage_speed / fits[1].speed2) >
-            0.05 * flux_wb) {
-        return FOC_CALIBRATION_FAILURE_RESIDUAL;
-    }
-    result->flux_wb = (float)flux_wb;
-    result->ke_phase_peak_v_per_mechanical_rad_s = (float)((double)pole_pairs * flux_wb);
-    result->kt_nm_per_peak_q_amp = (float)(1.5 * (double)pole_pairs * flux_wb);
-    return FOC_CALIBRATION_FAILURE_NONE;
-}
-
 static enum foc_calibration_failure collect_flux(
     struct foc_virtual_motor *motor,
     const struct foc_virtual_cal_electrical_config *config,
     const struct foc_cal_workflow_bundle *bundle,
-    struct foc_virtual_cal_flux_result *result
+    struct foc_virtual_cal_flux_result *result,
+    const struct foc_virtual_flux_options *options,
+    struct foc_flux_id_result *evidence,
+    const struct foc_virtual_phase_source *reference
 )
 {
-    const struct foc_motor_rl_model *rl = &bundle->electrical_model;
+    const uint32_t session = bundle->request.session;
     const uint16_t pole_pairs = bundle->rotor.pole_pairs;
     const uint32_t full_scale = bundle->request.identity.acquisition.adc_full_scale_counts;
+    const struct foc_flux_id_config policy = {
+        .identity =
+            {
+                .session = session,
+                .capture = result->capture,
+                .motor = bundle->request.identity.motor_setup_id,
+                .dq_frame = options != NULL ? options->angle_reference : 1U,
+                .current_chain = options != NULL ? options->current_revision : session,
+                .voltage_chain = options != NULL ? options->voltage_chain : 1U,
+                .speed_chain = options != NULL ? options->angle_reference : 1U,
+                .clock = 1U,
+                .rl_revision = options != NULL ? options->rl_revision : session,
+                .poles_revision = options != NULL ? options->poles_revision : session,
+                .phase_order = bundle->request.identity.acquisition.phase_order,
+                .pole_pairs = pole_pairs,
+            },
+        .rl = bundle->electrical_model,
+        .rl_qualified = true,
+        .source = FOC_MOTOR_ID_VIRTUAL,
+        .voltage_source = FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL,
+        .interval_us = INTERVAL_US,
+        .intervals_per_window = FLUX_INTERVALS_PER_WINDOW,
+        .min_windows_per_direction = 2U * FLUX_WINDOWS_PER_SPEED,
+        .max_abs_current_a = config->max_current_a,
+        .max_abs_vq_v = config->vbus_v * 0.57,
+        .max_abs_speed_rad_s = 100.0,
+        .min_abs_window_speed_rad_s = 1.0,
+        .min_speed_span_rad_s = 1.0,
+        .min_speed_rms_rad_s = 5.0,
+        .min_flux_wb = 0.001,
+        .max_flux_wb = 0.2,
+        .max_residual_rms_v = 0.02,
+        .max_direction_difference_relative = 0.05,
+    };
+    struct foc_flux_id estimator;
+    const enum foc_calibration_failure initialized = foc_flux_id_init(&estimator, &policy);
+    if (initialized != FOC_CALIBRATION_FAILURE_NONE) {
+        return initialized;
+    }
     struct foc_virtual_motor_observation prior;
     struct foc_vector_dq previous;
-    if (foc_virtual_motor_observe(motor, &prior) != 0 ||
-        !current_at_aperture(
-            motor,
-            config,
-            full_scale,
-            0U,
-            result->first_us,
-            prior.electrical_position_rad,
-            &previous
-        )) {
+    double theta = 0.0;
+    double shaft_speed = 0.0;
+    if (foc_virtual_motor_observe(motor, &prior) != 0) {
+        return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
+    }
+    if (reference == NULL) {
+        theta = prior.electrical_position_rad;
+    } else if (!reference
+                    ->read(reference->argument, motor, result->first_us, &theta, &shaft_speed)) {
+        return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
+    }
+    if (!current_at_aperture(motor, config, full_scale, 0U, result->first_us, theta, &previous,
+                            reference)) {
         return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
     }
     result->samples = 1U;
     result->last_us = result->first_us;
 
-    struct flux_fit fits[2] = {0};
     static const double speed_levels[] = {1.0, -1.0, 2.0, -2.0};
+    const double direction = reference != NULL && reference->trial != NULL &&
+            reference->trial->reverse_first ? -1.0 : 1.0;
     for (unsigned int speed_index = 0U; speed_index < 4U; ++speed_index) {
         const double fixture_speed =
-            config->flux_electrical_speed_rad_s * speed_levels[speed_index] / (double)pole_pairs;
+            direction * config->flux_electrical_speed_rad_s * speed_levels[speed_index] /
+            (double)pole_pairs;
         if (foc_virtual_motor_set_fixture_speed(motor, fixture_speed) != 0) {
             return FOC_CALIBRATION_FAILURE_PRECONDITION;
         }
 
         for (uint32_t window = 0U; window < FLUX_WINDOWS_PER_SPEED; ++window) {
-            const double q_start = previous.q;
             const double excitation_vq = (window % 2U == 0U ? FLUX_VQ : -FLUX_VQ);
-            double voltage_sum = 0.0;
-            double speed_sum = 0.0;
             for (uint32_t interval = 0U; interval < FLUX_INTERVALS_PER_WINDOW; ++interval) {
                 struct foc_virtual_motor_observation end;
                 struct foc_vector_dq current;
@@ -253,52 +262,98 @@ static enum foc_calibration_failure collect_flux(
                 if (config->permit != NULL && !config->permit(config->permit_argument, time)) {
                     return FOC_CALIBRATION_FAILURE_PRECONDITION;
                 }
-                if (excite(motor, FLUX_VD, excitation_vq, prior.electrical_position_rad) != 0 ||
-                    foc_virtual_motor_observe(motor, &end) != 0 || !end.fixture_active ||
-                    !current_at_aperture(
+                if (excite(motor, FLUX_VD, excitation_vq, theta) != 0 ||
+                    foc_virtual_motor_observe(motor, &end) != 0 || !end.fixture_active) {
+                    return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
+                }
+                double next_theta;
+                if (reference == NULL) {
+                    next_theta = end.electrical_position_rad;
+                    shaft_speed = end.mechanical_velocity_rad_s;
+                } else {
+                    double encoder_theta;
+                    if (!reference->read(
+                            reference->argument,
+                            motor,
+                            time,
+                            &encoder_theta,
+                            &shaft_speed
+                        )) {
+                        return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
+                    }
+                    /* A 50 us interval is shorter than the encoder aperture step
+                     * at some speeds. Run the independently witnessed speed clock
+                     * and require an encoder-backed phase check at every aperture. */
+                    next_theta = theta + pole_pairs * shaft_speed * INTERVAL_S;
+                    if (fabs(remainder(encoder_theta - next_theta, TWO_PI)) > 0.008) {
+                        return FOC_CALIBRATION_FAILURE_PRECONDITION;
+                    }
+                }
+                const double omega_e = pole_pairs * shaft_speed;
+                if (fabs((next_theta - theta) - omega_e * INTERVAL_S) > 1e-7 ||
+                    omega_e * fixture_speed <= 0.0) {
+                    return FOC_CALIBRATION_FAILURE_PRECONDITION;
+                }
+                if (!current_at_aperture(
                         motor,
                         config,
                         full_scale,
                         result->samples,
                         time,
-                        end.electrical_position_rad,
-                        &current
+                        next_theta,
+                        &current,
+                        reference
                     )) {
                     return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
                 }
-                const double angle_step =
-                    end.electrical_position_rad - prior.electrical_position_rad;
-                const double omega_e = pole_pairs * end.mechanical_velocity_rad_s;
-                if (fabs(angle_step - omega_e * INTERVAL_S) > 1e-7 ||
-                    omega_e * fixture_speed <= 0.0) {
-                    return FOC_CALIBRATION_FAILURE_PRECONDITION;
-                }
-
-                /* The applied alpha/beta terminal voltage is held. Its q component
-                 * rotates with the observed aperture angles. Integrate the q-axis
-                 * equation over a full window to avoid differentiating ADC noise. */
                 const double vq = 0.5 *
-                    (terminal_voltage(&end, prior.electrical_position_rad, FOC_MOTOR_ID_Q) +
-                     terminal_voltage(&end, end.electrical_position_rad, FOC_MOTOR_ID_Q));
-                const double iq = 0.5 * ((double)previous.q + current.q);
-                const double id = 0.5 * ((double)previous.d + current.d);
-                voltage_sum += vq - rl->rs_ohm * iq - omega_e * rl->ld_h * id;
-                speed_sum += omega_e;
+                    (terminal_voltage(&end, theta, FOC_MOTOR_ID_Q) +
+                     terminal_voltage(&end, next_theta, FOC_MOTOR_ID_Q));
+                const struct foc_flux_id_interval sample = {
+                    .identity = policy.identity,
+                    .source = policy.source,
+                    .voltage_source = policy.voltage_source,
+                    .sequence = result->samples,
+                    .begin_us = result->last_us,
+                    .end_us = time,
+                    .voltage_begin_us = result->last_us,
+                    .voltage_end_us = time,
+                    .speed_begin_us = result->last_us,
+                    .speed_end_us = time,
+                    .id_begin_a = previous.d,
+                    .iq_begin_a = previous.q,
+                    .id_end_a = current.d,
+                    .iq_end_a = current.q,
+                    .mean_omega_e_rad_s = omega_e,
+                    .mean_vq_v = vq,
+                    .current_valid = true,
+                    .voltage_valid = true,
+                    .speed_valid = true,
+                    .frame_confirmed = true,
+                    .output_confirmed = true,
+                    .terminal_voltage_witnessed = true,
+                };
+                const enum foc_calibration_failure status = foc_flux_id_push(&estimator, &sample);
+                if (status != FOC_CALIBRATION_FAILURE_NONE) {
+                    return foc_flux_id_finish(&estimator, evidence);
+                }
+                if (options != NULL && options->interval != NULL) {
+                    options->interval(options->argument, &sample);
+                }
                 previous = current;
-                prior = end;
+                theta = next_theta;
                 result->last_us = time;
                 ++result->samples;
             }
-            const double n = FLUX_INTERVALS_PER_WINDOW;
-            const double emf = (voltage_sum - rl->lq_h * (previous.q - q_start) / INTERVAL_S) / n;
-            const double speed = speed_sum / n;
-            struct flux_fit *fit = &fits[speed_index % 2U];
-            fit->speed2 += speed * speed;
-            fit->voltage2 += emf * emf;
-            fit->voltage_speed += emf * speed;
         }
     }
-    return fit_flux(fits, result, pole_pairs);
+    const enum foc_calibration_failure status = foc_flux_id_finish(&estimator, evidence);
+    result->residual_rms_v = evidence->residual_rms_v;
+    result->omega_e_rms_rad_s = evidence->omega_e_rms_rad_s;
+    result->flux_wb = evidence->flux_wb;
+    result->ke_phase_peak_v_per_mechanical_rad_s = evidence->ke_phase_peak_v_per_mechanical_rad_s;
+    result->kt_nm_per_peak_q_amp = evidence->kt_nm_per_peak_q_amp;
+    return status;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -324,14 +379,15 @@ struct foc_virtual_cal_electrical_config foc_virtual_cal_electrical_default_conf
     };
 }
 
-int foc_virtual_calibrate_rl_axis(
+int foc_virtual_calibrate_rl_observed(
     struct foc_cal_workflow *workflow,
     struct foc_virtual_motor *motor,
     const struct foc_virtual_cal_electrical_config *config,
     enum foc_motor_id_axis axis,
     uint32_t capture,
     uint32_t first_us,
-    double aligned_electrical_rad
+    double aligned_electrical_rad,
+    const struct foc_virtual_phase_source *reference
 )
 {
     const struct foc_cal_workflow_bundle *bundle = foc_cal_workflow_result(workflow);
@@ -345,10 +401,22 @@ int foc_virtual_calibrate_rl_axis(
     struct foc_virtual_motor_observation origin;
     if (foc_virtual_motor_observe(&trial, &origin) != 0 || origin.fixture_active ||
         origin.mechanical_velocity_rad_s != 0.0 ||
-        fabs(remainder(origin.electrical_position_rad - aligned_electrical_rad, TWO_PI)) >
-            FRAME_TOLERANCE_RAD ||
+        (reference == NULL &&
+         fabs(remainder(origin.electrical_position_rad - aligned_electrical_rad, TWO_PI)) >
+             FRAME_TOLERANCE_RAD) ||
         foc_virtual_motor_set_fixture_speed(&trial, 0.0) != 0) {
         return FOC_CAL_WORKFLOW_ERR_QUALITY;
+    }
+    if (reference != NULL) {
+        double measured_theta;
+        double measured_speed;
+        if (!reference
+                 ->read(reference->argument, &trial, first_us, &measured_theta, &measured_speed) ||
+            fabs(measured_speed) > 1e-6 ||
+            fabs(remainder(measured_theta - aligned_electrical_rad, TWO_PI)) >
+                FRAME_TOLERANCE_RAD) {
+            return FOC_CAL_WORKFLOW_ERR_QUALITY;
+        }
     }
     const struct foc_cal_workflow_stage_request stage = {
         .stage = FOC_CAL_WORKFLOW_ELECTRICAL,
@@ -389,7 +457,8 @@ int foc_virtual_calibrate_rl_axis(
             index,
             time,
             aligned_electrical_rad,
-            &current
+            &current,
+            reference
         );
         const struct foc_cal_workflow_sample sample = {
             .session = bundle->request.session,
@@ -437,15 +506,45 @@ int foc_virtual_calibrate_rl_axis(
     return status;
 }
 
-int foc_virtual_calibrate_flux(
+int foc_virtual_calibrate_rl_axis(
+    struct foc_cal_workflow *workflow,
+    struct foc_virtual_motor *motor,
+    const struct foc_virtual_cal_electrical_config *config,
+    enum foc_motor_id_axis axis,
+    uint32_t capture,
+    uint32_t first_us,
+    double aligned_electrical_rad
+)
+{
+    return foc_virtual_calibrate_rl_observed(
+        workflow,
+        motor,
+        config,
+        axis,
+        capture,
+        first_us,
+        aligned_electrical_rad,
+        NULL
+    );
+}
+
+int foc_virtual_calibrate_flux_referenced(
     struct foc_virtual_motor *motor,
     const struct foc_virtual_cal_electrical_config *config,
     const struct foc_cal_workflow_bundle *bundle,
     uint32_t capture,
     uint32_t first_us,
-    struct foc_virtual_cal_flux_result *result
+    struct foc_virtual_cal_flux_result *result,
+    const struct foc_virtual_flux_options *options,
+    struct foc_flux_id_result *evidence,
+    const struct foc_virtual_phase_source *reference
 )
 {
+    struct foc_flux_id_result local;
+    if (evidence == NULL) {
+        evidence = &local;
+    }
+    *evidence = (struct foc_flux_id_result){.state = FOC_CALIBRATION_STATE_INVALID};
     if (result == NULL) {
         return FOC_CAL_WORKFLOW_ERR_INPUT;
     }
@@ -455,21 +554,39 @@ int foc_virtual_calibrate_flux(
         !isfinite(config->flux_electrical_speed_rad_s) ||
         config->flux_electrical_speed_rad_s < 4.0f || config->flux_electrical_speed_rad_s > 50.0f) {
         result->failure = FOC_CALIBRATION_FAILURE_INVALID_CONFIG;
+        evidence->failure = result->failure;
         return FOC_CAL_WORKFLOW_ERR_INPUT;
     }
     const uint32_t required = FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ELECTRICAL) |
         FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_ROTOR);
     if (!bundle->request.require_dual_axis || (bundle->passed & required) != required ||
+        bundle->state == FOC_CAL_WORKFLOW_CANCELLED || bundle->state == FOC_CAL_WORKFLOW_REJECTED ||
         !bundle->rotor.identifiable || bundle->rotor.pole_pairs == 0U ||
         bundle->stages[FOC_CAL_WORKFLOW_ELECTRICAL].source !=
             FOC_CAL_WORKFLOW_HOST_VIRTUAL_MEASUREMENT) {
         result->failure = FOC_CALIBRATION_FAILURE_PRECONDITION;
+        evidence->failure = result->failure;
+        return FOC_CAL_WORKFLOW_ERR_DEPENDENCY;
+    }
+    struct foc_motor_rl_model model;
+    if (foc_motor_id_make_model(
+            &bundle->electrical,
+            &bundle->electrical_q,
+            bundle->request.max_rs_relative_difference,
+            &model
+        ) != FOC_MOTOR_ID_OK ||
+        model.rs_ohm != bundle->electrical_model.rs_ohm ||
+        model.ld_h != bundle->electrical_model.ld_h ||
+        model.lq_h != bundle->electrical_model.lq_h) {
+        result->failure = FOC_CALIBRATION_FAILURE_CONFIG_MISMATCH;
+        evidence->failure = result->failure;
         return FOC_CAL_WORKFLOW_ERR_DEPENDENCY;
     }
     if (!capture_available(bundle, capture) ||
         !later_than(first_us, bundle->electrical_q_capture.last_us) ||
         !later_than(first_us, bundle->stages[FOC_CAL_WORKFLOW_ROTOR].primary.last_us)) {
         result->failure = FOC_CALIBRATION_FAILURE_TIME_ORDER;
+        evidence->failure = result->failure;
         return FOC_CAL_WORKFLOW_ERR_ORDER;
     }
     struct foc_virtual_motor trial = *motor;
@@ -477,13 +594,19 @@ int foc_virtual_calibrate_flux(
     if (foc_virtual_motor_observe(&trial, &initial) != 0 || initial.fixture_active ||
         initial.mechanical_velocity_rad_s != 0.0) {
         result->failure = FOC_CALIBRATION_FAILURE_PRECONDITION;
+        evidence->failure = result->failure;
         return FOC_CAL_WORKFLOW_ERR_QUALITY;
     }
-    result->failure = collect_flux(&trial, config, bundle, result);
+    result->failure = collect_flux(&trial, config, bundle, result, options, evidence, reference);
     if (result->failure != FOC_CALIBRATION_FAILURE_NONE) {
+        evidence->failure = result->failure;
         return FOC_CAL_WORKFLOW_ERR_QUALITY;
     }
     if (!stop_fixture(&trial)) {
+        *evidence = (struct foc_flux_id_result){
+            .state = FOC_CALIBRATION_STATE_INVALID,
+            .failure = FOC_CALIBRATION_FAILURE_NUMERIC,
+        };
         *result = (struct foc_virtual_cal_flux_result){
             .capture = capture,
             .first_us = first_us,
@@ -503,6 +626,51 @@ int foc_virtual_calibrate_flux(
     };
     *motor = trial;
     return FOC_CAL_WORKFLOW_OK;
+}
+
+int foc_virtual_calibrate_flux_observed(
+    struct foc_virtual_motor *motor,
+    const struct foc_virtual_cal_electrical_config *config,
+    const struct foc_cal_workflow_bundle *bundle,
+    uint32_t capture,
+    uint32_t first_us,
+    struct foc_virtual_cal_flux_result *result,
+    const struct foc_virtual_flux_options *options,
+    struct foc_flux_id_result *evidence
+)
+{
+    return foc_virtual_calibrate_flux_referenced(
+        motor,
+        config,
+        bundle,
+        capture,
+        first_us,
+        result,
+        options,
+        evidence,
+        NULL
+    );
+}
+
+int foc_virtual_calibrate_flux(
+    struct foc_virtual_motor *motor,
+    const struct foc_virtual_cal_electrical_config *config,
+    const struct foc_cal_workflow_bundle *bundle,
+    uint32_t capture,
+    uint32_t first_us,
+    struct foc_virtual_cal_flux_result *result
+)
+{
+    return foc_virtual_calibrate_flux_observed(
+        motor,
+        config,
+        bundle,
+        capture,
+        first_us,
+        result,
+        NULL,
+        NULL
+    );
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -4,8 +4,8 @@
  * @version v0.1.0
  * @date    2026.11.20
  *
- * Design overview
- * ---------------
+ * Implementation role
+ * -------------------
  * At fixed speed and Id, voltage is affine in Iq. Intersect its all-angle
  * circle with the current vector and optional torque bounds.
  *
@@ -30,14 +30,14 @@
 #include <math.h>
 #include <stddef.h>
 
-/* Private Functions ------------------------------------------------------------ */
+/* Private Helpers -------------------------------------------------------------- */
 
 static bool model_valid(const struct foc_pmsm_qualified_model *model)
 {
-    return model != NULL && model->qualified && model->motor_id != 0U &&
-        model->pole_pairs != 0U && isfinite(model->rs_ohm) && model->rs_ohm > 0.0f &&
-        isfinite(model->ld_h) && model->ld_h > 0.0f && isfinite(model->lq_h) &&
-        model->lq_h > 0.0f && isfinite(model->flux_wb) && model->flux_wb > 0.0f;
+    return model != NULL && model->qualified && model->motor_id != 0U && model->pole_pairs != 0U &&
+        isfinite(model->rs_ohm) && model->rs_ohm > 0.0f && isfinite(model->ld_h) &&
+        model->ld_h > 0.0f && isfinite(model->lq_h) && model->lq_h > 0.0f &&
+        isfinite(model->flux_wb) && model->flux_wb > 0.0f;
 }
 
 static bool input_valid(
@@ -122,7 +122,8 @@ enum foc_pmsm_reachability_verdict foc_pmsm_reachability_evaluate(
 
     const double id = point->id_a;
     const double pole_pairs = model->pole_pairs;
-    const double kt = 1.5 * pole_pairs * (model->flux_wb + ((double)model->ld_h - model->lq_h) * id);
+    const double kt =
+        1.5 * pole_pairs * (model->flux_wb + ((double)model->ld_h - model->lq_h) * id);
     result->torque_per_q_amp = kt;
     if (point->kind == FOC_PMSM_TARGET_TORQUE && kt == 0.0) {
         result->reasons = FOC_PMSM_REASON_TORQUE_UNDEFINED;
@@ -157,8 +158,7 @@ enum foc_pmsm_reachability_verdict foc_pmsm_reachability_evaluate(
      * determined by the narrower side of an asymmetric duty window. */
     const double inv_sqrt3 = 0.57735026918962576451;
     const double dc_bus = point->vbus_v;
-    const double duty_span =
-        2.0 * fmin(0.5 - limits->pwm.duty_min, limits->pwm.duty_max - 0.5);
+    const double duty_span = 2.0 * fmin(0.5 - limits->pwm.duty_min, limits->pwm.duty_max - 0.5);
     const double core_cap = fmin(limits->pwm.voltage_limit_v, dc_bus * inv_sqrt3);
     result->all_angle_limit_v = fmin(core_cap, dc_bus * duty_span * inv_sqrt3);
     result->best_angle_limit_v = fmin(core_cap, dc_bus * duty_span * (2.0 / 3.0));

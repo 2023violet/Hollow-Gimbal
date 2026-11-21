@@ -327,6 +327,50 @@ static int explicit_host_adapter_must_confirm_fresh_inhibit(void)
     return 0;
 }
 
+struct interrupted_output {
+    struct foc_runtime *original;
+    uint32_t fault;
+};
+
+static bool interrupt_initial_inhibit(void *argument, const struct foc_device_pwm_request *output)
+{
+    struct interrupted_output *context = argument;
+    foc_runtime_request_inhibit(context->original, context->fault);
+    return output->action == FOC_DEVICE_OUTPUT_INHIBIT;
+}
+
+static int initial_inhibit_after_review_can_revoke_application(void)
+{
+    for (unsigned int scenario = 0U; scenario < 2U; ++scenario) {
+        struct fixture fixture = {0};
+        CHECK(fixture_start(&fixture, &request, false) == 0);
+        CHECK(fixture_review(&fixture, 1) == 0);
+        struct interrupted_output trigger = {
+            .original = &fixture.original,
+            .fault = scenario == 0U ? 0U : FOC_SAFE_FAULT_FATAL_RESET_REQUIRED,
+        };
+        const struct foc_cal_application_output output = {interrupt_initial_inhibit, &trigger};
+        struct foc_runtime destination = {0};
+        struct foc_cal_application_sensor sensor = {0};
+        struct foc_runtime_snapshot view;
+        CHECK(
+            foc_cal_application_apply_with_output(
+                &fixture.application,
+                NULL,
+                NULL,
+                &output,
+                &destination,
+                &sensor,
+                20U
+            ) == (scenario == 0U ? FOC_CAL_APPLICATION_ERR_INHIBIT : FOC_CAL_APPLICATION_ERR_FAULT)
+        );
+        CHECK(!destination.initialized && !sensor.encoder.initialized && fixture.submissions == 1U);
+        CHECK(foc_runtime_read_snapshot(&fixture.original, &view) == FOC_RUNTIME_OK);
+        CHECK(view.inhibit_pending && view.faults == trigger.fault);
+    }
+    return 0;
+}
+
 static int reviewed_dual_axis_and_outer_gains_reach_runtime(void)
 {
     struct foc_cal_workflow_request setup = request;
@@ -685,6 +729,7 @@ int main(void)
 {
     return rejects_observer_hook_without_calling_it() || explicit_apply_retains_safety() ||
         explicit_host_adapter_must_confirm_fresh_inhibit() ||
+        initial_inhibit_after_review_can_revoke_application() ||
         reviewed_dual_axis_and_outer_gains_reach_runtime() ||
         installed_lut_survives_workflow_restart() || rejected_apply_preserves_destinations();
 }

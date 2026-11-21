@@ -120,7 +120,8 @@ static int lifecycle(void)
         out->stages[FOC_CAL_WORKFLOW_ADC].primary.first_us >
             out->stages[FOC_CAL_WORKFLOW_ADC].primary.last_us
     );
-    CHECK(foc_cal_workflow_review(&first, 1U, &identity, true) == FOC_CAL_WORKFLOW_ERR_REVIEW);
+    CHECK(foc_cal_workflow_review(&first, 1U, &identity, true) == FOC_CAL_WORKFLOW_OK);
+    CHECK(out->reviewed && !out->applicable && !out->snapshot.accepted);
     CHECK(foc_cal_workflow_result(&second)->stages[FOC_CAL_WORKFLOW_ADC].primary.samples == 0U);
     CHECK(foc_cal_workflow_cancel(&second) == FOC_CAL_WORKFLOW_OK);
     CHECK(foc_cal_workflow_result(&second)->state == FOC_CAL_WORKFLOW_CANCELLED);
@@ -320,6 +321,21 @@ static int model_dependency(void)
     CHECK(
         result->complete && !result->applicable && result->tuning.valid &&
         result->mechanical.usable && fabsf(result->mechanical.inertia_kg_m2 - 0.002f) < 1e-6f
+    );
+    ++selected.session;
+    selected.stages = FOC_CAL_WORKFLOW_STAGE_BIT(FOC_CAL_WORKFLOW_MECHANICAL);
+    capture.policy.mechanical.torque_constant_nm_per_a = 0.0f;
+    CHECK(foc_cal_workflow_start(&workflow, &selected) == FOC_CAL_WORKFLOW_OK);
+    CHECK(foc_cal_workflow_open(&workflow, &capture) == FOC_CAL_WORKFLOW_OK);
+    CHECK(mechanical_samples(&workflow, selected.session, true) == 0);
+    CHECK(foc_cal_workflow_finish_stage(&workflow) == FOC_CAL_WORKFLOW_OK);
+    CHECK(foc_cal_workflow_finish(&workflow) == FOC_CAL_WORKFLOW_OK);
+    CHECK(
+        foc_cal_workflow_review(&workflow, selected.session, &identity, true) == FOC_CAL_WORKFLOW_OK
+    );
+    CHECK(
+        result->reviewed && result->mechanical.usable && !result->kt.qualified &&
+        !result->applicable && !result->snapshot.accepted
     );
     puts("WORKFLOW J/B jitter, unidentifiable fit, unknown load, qualified Kt and K/D PASS");
     return 0;
@@ -585,6 +601,11 @@ static int dual_axis_gate(void)
     CHECK(capture_electrical(&workflow, &q, 0.6f, 0.0018f) == FOC_CAL_WORKFLOW_OK);
     CHECK(result->passed == mask && result->electrical.axis == FOC_MOTOR_ID_Q);
     CHECK(!result->electrical_q.usable && result->electrical_q_capture.id == 0U);
+    CHECK(foc_cal_workflow_finish(&workflow) == FOC_CAL_WORKFLOW_OK);
+    CHECK(
+        foc_cal_workflow_review(&workflow, selected.session, &identity, true) == FOC_CAL_WORKFLOW_OK
+    );
+    CHECK(result->reviewed && !result->applicable && !result->snapshot.accepted);
     return 0;
 }
 

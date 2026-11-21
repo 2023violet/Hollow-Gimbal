@@ -148,16 +148,22 @@ add_test(NAME test-foc-virtual-cogging COMMAND test-foc-virtual-cogging)
 if(PROJECT_IS_TOP_LEVEL)
   add_subdirectory(../control_plane control_plane EXCLUDE_FROM_ALL)
   add_library(
-    falconfoc-virtual-calibration STATIC src/foc_virtual_calibration.c
-                                         src/foc_virtual_calibration_electrical.c
+    falconfoc-virtual-calibration STATIC
+    src/foc_virtual_calibration.c src/foc_virtual_calibration_electrical.c
+    src/foc_virtual_bootstrap_capture.c
   )
   target_link_libraries(
     falconfoc-virtual-calibration PUBLIC falconfoc-virtual-motor falconfoc-calibration-application
   )
   add_executable(
-    falconfoc-virtual-calibrate src/falconfoc_virtual_calibrate.c
-                                src/foc_virtual_calibration_package.c
-                                ../core/src/foc_pmsm_reachability.c
+    falconfoc-virtual-calibrate
+    src/falconfoc_virtual_calibrate.c
+    src/falconfoc_virtual_calibrate_bootstrap.c
+    src/falconfoc_virtual_calibrate_reuse.c
+    src/falconfoc_virtual_calibrate_timing.c
+    src/foc_virtual_calibration_package.c
+    src/foc_virtual_calibration_reuse.c
+    ../core/src/foc_pmsm_reachability.c
   )
   target_link_libraries(falconfoc-virtual-calibrate PRIVATE falconfoc-virtual-calibration)
   target_include_directories(falconfoc-virtual-calibrate PRIVATE ../components/utils/crc)
@@ -173,13 +179,53 @@ if(PROJECT_IS_TOP_LEVEL)
   add_executable(test-foc-virtual-calibration-session tests/test_foc_virtual_calibration_session.c)
   target_link_libraries(test-foc-virtual-calibration-session PRIVATE falconfoc-virtual-calibration)
   add_test(NAME test-foc-virtual-calibration-session COMMAND test-foc-virtual-calibration-session)
+  add_executable(test-foc-virtual-bootstrap-capture tests/test_foc_virtual_bootstrap_capture.c)
+  target_include_directories(test-foc-virtual-bootstrap-capture PRIVATE src)
+  target_link_libraries(test-foc-virtual-bootstrap-capture PRIVATE falconfoc-virtual-calibration)
+  add_test(NAME test-foc-virtual-bootstrap-capture COMMAND test-foc-virtual-bootstrap-capture)
+  add_executable(
+    test-foc-virtual-calibration-reuse tests/test_foc_virtual_calibration_reuse.c
+                                       src/foc_virtual_calibration_reuse.c
+  )
+  target_include_directories(test-foc-virtual-calibration-reuse PRIVATE src)
+  add_test(NAME test-foc-virtual-calibration-reuse COMMAND test-foc-virtual-calibration-reuse)
+  add_executable(
+    test-foc-virtual-calibration-robustness tests/test_foc_virtual_calibration_robustness.c
+  )
+  target_include_directories(test-foc-virtual-calibration-robustness PRIVATE src)
+  target_link_libraries(test-foc-virtual-calibration-robustness PRIVATE falconfoc-virtual-calibration)
+  add_test(NAME test-foc-virtual-calibration-robustness
+           COMMAND test-foc-virtual-calibration-robustness
+  )
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME test-foc-virtual-calibration-product-cli
+      COMMAND
+        "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_virtual_calibration_product_cli.py"
+        $<TARGET_FILE:falconfoc-virtual-calibrate>
+    )
+    set_tests_properties(test-foc-virtual-calibration-product-cli PROPERTIES TIMEOUT 150)
+    add_test(
+      NAME test-foc-virtual-bootstrap-cli
+      COMMAND
+        "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_virtual_bootstrap_cli.py"
+        $<TARGET_FILE:falconfoc-virtual-calibrate>
+    )
     add_test(
       NAME test-foc-virtual-calibration-cli
       COMMAND
         "${Python3_EXECUTABLE}" -B
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_virtual_calibration_cli.py"
+        $<TARGET_FILE:falconfoc-virtual-calibrate>
+    )
+    add_test(
+      NAME test-foc-virtual-calibration-reuse-cli
+      COMMAND
+        "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_virtual_calibration_reuse_cli.py"
         $<TARGET_FILE:falconfoc-virtual-calibrate>
     )
   endif()

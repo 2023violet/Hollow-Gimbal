@@ -740,24 +740,58 @@ def run_virtual_demo(
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
+    product_mode = args.calibration_mode
+    if product_mode:
+        if any((args.bootstrap, args.reuse_session, args.stages, args.cogging, args.capabilities,
+                args.reachability, args.reachability_torque)):
+            parser.error("--calibration-mode selects one workflow; remove other workflow options")
+        if (product_mode == "quick") != bool(args.load_config):
+            parser.error("--calibration-mode quick requires --load-config; full and selective use measurements")
+        args.reuse_session = product_mode == "selective"
+        args.bootstrap = "known" if product_mode == "quick" else "unknown"
     if args.load_config and (args.save_config or args.cancel_after or args.cogging
-                             or args.trace or args.startup_trace):
+                             or args.trace or args.flux_trace or args.startup_trace):
         parser.error("--load-config cannot be combined with --save-config or capture options")
     if args.save_config and not args.approve_candidate:
         parser.error("--save-config requires --approve-candidate")
     reports = [pathlib.Path(path).resolve() for path in
-               (args.json, args.save_config, args.load_config, args.trace, args.startup_trace) if path]
+               (args.json, args.save_config, args.load_config, args.trace, args.flux_trace, args.boot_trace,
+                args.startup_trace) if path]
     if len(reports) != len(set(reports)):
         parser.error("report and configuration paths must be distinct")
     command = [str(pathlib.Path(args.simulator).resolve()), "--profile-id", args.profile_id]
+    if product_mode:
+        command.append("--product-timing")
+    if args.reuse_session:
+        if any((args.json, args.approve_candidate, args.save_config, args.load_config,
+                args.cancel_after, args.trace, args.flux_trace, args.startup_trace, args.capabilities,
+                args.reachability, args.reachability_torque, args.stages,
+                args.boot_scenario, args.boot_trace)):
+            parser.error("Selective calibration takes commands on stdin; pass capture and review options as commands")
+        command.append("--reuse-session")
+        if args.bootstrap:
+            command.extend(("--bootstrap", args.bootstrap))
+        if args.cogging:
+            command.append("--cogging")
+        try:
+            return subprocess.run(command, check=False).returncode
+        except OSError:
+            print(json.dumps({"error": "SIMULATOR_START_FAILED", "stage": "HOST_RUNNER"}))
+            return 2
     if args.approve_candidate:
         command.extend(("--approve-candidate", args.approve_candidate))
     if args.cogging:
         command.append("--cogging")
     if args.capabilities:
         command.append("--capabilities")
+    if args.stages:
+        command.extend(("--stages", args.stages))
+    if args.bootstrap:
+        command.extend(("--bootstrap", args.bootstrap))
     for key, value in (("--save-config", args.save_config), ("--load-config", args.load_config),
                        ("--cancel-after", args.cancel_after), ("--trace", args.trace),
+                       ("--flux-trace", args.flux_trace),
+                       ("--boot-scenario", args.boot_scenario), ("--boot-trace", args.boot_trace),
                        ("--cq-startup-csv", args.startup_trace)):
         if value is not None:
             command.extend((key, value))
@@ -767,6 +801,8 @@ def calibrate_host(args, parser):
             command.extend((option, *point))
     stderr = ""
     try:
+        if product_mode and not args.json:
+            return subprocess.run(command, timeout=60, check=False).returncode
         process = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
         stderr = process.stderr
     except OSError:
@@ -851,8 +887,23 @@ def main():
     parser.add_argument("--load-config", help="Restore an approved Host calibration package")
     parser.add_argument("--cancel-after", help="Cancel a virtual calibration after the named stage")
     parser.add_argument("--cogging", action="store_true", help="Capture and apply a virtual cogging LUT")
-    parser.add_argument("--trace", help="Export the d/q terminal voltage and ADC aperture CSV")
+    trace = parser.add_mutually_exclusive_group()
+    trace.add_argument("--trace", help="Export the d/q R/L terminal voltage and ADC aperture CSV")
+    trace.add_argument("--flux-trace", help="Export the accepted flux terminal intervals as a CSV")
     parser.add_argument("--startup-trace", help="Export the approved Host Current Startup V1 CSV")
+    parser.add_argument("--stages", choices=("rs", "jb"), help="Review a single parameter group")
+    parser.add_argument("--calibration-mode", choices=("quick", "full", "selective"),
+                        help="Run a Host product calibration workflow with live stage timing")
+    parser.add_argument("--bootstrap", choices=("inspect", "known", "offset", "unknown"),
+                        help="Qualify or acquire an initial Host electrical reference")
+    parser.add_argument("--boot-scenario", choices=("nominal", "load", "partial", "stalled", "encoder",
+                                                    "current-limit", "phase", "direction", "weak-emf",
+                                                    "stop", "fault", "timeout", "cancel",
+                                                    "identity-change", "output-reject"),
+                        help="Select a Host-only bootstrap failure fixture")
+    parser.add_argument("--boot-trace", help="Export the synchronized Host bootstrap apertures")
+    parser.add_argument("--reuse-session", action="store_true",
+                        help="Run a Host reuse session with commands from stdin")
     diagnostic = parser.add_mutually_exclusive_group()
     diagnostic.add_argument("--capabilities", action="store_true", help="Inspect Host calibration capabilities")
     diagnostic.add_argument("--reachability", nargs=4, metavar=("MECH_RAD_S", "ID_A", "IQ_A", "VBUS_V"),
@@ -862,7 +913,9 @@ def main():
                             help="Evaluate a steady Impedance torque point from --load-config")
     args = parser.parse_args()
     if args.action != "calibrate" and any(
-        (args.capabilities, args.reachability, args.reachability_torque, args.startup_trace)
+        (args.capabilities, args.reachability, args.reachability_torque, args.startup_trace,
+         args.flux_trace, args.calibration_mode,
+         args.stages, args.reuse_session, args.bootstrap, args.boot_scenario, args.boot_trace)
     ):
         parser.error("Host calibration diagnostic options require calibrate")
     try:

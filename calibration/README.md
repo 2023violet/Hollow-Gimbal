@@ -113,6 +113,42 @@ duty constraints and control schedule. The bounds define design policy for
 the ideal model. Apply candidates explicitly to an offline configuration and
 validate the closed-loop response before using them in another context.
 
+## Magnet flux and derived Kt
+
+`foc_flux_id.h` is a standalone C11 estimator for adjacent current apertures
+and co-timed interval averages of actual terminal Vq and electrical speed.
+The caller supplies a qualified R/L model, pole pairs, current/voltage/speed
+chain identities, valid d/q frame, common clock and dependency revisions.
+One interval has an exact declared duration. Samples are contiguous, with
+matching shared current endpoints and 32-bit modular time. The capture must
+span less than half the clock range. An interval needs confirmed effective
+output, a terminal-voltage witness and unsaturated observations.
+
+The estimator accepts model terminal voltage for virtual data, independently
+sensed terminal voltage for measured data and independently validated
+terminal reconstruction for measured data. The latter needs a calibration
+and uncertainty basis for the same interval. Qualification flags and chain
+IDs identify the caller's evidence. Physical accuracy still depends on that
+evidence.
+
+For each same-sign window, the estimator averages Vq − Rs·Iq − ωe·Ld·Id
+and subtracts Lq·ΔIq/T using the paired current endpoints. It fits the
+remaining voltage to mean ωe through the origin and reports separate positive
+and negative fits, residual, agreement, windows and signed operating speed.
+Current endpoints are integrated with the trapezoidal rule. The interval
+average of speed times the Id midpoint requires adequate resolution of the
+ωe·Id product. The default Host fixture uses 50 µs intervals and signed
+10/20 electrical rad/s levels.
+
+The project uses peak phase currents and amplitude-invariant Clarke/Park.
+Flux is in Wb. With p pole pairs, Ke = p·flux is open-circuit phase-to-neutral
+peak V per mechanical rad/s. Kt = 1.5·p·flux is N·m per peak q ampere at Id=0.
+Nonzero Id in a salient motor adds the torque term
+1.5·p·(Ld−Lq)·Id·Iq. The estimator labels its outputs
+`FLUX_FROM_MEASUREMENT` and `KT_DERIVED_FROM_FLUX`. Independent torque
+calibration has its own source, `KT_FROM_INDEPENDENT_TORQUE`.
+[Measurement and acceptance evidence](../docs/evidence/2026-11-20-next-cal-flux-01.md)
+
 ## Equivalent mechanical inertia and viscous damping
 
 Include `foc_mechanical_id.h` and link `falconfoc-calibration`. Initialize a

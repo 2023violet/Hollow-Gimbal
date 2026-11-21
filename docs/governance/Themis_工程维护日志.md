@@ -3094,3 +3094,24 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - Host 增加 Current Startup V1 全生命周期观测及固定评价。速度前馈与首次目标补偿完成同条件对照，保留已审核的 130 Hz 和 48 Hz。Salient 大阶跃、历史 Current、近转矩点和超载保留对应失败。
 - 复验近转矩点滑移、限幅与撤载，完成版本化控制品质验收定义。软件专项收口，锁定 ARM 镜像逐字节相同，物理标定与目标 WCET 待验。 [验收报告](../evidence/2026-11-20-next-cq-03.md)
+
+## 2026-11-20 · NEXT-PRODUCT-02 软件产品成熟度
+
+- Core 增加可重定位的 C11 静态包与外部消费例。复用公开 Runtime 和 Sensor API 验证独立控制使用链，Host CLI 增加经校验 FCAL 的稳态电压、电流和转矩可达域。
+- 归档真实调用链、Host 成本和 ARM 静态证据。保留锁定镜像和历史品质裁决，识别 ADC 最晚触发与 H0 预算的组合风险。目标时序、物理标定与 WCET 待验。 [验收报告](../evidence/2026-11-20-next-product-02.md)
+
+## 2026-11-20 · NEXT-CAL-ARCH-02 校准参数复用
+
+- 工作流支持 Rs 与 J/B 分项审核，完整应用继续依赖换相准入。Host 按设备、来源和依赖版本选择重测，组合候选进入现有 Calibration Application，并在首个 INHIBIT 回调复核原实例的 STOP/FAULT 状态。
+- 复用历史保留于 Host 进程，数值配置继续兼容 FCAL v1。虚拟电机闭环、应用拒绝证据和板端锁定边界见 [验收报告](../evidence/2026-11-20-next-cal-arch-02.md)。
+
+## 2026-11-20 · NEXT-CAL-FLUX-01 磁链与 Kt
+
+- 把 Host 原端电压积分和正反向拟合提取为通用 C11 `foc_flux_id`。测量契约区分实际端电压、独立验证的重构电压和普通软件请求。Host 预览与复用审核保留符号、来源和依赖修订。
+- 两套虚拟电机复验既有拟合和 FOC 结果，并验证已审核 Kt 下的双向超载限制。FCAL v1 和锁定板级镜像保持兼容。 [验收报告](../evidence/2026-11-20-next-cal-flux-01.md)
+
+
+## 2026-11-20 · NEXT-CAL-BOOT-01 未知电机初始化
+
+- 新增 C11 初始化资格和粗参考辨识。Host 在软件输出抑制期间，通过独立虚拟机械驱动、同步原始编码器码、有符号轴速与开路端电压获得磁轴参考，再复用 Rotor、LUT 和 Offset 估计器。
+- 细化电角进入 R/L、Flux/Kt、J/B 与显式审核后的 Runtime。复用按 LUT 和 Offset 依赖传播失效，FCAL v1 沿用原数值审核。锁定 ARM 复建镜像与基线相同。 [验收报告](../evidence/2026-11-20-next-cal-boot-01.md)

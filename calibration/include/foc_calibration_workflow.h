@@ -24,7 +24,8 @@
  * ------------------
  * A failed stage cannot be retried with another capture in the same session.
  * An identity change revokes the entire candidate. A new session discards all
- * previous accumulation. Only a complete, reviewed result can be applied.
+ * previous accumulation. Review accepts complete selected measurements.
+ * Runtime application additionally requires an admitted commutation snapshot.
  */
 
 #pragma once
@@ -239,7 +240,7 @@ struct foc_cal_workflow_bundle {
     bool complete;
     /** Complete with an admitted ADC/rotor/offset snapshot. */
     bool applicable;
-    /** An explicit review accepted the same session and setup. */
+    /** An explicit review accepted the same session and setup, including partial profiles. */
     bool reviewed;
 };
 

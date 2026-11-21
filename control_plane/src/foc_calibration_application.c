@@ -144,9 +144,11 @@ static bool outer_tuning(
         mechanical->capture_id != bundle->stages[FOC_CAL_WORKFLOW_MECHANICAL].primary.id ||
         !bundle->kt.qualified || bundle->kt.capture == 0U ||
         bundle->kt.capture == mechanical->capture_id || bundle->kt.torque_model_id == 0U ||
-        bundle->kt.torque_model_id != mechanical->torque_model_id ||
-        bundle->kt.nm_per_a != mechanical->torque_constant_nm_per_a || !motion->impedance.enabled ||
-        !impedance->valid || impedance->model_id != mechanical->torque_model_id ||
+        (mechanical->torque_source != FOC_MECHANICAL_ID_TORQUE_EQUIVALENT &&
+         (bundle->kt.torque_model_id != mechanical->torque_model_id ||
+          bundle->kt.nm_per_a != mechanical->torque_constant_nm_per_a)) ||
+        !motion->impedance.enabled || !impedance->valid ||
+        impedance->model_id != mechanical->torque_model_id ||
         !isfinite(impedance->stiffness_nm_per_rad) || impedance->stiffness_nm_per_rad <= 0.0f ||
         impedance->stiffness_nm_per_rad > motion->impedance.max_stiffness_nm_per_rad ||
         !isfinite(impedance->damping_nm_s_per_rad) || impedance->damping_nm_s_per_rad < 0.0f ||
@@ -494,6 +496,24 @@ static int initialize_candidate(
     return FOC_CAL_APPLICATION_APPLIED;
 }
 
+struct application_initial_output {
+    const struct foc_cal_application *application;
+    const struct foc_cal_application_output *output;
+    int status;
+};
+
+static bool confirm_initial_output(void *argument, const struct foc_device_pwm_request *request)
+{
+    struct application_initial_output *guard = argument;
+    guard->status = check_original(guard->application);
+    if (guard->status != FOC_CAL_APPLICATION_OK) {
+        return false;
+    }
+    const bool confirmed = guard->output->submit(guard->output->argument, request);
+    guard->status = check_original(guard->application);
+    return confirmed && guard->status == FOC_CAL_APPLICATION_OK;
+}
+
 static int apply(
     const struct foc_cal_application *application,
     const struct foc_cal_application_tuning_policy *policy,
@@ -523,15 +543,26 @@ static int apply(
     if (approved_gains != NULL && !gains_match(&candidate.gains, approved_gains)) {
         return FOC_CAL_APPLICATION_ERR_REVIEW;
     }
-    return initialize_candidate(
+    struct application_initial_output guard = {application, output, FOC_CAL_APPLICATION_OK};
+    const struct foc_cal_application_output guarded = {confirm_initial_output, &guard};
+    const int initialized = initialize_candidate(
         &candidate,
         application->identity.encoder_id,
         candidate.has_lut ? &lut : NULL,
-        output,
+        output != NULL ? &guarded : NULL,
         destination,
         sensor,
         now_us
     );
+    if (guard.status != FOC_CAL_APPLICATION_OK) {
+        return guard.status;
+    }
+    if (initialized == FOC_CAL_APPLICATION_APPLIED && output != NULL) {
+        /* Only the first INHIBIT uses the temporary guard. */
+        destination->pipeline.output_submit = output->submit;
+        destination->pipeline.output_arg = output->argument;
+    }
+    return initialized;
 }
 
 /* Public Functions ------------------------------------------------------------- */

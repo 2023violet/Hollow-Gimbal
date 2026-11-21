@@ -75,3 +75,8 @@ The optional `falconfoc-calibration-application` target binds reviewed
 calibration to a captured Host Runtime. It prepares detached configuration
 and explicitly initializes separate Runtime and encoder instances. See the
 [workflow and application contract](../calibration/WORKFLOW.md).
+
+An explicit Host output adapter receives an initial INHIBIT while the old
+Runtime is still the bound owner. The application checks that binding before
+and after the callback. A newly requested STOP or FAULT revokes the operation
+before the destination Runtime or Encoder is initialized.

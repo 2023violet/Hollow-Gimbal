@@ -47,6 +47,17 @@ def verify(events, truth):
     assert measured["rotor_pole_pairs"] == 4
     assert measured["lut_holdout_rms_rad"] < 0.001
     applied = event(events, "CONFIGURATION_APPLIED")
+    fit = event(events, "FLUX_CANDIDATE")
+    assert fit["flux_origin"] == "FLUX_FROM_MEASUREMENT"
+    assert fit["kt_origin"] == "KT_DERIVED_FROM_FLUX"
+    assert fit["voltage_source"] == "VIRTUAL_TERMINAL"
+    assert fit["windows"] == [8, 8] and fit["intervals"] == 512
+    near(fit["ke_phase_peak_v_per_mechanical_rad_s"], fit["pole_pairs"] * fit["flux_wb"], 1e-7)
+    near(applied["kt"], fit["kt_nm_per_peak_q_amp"], 1e-7)
+    limited = [row for row in events if row.get("event") == "CALIBRATED_TORQUE_LIMIT_VERIFIED"]
+    assert len(limited) == 2 and limited[0]["iq_ref_a"] < 0 < limited[1]["iq_ref_a"]
+    assert all(abs(row["iq_ref_a"]) <= row["cap_a"] + 1e-6 and row["stop_confirmed"]
+               for row in limited)
     assert applied["adc"] == [2090.0, 2030.0, 2024.0]
     assert applied["lut_nodes"] == 32
     assert event(events, "CANDIDATE_PREVIEW")["damping_filter_hz"] == 48
@@ -137,7 +148,24 @@ def main():
         )
         assert wrong_runner.returncode == 2
         assert json.loads(wrong_runner.stdout)["error"] == "SIMULATOR_PROTOCOL_ERROR"
-        preview = run("--cogging")
+        flux_trace = root / "flux.csv"
+        preview = run("--cogging", "--flux-trace", flux_trace)
+        with flux_trace.open(newline="", encoding="ascii") as file:
+            flux_rows = list(csv.DictReader(file))
+        assert len(flux_rows) == 512
+        signs = set()
+        for index, row in enumerate(flux_rows):
+            assert int(row["sequence"]) == index + 1
+            assert int(row["end_us"]) - int(row["begin_us"]) == 50
+            assert row["voltage_begin_us"] == row["speed_begin_us"] == row["begin_us"]
+            assert row["voltage_end_us"] == row["speed_end_us"] == row["end_us"]
+            assert row["terminal_voltage_witnessed"] == row["output_confirmed"] == "1"
+            assert row["saturated"] == "0"
+            signs.add(float(row["omega_e_rad_s"]))
+        assert signs == {10.0, -10.0, 20.0, -20.0}
+        cancelled = run("--cancel-after", "FLUX", status=2)
+        error(cancelled, "CALIBRATION_CANCELLED")
+        assert not any(row.get("event") == "FLUX_CANDIDATE" for row in cancelled)
         reviewed = event(preview, "CANDIDATE_PREVIEW")["review_id"]
         approval = ("--approve-candidate", reviewed)
         event(preview, "REVIEW_REQUIRED")

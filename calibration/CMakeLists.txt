@@ -21,8 +21,12 @@ if(NOT TARGET falconfoc-encoder)
 endif()
 
 add_library(
-  falconfoc-calibration STATIC src/foc_calibration.c src/foc_motor_id.c
-                               src/foc_encoder_calibration.c src/foc_mechanical_id.c
+  falconfoc-calibration STATIC
+  src/foc_calibration.c
+  src/foc_motor_id.c
+  src/foc_flux_id.c
+  src/foc_encoder_calibration.c
+  src/foc_mechanical_id.c
 )
 target_link_libraries(falconfoc-calibration PUBLIC falconfoc-encoder)
 target_include_directories(falconfoc-calibration PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -43,6 +47,10 @@ add_executable(test-foc-motor-id tests/test_foc_motor_id.c)
 target_link_libraries(test-foc-motor-id PRIVATE falconfoc-calibration)
 add_test(NAME test-foc-motor-id COMMAND test-foc-motor-id)
 
+add_executable(test-foc-flux-id tests/test_foc_flux_id.c)
+target_link_libraries(test-foc-flux-id PRIVATE falconfoc-calibration)
+add_test(NAME test-foc-flux-id COMMAND test-foc-flux-id)
+
 add_executable(test-foc-encoder-calibration tests/test_foc_encoder_calibration.c)
 target_link_libraries(test-foc-encoder-calibration PRIVATE falconfoc-calibration)
 add_test(NAME test-foc-encoder-calibration COMMAND test-foc-encoder-calibration)
@@ -52,8 +60,8 @@ target_link_libraries(test-foc-mechanical-id PRIVATE falconfoc-calibration)
 add_test(NAME test-foc-mechanical-id COMMAND test-foc-mechanical-id)
 
 add_library(
-  falconfoc-calibration-workflow STATIC EXCLUDE_FROM_ALL src/foc_calibration_workflow.c
-                                                         ../core/src/foc_impedance_tuning.c
+  falconfoc-calibration-workflow STATIC EXCLUDE_FROM_ALL
+  src/foc_calibration_workflow.c src/foc_bootstrap.c ../core/src/foc_impedance_tuning.c
 )
 target_include_directories(falconfoc-calibration-workflow PUBLIC ../core/include)
 target_link_libraries(falconfoc-calibration-workflow PUBLIC falconfoc-calibration)
@@ -68,6 +76,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(PROJECT_IS_TOP_LEVEL)
+  add_executable(test-foc-bootstrap tests/test_foc_bootstrap.c)
+  target_link_libraries(test-foc-bootstrap PRIVATE falconfoc-calibration-workflow)
+  add_test(NAME test-foc-bootstrap COMMAND test-foc-bootstrap)
+
   add_executable(test-foc-calibration-workflow tests/test_foc_calibration_workflow.c)
   target_link_libraries(test-foc-calibration-workflow PRIVATE falconfoc-calibration-workflow)
   add_test(NAME test-foc-calibration-workflow COMMAND test-foc-calibration-workflow)

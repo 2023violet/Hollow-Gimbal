@@ -796,8 +796,10 @@ int foc_cal_workflow_tune(
         return FOC_CAL_WORKFLOW_ERR_DATA_REQUIRED;
     }
     if (!foc_cal_workflow_identity_matches(&bundle->request.identity, &kt->identity) ||
-        kt->torque_model_id != bundle->mechanical.torque_model_id ||
-        kt->nm_per_a != bundle->mechanical.torque_constant_nm_per_a) {
+        kt->torque_model_id == 0U ||
+        (bundle->mechanical.torque_source != FOC_MECHANICAL_ID_TORQUE_EQUIVALENT &&
+         (kt->torque_model_id != bundle->mechanical.torque_model_id ||
+          kt->nm_per_a != bundle->mechanical.torque_constant_nm_per_a))) {
         return reject_identity(workflow, FOC_CAL_WORKFLOW_TUNING);
     }
     if (capture_used(bundle, kt->capture)) {
@@ -896,7 +898,7 @@ int foc_cal_workflow_review(
         return FOC_CAL_WORKFLOW_ERR_INPUT;
     }
     struct foc_cal_workflow_bundle *bundle = &workflow->result;
-    if (bundle->state != FOC_CAL_WORKFLOW_COMPLETED || !bundle->applicable) {
+    if (bundle->state != FOC_CAL_WORKFLOW_COMPLETED || !bundle->complete) {
         return FOC_CAL_WORKFLOW_ERR_REVIEW;
     }
     if (session != bundle->request.session) {

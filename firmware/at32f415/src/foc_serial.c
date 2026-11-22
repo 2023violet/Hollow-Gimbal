@@ -852,7 +852,19 @@ foc_serial_calibrate_read(const struct foc_serial *serial, struct foc_protocol_f
     for (unsigned int index = 0U; index < sizeof electrical / sizeof electrical[0]; ++index) {
         foc_protocol_write_u32(body + 39 + 4U * index, foc_serial_float_bits(electrical[index]));
     }
-    response->length = 71;
+    body[71] = view.committed_stages;
+    body[72] = view.result_bits;
+    body[73] = view.active_source;
+    body[74] = view.ring_high_water;
+    foc_protocol_write_u16(body + 75, view.active_pole_pairs);
+    foc_protocol_write_u32(body + 77, foc_serial_float_bits(view.active_electrical_offset_rad));
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        foc_protocol_write_u32(
+            body + 81 + 4U * index,
+            foc_serial_float_bits(view.active_adc_offset_count[index])
+        );
+    }
+    response->length = 93;
     return FOC_PROTO_OK;
 }
 

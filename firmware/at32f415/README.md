@@ -302,6 +302,24 @@ first probes its drive voltage. Readback ID 51 reports the restore.
 `sil-demo --sil-scenario calibrate-persist` calibrates the hidden plant, saves,
 power-cycles, runs velocity without recalibrating, reruns CAL-3/4/5 and erases.
 
+### M3-R calibration correctness
+
+A source audit of M0–M3 found calibration paths that ended FAILED with CAL-1/2
+already applied, left the Runtime in CALIBRATION mode, or read back zeros
+after a boot restore. The run now commits in two named phases (rotor at APPLY,
+electrical at TUNE); a failure after SET_MODE CALIBRATION passes through RESTORE
+to CURRENT mode first; CALIBRATE_READ grows to 93 bytes with the committed
+phases, the results present, the active source (boot / run / storage), the ring
+high-water mark and the active Runtime pole pairs, offset and ADC zero. CAL-1
+refuses a zero noisier than 4 counts rms before driving. The CAL-2 sweep runs at
+half an electrical turn per second: at one turn per second the reversal rang
+on high-Rs motors (back-EMF damping falls with Rs) and CAL-2 admission failed
+from about 1 Ω. The SIL gains `--adc-noise <counts rms>`, and
+`sil-demo --sil-scenario calibrate-faults` covers the refused noisy zero, CAL-3
+failing after CAL-1/2 (save and restore of the committed phase), and an abort
+in CAL-3 followed by Host control. Motor identity is still the boot
+configuration (see the protocol README).
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

@@ -105,6 +105,14 @@ struct foc_serial_calibration_view {
     float kp_d_v_per_a;
     float kp_q_v_per_a;
     float ki_v_per_a_s;
+    /* M3-R: what the latest run committed and what is active now. */
+    uint8_t committed_stages;
+    uint8_t result_bits;
+    uint8_t active_source;
+    uint8_t ring_high_water;
+    uint16_t active_pole_pairs;
+    float active_electrical_offset_rad;
+    float active_adc_offset_count[3];
 };
 
 /** Optional on-MCU calibration owner. start returns a FOC_PROTO_* result code. */

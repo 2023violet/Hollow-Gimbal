@@ -128,6 +128,9 @@ struct sil_device {
     uint32_t adc_done_us;
     uint16_t adc_ranks[4];
     uint32_t adc_sequence;
+    /* Optional phase-rank noise in counts rms (deterministic xorshift32). */
+    double adc_noise_counts;
+    uint32_t noise_state;
     /* Plant truth at the conversion aperture, and for the frame H0 last used. */
     double aperture_id_a;
     double aperture_iq_a;
@@ -238,6 +241,25 @@ static void sil_tmr1_update(struct sil_device *device)
     }
 }
 
+/* Sum of four uniforms (variance 1/3), scaled to the requested rms and rounded. */
+static uint16_t sil_adc_noisy(struct sil_device *device, uint16_t raw)
+{
+    if (!(device->adc_noise_counts > 0.0)) {
+        return raw;
+    }
+    double sum = 0.0;
+    for (unsigned int index = 0U; index < 4U; ++index) {
+        uint32_t x = device->noise_state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        device->noise_state = x;
+        sum += (double)x / 4294967296.0 - 0.5;
+    }
+    const double value = (double)raw + sum * device->adc_noise_counts / 0.5773502691896258;
+    return (uint16_t)fmin(fmax(floor(value + 0.5), 0.0), 4095.0);
+}
+
 /* TMR1_CH_IRQHandler: compare 4 starts one conversion. Ranks are sampled now. */
 static void sil_tmr1_compare(struct sil_device *device)
 {
@@ -254,9 +276,9 @@ static void sil_tmr1_compare(struct sil_device *device)
                 &raw
             ) == 0) {
             device->adc_ranks[0] = raw.vbus_raw;
-            device->adc_ranks[1] = raw.rank2_raw;
-            device->adc_ranks[2] = raw.rank3_raw;
-            device->adc_ranks[3] = raw.rank4_raw;
+            device->adc_ranks[1] = sil_adc_noisy(device, raw.rank2_raw);
+            device->adc_ranks[2] = sil_adc_noisy(device, raw.rank3_raw);
+            device->adc_ranks[3] = sil_adc_noisy(device, raw.rank4_raw);
             struct foc_virtual_motor_observation truth;
             if (foc_virtual_motor_observe(&device->plant.motor, &truth) == 0) {
                 device->aperture_id_a = truth.id_a;
@@ -622,7 +644,8 @@ static void sil_usage(const char *name)
     fprintf(
         stderr,
         "usage: %s [--speed factor | --lockstep-us us] [--duration-us us] [--trace-us us]\n"
-        "          [--flash file] [--adc-offset a,b,c] [--vbus-v v] [--motor-rs-ohm r] "
+        "          [--flash file] [--adc-offset a,b,c] [--adc-noise rms] [--vbus-v v]\n"
+        "          [--motor-rs-ohm r] "
         "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n",
@@ -745,6 +768,9 @@ int main(int argc, char **argv)
                 sil_usage(argv[0]);
                 return 2;
             }
+        } else if (strcmp(option, "--adc-noise") == 0) {
+            device.adc_noise_counts = strtod(value, NULL);
+            device.noise_state = UINT32_C(0x9E3779B9);
         } else if (strcmp(option, "--flash") == 0) {
             flash_path = value;
         } else if (strcmp(option, "--vbus-v") == 0) {

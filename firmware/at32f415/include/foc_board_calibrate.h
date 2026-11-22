@@ -73,6 +73,21 @@ enum foc_board_cal_stages {
     FOC_BOARD_CAL_STAGE_ALL = 3,
 };
 
+/** CALIBRATE_READ byte 73: where the active rotor calibration came from. */
+enum foc_board_cal_source {
+    FOC_BOARD_CAL_SOURCE_BOOT = 0,
+    FOC_BOARD_CAL_SOURCE_RUN = 1,
+    FOC_BOARD_CAL_SOURCE_STORAGE = 2,
+};
+
+/** CALIBRATE_READ byte 72: results the latest run produced (present, not applied). */
+enum foc_board_cal_result_bits {
+    FOC_BOARD_CAL_RESULT_ROTOR = 1,
+    FOC_BOARD_CAL_RESULT_RL = 2,
+    FOC_BOARD_CAL_RESULT_FLUX = 4,
+    FOC_BOARD_CAL_RESULT_PI = 8,
+};
+
 /** Wire values of CALIBRATE_READ byte 2. */
 enum foc_board_cal_failure {
     FOC_BOARD_CAL_FAILURE_NONE = 0,
@@ -193,6 +208,13 @@ struct foc_board_calibration {
     /* M3c: CAL-3 probes the drive voltage when no alignment ran in this boot. */
     bool probing;
     float probe_current_a;
+    /* M3-R transaction report. mode_claimed: this run put the Runtime in CALIBRATION
+     * mode; failing: RESTORE returns it to CURRENT on the way to FAILED. */
+    bool mode_claimed;
+    bool failing;
+    uint8_t committed;
+    uint8_t active_source;
+    uint8_t ring_high_water;
 };
 
 /* Public Functions ------------------------------------------------------------- */

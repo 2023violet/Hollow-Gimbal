@@ -96,7 +96,7 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
 | 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
-| 51 | CALIBRATE_READ | Empty | 71-byte calibration progress and results (below) |
+| 51 | CALIBRATE_READ | Empty | 93-byte calibration progress, results and active configuration (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
@@ -251,11 +251,14 @@ stays at or below the current limit.
 CALIBRATE_START runs CAL-1 and CAL-2 in the firmware:
 
 1. CAL-1 ADC zero: with the output inhibited and the shaft still, H0 feeds 256
-   valid ADC frames to the current-zero estimator.
+   valid ADC frames to the current-zero estimator. A zero whose noise exceeds 4
+   counts rms is refused here, before the motor is driven. The samples are
+   declared zero-current because INHIBIT is confirmed and the shaft is still
+   (open bridge, no back-EMF); nothing measures the current independently.
 2. CAL-2 rotor mapping: the manager selects the internal CALIBRATION mode,
    ARMs and STARTs, ramps a d-axis voltage at electrical angle 0 until the
    decoded current reaches 0.5 A, then sweeps the commanded angle two electrical
-   turns forward and back at one turn per second, pairing each angle with the
+   turns forward and back at half a turn per second, pairing each angle with the
    encoder position. Forward and backward points at the same angle are averaged
    (the drive lag cancels); the estimators fit direction, pole pairs (1–30) and
    electrical offset.
@@ -279,11 +282,25 @@ hardware it includes dead-time and switch-drop error, which biases Rs. With
 
 While a run is active, SETPOINT, ARM, START, SET_MODE, PARAM_WRITE, PARAM_SAVE,
 CONFIG_ERASE, FAULT_CLEAR and CALIBRATE_START return BUSY. STOP or
-CALIBRATE_ABORT ends the run and keeps the previous configuration. The result
-is applied to RAM; PARAM_SAVE stores it (below) together with the tuning,
-which includes the CAL-5 PI. After a boot that restored a calibration, the
-electrical stages may run alone: CAL-3 then first ramps the d-axis voltage on the
-rotor angle until 0.5 A to find its excitation scale.
+CALIBRATE_ABORT ends the run as FAILED (aborted).
+
+A run commits in two phases, and only these:
+
+- Rotor phase (CAL-1/2) commits at APPLY, when the admitted snapshot has
+  re-initialized the instance. It stays in RAM if a later stage fails or is
+  aborted.
+- Electrical phase (CAL-3/4/5) commits at TUNE, when H0 has applied the
+  designed current PI. R/L and flux results are reported, never applied on
+  their own.
+
+A run that ends FAILED after it selected the CALIBRATION mode first passes
+through RESTORE: it waits for the stop and returns the Runtime to CURRENT mode
+(as a successful run does), then reports FAILED with the original reason. Byte
+71 states what this run committed; bytes 73–92 state what is active. PARAM_SAVE
+stores the active rotor calibration and the tuning (which carries the CAL-5 PI)
+whatever the outcome of the latest run. After a boot that restored a
+calibration, the electrical stages may run alone: CAL-3 then first ramps the
+d-axis voltage on the rotor angle until 0.5 A to find its excitation scale.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
@@ -298,6 +315,16 @@ rotor angle until 0.5 A to find its excitation scale.
 | 39 / 43 / 47 | f32 | Rs Ω / Ld H / Lq H |
 | 51 / 55 | f32 | Flux Wb / Kt N·m per peak q ampere |
 | 59 / 63 / 67 | f32 | Designed current Kp d / Kp q V/A / Ki V/(A·s) |
+| 71 | u8 | Committed by the latest run: bit 0 rotor phase, bit 1 electrical phase |
+| 72 | u8 | Results the latest run produced: bit 0 rotor fit, 1 R/L, 2 flux, 3 PI applied |
+| 73 | u8 | Active rotor calibration source: 0 boot configuration, 1 a run in this boot, 2 restored from storage |
+| 74 | u8 | Largest backlog of the H0 capture ring (64 entries) in the latest run |
+| 75 / 77 | u16 / f32 | Active pole pairs / electrical offset rad (Runtime) |
+| 81 / 85 / 89 | f32 | Active ADC zero A / B / C in counts (Runtime) |
+
+Bytes 5–70 describe the latest run (zero for what it did not reach: an
+electrical-only run reports no rotor fit). Bytes 73–92 describe the instance
+that is running, including a calibration restored at boot.
 
 States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
 SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10, RL_D 11, RL_Q 12, FLUX 13,
@@ -318,7 +345,10 @@ image's boot motor configuration. At boot, before any interrupt, a stored
 record is applied only when that boot configuration is identical and every
 value passes the same checks as a UART write and the calibration passes the
 same re-initialization as a live run; it applies completely or not at all,
-otherwise the boot configuration stays in use.
+otherwise the boot configuration stays in use. The record is bound to the
+board's boot configuration, not to a motor: nothing on Board1 identifies the
+motor, so after replacing the motor or moving the encoder, send CONFIG_ERASE
+or recalibrate. ID 51 = 1 means "restored", not "verified on this motor".
 Two slots and a separately programmed commit word keep the previous record
 when a save is interrupted. A successful save clears the dirty flag.
 

@@ -128,6 +128,18 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual([boot["calibration_restored"] for boot in summary["boots"]], [0, 1, 0])
         self.assertEqual([boot["pole_pairs"] for boot in summary["boots"]], [7, 11, 7])
 
+    def test_calibration_failures_commit_only_what_they_report(self):
+        """A noisy ADC zero is refused before any drive; CAL-3 failing after CAL-1/2 and an
+        abort in CAL-3 both keep the committed rotor phase, report it, return the Runtime to
+        CURRENT mode and leave the Host in control; the saved rotor phase restores."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_calibrate_faults(SIL, ["--lockstep-us", "500"],
+                                                   Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+        self.assertEqual(summary["metrics"]["rl_failure_after_rotor"]["committed_stages"],
+                         ["rotor"])
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

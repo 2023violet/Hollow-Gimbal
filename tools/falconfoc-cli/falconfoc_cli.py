@@ -53,6 +53,8 @@ CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
                 "CAPTURE"]
 CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2}
+CAL_SOURCES = ["BOOT", "RUN", "STORAGE"]
+CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8))
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
@@ -264,7 +266,7 @@ def describe(frame):
             raise ValueError("BAD_RESPONSE")
         result["publication_sequence"] = struct.unpack_from("<I", body, 1)[0]
     elif frame.type == 0x51 and body[0] == 0:
-        if len(body) not in (39, 71):
+        if len(body) not in (39, 71, 93):
             raise ValueError("BAD_RESPONSE")
         name = lambda table, index: table[index] if index < len(table) else index
         result.update(
@@ -281,10 +283,20 @@ def describe(frame):
             adc_noise_rms_count=struct.unpack_from("<f", body, 31)[0],
             applied_runs=struct.unpack_from("<I", body, 35)[0],
         )
-        if len(body) == 71:
+        if len(body) >= 71:
             result.update(dict(zip(
                 ("rs_ohm", "ld_h", "lq_h", "flux_wb", "kt_nm_per_a", "kp_d_v_per_a",
                  "kp_q_v_per_a", "ki_v_per_a_s"), struct.unpack_from("<8f", body, 39))))
+        if len(body) == 93:
+            result.update(
+                committed_stages=[stage for stage, bit in (("rotor", 1), ("electrical", 2))
+                                  if body[71] & bit],
+                results_present=[kind for kind, bit in CAL_RESULT_BITS if body[72] & bit],
+                active_source=name(CAL_SOURCES, body[73]), ring_high_water=body[74],
+                active_pole_pairs=struct.unpack_from("<H", body, 75)[0],
+                active_electrical_offset_rad=struct.unpack_from("<f", body, 77)[0],
+                active_adc_offset_count=list(struct.unpack_from("<3f", body, 81)),
+            )
     elif frame.type == 0x32 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -824,7 +836,7 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist")
+                 "calibrate-persist", "calibrate-faults")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1203,7 +1215,7 @@ def _relative_error(found, true):
     return abs(found - true) / abs(true)
 
 
-def _calibrate_wait(session, stop_at=None, limit=40000):
+def _calibrate_wait(session, stop_at=None, limit=120000):
     """Poll CALIBRATE_READ (which also moves lockstep time) until DONE or FAILED."""
     seen = []
     for _ in range(limit):
@@ -1457,6 +1469,118 @@ def run_sil_calibrate_persist(simulator, base_arguments, flash_path, json_path=N
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
                "boots": boots, "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_calibrate_faults(simulator, base_arguments, flash_path, json_path=None):
+    """Negative calibration paths (M3-R): every failure returns the Runtime to CURRENT
+    mode, reports what the run committed and keeps nothing it did not commit.
+    Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    plant = SIL_CALIBRATE_PLANT
+    checks, metrics = {}, {}
+
+    def plant_arguments(**override):
+        values = dict(plant, **override)
+        return [
+            "--motor-pole-pairs", str(values["pole_pairs"]),
+            "--motor-offset-rad", str(values["offset_rad"]),
+            "--adc-offset", ",".join(map(str, values["adc_offset"])),
+            "--motor-rs-ohm", str(values["rs_ohm"]),
+            "--motor-ld-h", str(values["ld_h"]),
+            "--motor-lq-h", str(values["lq_h"]),
+            "--motor-psi-f-wb", str(values["flux_wb"]),
+        ]
+
+    def boot(arguments):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def outcome(session, view):
+        keys = ("calibration_state", "calibration_failure", "failed_state", "committed_stages",
+                "results_present", "active_source", "active_pole_pairs")
+        result = {key: view.get(key) for key in keys}
+        mode = session.status()["mode"]
+        result["runtime_mode"] = {value: name for name, value in MODES.items()}.get(mode, mode)
+        print(json.dumps(result, allow_nan=False))
+        return result
+
+    # 1. A noisy ADC zero is refused before the motor is driven; nothing changes.
+    transport, session = boot(plant_arguments() + ["--adc-noise", "6"])
+    session.call("calibrate")
+    view, seen = _calibrate_wait(session)
+    noisy = metrics["noisy_adc"] = outcome(session, view)
+    checks["noisy_adc_refused_before_drive"] = (noisy["calibration_failure"] == "ADC"
+                                                and noisy["failed_state"] == "ADC_ZERO"
+                                                and "ALIGN" not in seen)
+    checks["noisy_adc_commits_nothing"] = (noisy["committed_stages"] == []
+                                           and noisy["active_source"] == "BOOT"
+                                           and session.read("pole-pairs") == 7)
+    transport.__exit__()
+
+    # 2. CAL-1/2 pass, CAL-3 fails (Rs above the fit bound): the rotor phase stays
+    #    committed and reported, the Runtime is back in CURRENT mode, PARAM_SAVE stores
+    #    the committed rotor calibration and a power cycle restores it.
+    if flash_path.exists():
+        flash_path.unlink()
+    arguments = plant_arguments(rs_ohm=1.3) + ["--flash", str(flash_path)]
+    transport, session = boot(arguments)
+    session.call("calibrate")
+    view, seen = _calibrate_wait(session)
+    partial = metrics["rl_failure_after_rotor"] = outcome(session, view)
+    checks["high_rs_rotor_phase_committed"] = (partial["committed_stages"] == ["rotor"]
+                                               and partial["active_source"] == "RUN"
+                                               and partial["active_pole_pairs"] == 11)
+    checks["high_rs_fails_in_rl"] = (partial["calibration_failure"] == "RL"
+                                     and partial["failed_state"] in ("RL_D", "RL_Q"))
+    checks["mode_current_after_failure"] = partial["runtime_mode"] == "current"
+    checks["pi_not_applied_after_failure"] = (
+        "pi" not in partial["results_present"]
+        and abs(session.read("current-kp-q") - 1.35) < 1e-6)
+    checks["save_after_partial_applied"] = session.call("save")["result"] == "APPLIED"
+    transport.__exit__()
+    transport, session = boot(arguments)
+    view = session.call("calibrate-read", quiet=True)
+    restored = metrics["after_reboot"] = outcome(session, view)
+    checks["committed_rotor_restored"] = (session.read("store-calibration") == 1
+                                          and restored["active_source"] == "STORAGE"
+                                          and restored["active_pole_pairs"] == 11
+                                          and restored["committed_stages"] == [])
+    transport.__exit__()
+
+    # 3. Abort during CAL-3 on a good motor: FAILED/ABORTED, mode CURRENT, rotor kept.
+    transport, session = boot(plant_arguments())
+    session.call("calibrate")
+    _calibrate_wait(session, stop_at="RL_D")
+    session.call("calibrate-abort")
+    view, _ = _calibrate_wait(session)
+    aborted = metrics["abort_in_rl"] = outcome(session, view)
+    checks["abort_reported"] = (aborted["calibration_failure"] == "ABORTED"
+                                and aborted["committed_stages"] == ["rotor"])
+    checks["mode_current_after_abort"] = aborted["runtime_mode"] == "current"
+    session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+    steps, samples = session.run("velocity", 5.0, 600000)
+    velocity_metrics, velocity_checks = _tracking(session, "velocity", 5.0, 600000, samples, steps)
+    metrics["velocity_after_abort"] = velocity_metrics
+    checks["host_controls_after_abort"] = velocity_checks.get("tracks_reference", False)
+    session.stop()
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-calibrate-faults",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
     if json_path:
         pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, allow_nan=False))
@@ -1744,6 +1868,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "calibrate-faults":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-faults-flash.bin"))
+                summary = run_sil_calibrate_faults(os.path.abspath(args.simulator),
+                                                   simulator_arguments, flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "calibrate-persist":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-calibrate-flash.bin"))

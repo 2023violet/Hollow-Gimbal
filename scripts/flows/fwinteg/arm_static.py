@@ -91,6 +91,22 @@ def normalize(text, prologue=False):
     return lines
 
 
+CALLEE_SAVED = re.compile(r"\b(r[4-9]|r1[01]|sl|fp)\b")
+
+
+def rename_callee_saved(lines):
+    """M3: main() grew, so the compiler saves more registers and permutes r4-r11.
+    Rename callee-saved registers consistently by first use and mask the saved-register
+    list; every instruction, operand shape, call target and literal still compares exactly."""
+    mapping = {}
+    out = []
+    for line in lines:
+        if line.startswith(("stmdb\tsp!", "push\t")):
+            line = re.sub(r"\{[^}]*\}", "{SAVED}", line)
+        out.append(CALLEE_SAVED.sub(lambda m: mapping.setdefault(m.group(1), f"R{len(mapping)}"), line))
+    return out
+
+
 def literals(text):
     return [line.split()[-1] for line in text.splitlines() if ".word" in line]
 
@@ -134,7 +150,8 @@ for name, elf in IMAGES.items():
     main = function(dis, "main")
     calls = re.findall(r"\bbl\s+[0-9a-f]+ <(\w+)>", main)
     (out / "main-call-order.txt").write_text("\n".join(calls) + "\n")
-    pro_base, pro_new = normalize(base_main, True), normalize(main, True)
+    pro_base = rename_callee_saved(normalize(base_main, True))
+    pro_new = rename_callee_saved(normalize(main, True))
     prologue_ok = pro_base == pro_new and literals(base_main)[:10] == literals(main)[:10]
     try:
         i = calls.index("system_core_clock_update")

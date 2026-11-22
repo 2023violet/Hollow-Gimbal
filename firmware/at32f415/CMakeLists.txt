@@ -68,6 +68,7 @@ add_library(
   falconfoc-board1 STATIC
   src/foc_board.c
   src/foc_board_boot.c
+  src/foc_board_calibrate.c
   src/foc_board_store.c
   src/foc_board_timing.c
   src/foc_board_capture.c

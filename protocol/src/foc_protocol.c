@@ -44,6 +44,9 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_CONFIG_ERASE:
     case FOC_MSG_TELEMETRY_READ:
     case FOC_MSG_TELEMETRY_STREAM:
+    case FOC_MSG_CALIBRATE_START:
+    case FOC_MSG_CALIBRATE_READ:
+    case FOC_MSG_CALIBRATE_ABORT:
         return true;
     default:
         return false;

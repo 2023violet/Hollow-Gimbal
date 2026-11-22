@@ -324,7 +324,8 @@ static bool foc_runtime_outer_mode(enum foc_runtime_mode mode)
 
 static bool foc_runtime_mode_enabled(const struct foc_runtime *runtime, enum foc_runtime_mode mode)
 {
-    return (mode == FOC_RUNTIME_MODE_CURRENT && !runtime->config.motion.limits.enabled) ||
+    return ((mode == FOC_RUNTIME_MODE_CURRENT || mode == FOC_RUNTIME_MODE_CALIBRATION) &&
+            !runtime->config.motion.limits.enabled) ||
         (runtime->config.motion.enabled &&
          (foc_runtime_cascade_mode(mode) ||
           (mode == FOC_RUNTIME_MODE_IMPEDANCE && runtime->config.motion.impedance.enabled)));
@@ -469,6 +470,7 @@ static bool foc_runtime_lifecycle_shape_valid(const struct foc_runtime_lifecycle
     }
     if (request->action == FOC_RUNTIME_ACTION_SET_MODE) {
         return request->requested_mode == FOC_RUNTIME_MODE_CURRENT ||
+            request->requested_mode == FOC_RUNTIME_MODE_CALIBRATION ||
             foc_runtime_outer_mode(request->requested_mode);
     }
     return request->action == FOC_RUNTIME_ACTION_ARM || request->action == FOC_RUNTIME_ACTION_START;
@@ -672,9 +674,20 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
             target_valid = false;
         }
     }
+    /* CALIBRATION takes its angle and voltage from the latest drive command. */
+    const bool calibration = runtime->mode == FOC_RUNTIME_MODE_CALIBRATION;
+    const unsigned int drive_index =
+        atomic_load_explicit(&runtime->command_slot, memory_order_acquire);
+    const struct foc_runtime_command *drive = calibration &&
+            drive_index != FOC_RUNTIME_UNPUBLISHED &&
+            runtime->command_slots[drive_index].mode == FOC_RUNTIME_MODE_CALIBRATION
+        ? &runtime->command_slots[drive_index]
+        : NULL;
     const struct foc_pipeline_input step = {
         .adc = *adc,
-        .theta_elec_rad = aligned,
+        /* Without a drive command (e.g. after STOP) the cycle observes like CURRENT does. */
+        .theta_elec_rad = drive != NULL ? drive->target.calibration.theta_elec_rad : aligned,
+        .voltage_drive = calibration,
         .angle_sample_us = adc->sample_tick,
         .now_us = now_us,
         .dt_s = (float)runtime->interval_us * 1.0e-6f,
@@ -691,6 +704,12 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     foc_runtime_import_foreground(runtime, now_us);
     if (outer) {
         foc_runtime_import_command(runtime, step.cycle_target, now_us);
+    } else if (calibration) {
+        if (drive != NULL) {
+            const struct foc_pipeline_command source =
+                {drive->target.calibration.voltage_v, drive->seq, drive->produced_us};
+            foc_runtime_import_command(runtime, &source, now_us);
+        }
     } else {
         const unsigned int command_index =
             atomic_load_explicit(&runtime->command_slot, memory_order_acquire);
@@ -1608,6 +1627,25 @@ int foc_runtime_publish_command(
         .target.current_a = command->target_a,
     };
     return foc_runtime_publish_reference(runtime, &source, now_us);
+}
+
+int foc_runtime_publish_calibration_command(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_command *command,
+    uint32_t now_us
+)
+{
+    if (runtime == NULL || !runtime->initialized || command == NULL ||
+        command->mode != FOC_RUNTIME_MODE_CALIBRATION ||
+        !isfinite(command->target.calibration.voltage_v.d) ||
+        !isfinite(command->target.calibration.voltage_v.q) ||
+        !isfinite(command->target.calibration.theta_elec_rad)) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    if (runtime->config.motion.limits.enabled) {
+        return FOC_RUNTIME_ERR_MOTION_MODE;
+    }
+    return foc_runtime_publish_reference(runtime, command, now_us);
 }
 
 int foc_runtime_publish_motion_command(

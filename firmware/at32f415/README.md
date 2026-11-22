@@ -252,6 +252,27 @@ Flash erase or program code. Target facts still to confirm before enabling it:
 the sector size, the instruction-fetch stall during erase while H0/H1 IRQs are
 enabled (a save from DISABLED may then miss H0 deadlines), and endurance.
 
+### M3a on-MCU calibration
+
+`src/foc_board_calibrate.c` runs CAL-1 (ADC zero, collected in H0 through the
+Board ADC tap) and CAL-2 (direction, pole pairs, electrical offset) on live
+firmware data, admits the candidates with the existing `foc_calibration_admit`
+and re-initializes the instance with `foc_board_reconfigure`, which keeps the
+output backend and the H0/H1 lane schedules of the running producers. CAL-2
+drives through the Runtime CALIBRATION mode: a commanded d/q voltage at a
+commanded electrical angle (`foc_runtime_publish_calibration_command`), applied
+by the Pipeline without the current PI, with the phase current decoded every
+cycle and a vector above the current limit stopping the output. The estimators
+work in the source sensor frame; admission maps that to the Runtime direction.
+
+`sil-demo --sil-scenario calibrate` gives the SIL a motor the firmware does not
+know (11 pole pairs, 1.1 rad offset, ADC zero 2078/2030/2060): velocity control
+fails before and tracks after, and a STOP mid-sweep aborts with the old
+configuration kept. On the ARM image `main.c` binds the manager; the locked
+image answers CALIBRATE_START with OUTPUT_LOCKED, and the quiesce hook masks the
+four producer IRQs around reconfiguration. The SIL models an inhibited bridge
+as open windings (no current) rather than shorted terminals.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

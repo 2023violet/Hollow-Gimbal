@@ -85,6 +85,19 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(summary["status"], "SIL_PASS", summary)
         self.assertEqual(summary["metrics"]["fault_bits"], 1)
 
+    def test_on_mcu_calibration_of_an_unknown_motor(self):
+        """CAL-1/CAL-2 on the MCU find the plant's hidden ADC zero, pole pairs and offset;
+        before, velocity control fails on that motor, after, it tracks. STOP aborts."""
+        with cli.SimulatorTransport(SIL, ["--lockstep-us", "500"] + cli.SIL_CALIBRATE_ARGUMENTS)                 as transport, contextlib.redirect_stdout(io.StringIO()):
+            client = cli.Client(transport, sequence=1)
+            client.hello()
+            summary = cli.run_sil_calibrate(client, transport)
+        self.assertEqual(summary["status"], "SIL_PASS", summary["failed_checks"])
+        calibration = summary["metrics"]["calibration"]
+        self.assertEqual(calibration["pole_pairs"], 11)
+        self.assertLess(summary["metrics"]["offset_error_rad"], 0.05)
+        self.assertGreater(summary["metrics"]["uncalibrated_velocity_tail_error"], 1.0)
+
     def test_persistence_across_power_cycles(self):
         """Save -> new process on the same flash (power cycle) -> restored; damaged -> refused;
         erase -> boot configuration."""

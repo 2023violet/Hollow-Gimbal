@@ -308,6 +308,39 @@ int foc_board_init_with_calibration(
     return FOC_RUNTIME_OK;
 }
 
+int foc_board_reconfigure(
+    struct foc_runtime *runtime,
+    struct foc_board_output *output,
+    struct foc_board_encoder *encoder,
+    const struct foc_calibration_snapshot *snapshot,
+    uint32_t now_us
+)
+{
+    if (runtime == NULL || output == NULL || encoder == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const struct foc_board_encoder previous_encoder = *encoder;
+    /* The lanes follow the running TMR1/TMR5 producers, not the configuration: a fresh
+     * schedule anchored at an arbitrary instant would make the next H0/H1 look late. */
+    const struct foc_runtime_lane lanes[] =
+        {runtime->h0, runtime->h1, runtime->supervision, runtime->telemetry};
+    const foc_board_output_backend backend = output->backend;
+    void *const backend_argument = output->backend_argument;
+    *encoder = (struct foc_board_encoder){0};
+    const int status = foc_board_init_with_calibration(runtime, output, encoder, snapshot, now_us);
+    if (status != FOC_RUNTIME_OK) {
+        *encoder = previous_encoder;
+        return status;
+    }
+    runtime->h0 = lanes[0];
+    runtime->h1 = lanes[1];
+    runtime->supervision = lanes[2];
+    runtime->telemetry = lanes[3];
+    output->backend = backend;
+    output->backend_argument = backend_argument;
+    return FOC_RUNTIME_OK;
+}
+
 bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_us, float *seconds)
 {
     if (seconds == NULL || !foc_safe_timestamp_fresh(now_us, previous_us, limit_us)) {
@@ -563,6 +596,9 @@ int foc_board_adc_complete(
     }
 
     adc->slot_served = valid;
+    if (valid && adc->tap != NULL) {
+        adc->tap(adc->tap_argument, ranks, token->generation, token->requested_us);
+    }
     const struct foc_runtime_fast_input input = {
         .adc =
             {ranks[0],

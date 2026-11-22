@@ -89,9 +89,10 @@ enum {
     /* TELEMETRY_READ byte 62: bit 1 marks the firmware's decoded current. */
     TELEMETRY_CURRENT_VALID = 2,
     /* Capability bits: lock, RAM policy, polling telemetry, UART, mode switch, tuning;
-     * bit 6 persistent settings is added when storage is attached. */
+     * bit 6 persistent settings and bit 7 on-MCU calibration are added when attached. */
     CAPABILITY_BITS = 63,
     CAPABILITY_PERSISTENCE = 64,
+    CAPABILITY_CALIBRATION = 128,
     /* Lifecycle result codes on the wire. */
     LIFECYCLE_WIRE_NONE = 0,
 };
@@ -131,8 +132,10 @@ static float foc_serial_bits_float(uint32_t bits)
 static void
 foc_serial_capability(const struct foc_serial *serial, struct foc_protocol_frame *response)
 {
-    const uint8_t bits = (uint8_t)(CAPABILITY_BITS |
-                                   (serial->persistence.save != NULL ? CAPABILITY_PERSISTENCE : 0));
+    const uint8_t bits =
+        (uint8_t)(CAPABILITY_BITS |
+                  (serial->persistence.save != NULL ? CAPABILITY_PERSISTENCE : 0) |
+                  (serial->calibration.start != NULL ? CAPABILITY_CALIBRATION : 0));
     const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, bits, 0};
     memcpy(response->payload, capability, sizeof capability);
     response->length = sizeof capability;
@@ -795,6 +798,49 @@ static int foc_serial_store(
     return result;
 }
 
+static bool foc_serial_calibrating(const struct foc_serial *serial)
+{
+    return serial->calibration.busy != NULL &&
+        serial->calibration.busy(serial->calibration.context);
+}
+
+/* Messages that would change control state while a calibration owns the Runtime. */
+static bool foc_serial_controls(uint8_t type)
+{
+    return type == FOC_MSG_SETPOINT || type == FOC_MSG_ARM || type == FOC_MSG_START ||
+        type == FOC_MSG_SET_MODE || type == FOC_MSG_PARAM_WRITE || type == FOC_MSG_PARAM_SAVE ||
+        type == FOC_MSG_CONFIG_ERASE || type == FOC_MSG_FAULT_CLEAR ||
+        type == FOC_MSG_CALIBRATE_START;
+}
+
+static int
+foc_serial_calibrate_read(const struct foc_serial *serial, struct foc_protocol_frame *response)
+{
+    struct foc_serial_calibration_view view;
+    if (serial->calibration.read == NULL ||
+        !serial->calibration.read(serial->calibration.context, &view)) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    uint8_t *body = response->payload;
+    body[1] = view.state;
+    body[2] = view.failure;
+    body[3] = view.failed_state;
+    body[4] = view.admission_failure;
+    foc_protocol_write_u16(body + 5, view.samples);
+    foc_protocol_write_u16(body + 7, view.pole_pairs);
+    body[9] = (uint8_t)view.calibration_direction;
+    body[10] = (uint8_t)view.runtime_direction;
+    foc_protocol_write_u32(body + 11, foc_serial_float_bits(view.electrical_offset_rad));
+    foc_protocol_write_u32(body + 15, foc_serial_float_bits(view.rotor_residual_rad));
+    foc_protocol_write_u32(body + 19, foc_serial_float_bits(view.adc_offset_count[0]));
+    foc_protocol_write_u32(body + 23, foc_serial_float_bits(view.adc_offset_count[1]));
+    foc_protocol_write_u32(body + 27, foc_serial_float_bits(view.adc_offset_count[2]));
+    foc_protocol_write_u32(body + 31, foc_serial_float_bits(view.adc_noise_rms_count));
+    foc_protocol_write_u32(body + 35, view.applied_runs);
+    response->length = 39;
+    return FOC_PROTO_OK;
+}
+
 static int foc_serial_dispatch(
     struct foc_serial *serial,
     struct foc_uart_buffer *uart,
@@ -804,6 +850,9 @@ static int foc_serial_dispatch(
     struct foc_protocol_frame *response
 )
 {
+    if (foc_serial_calibrating(serial) && foc_serial_controls(request->type)) {
+        return FOC_PROTO_BUSY;
+    }
     if (request->type == FOC_MSG_PARAM_READ || request->type == FOC_MSG_PARAM_WRITE) {
         return foc_serial_parameter(serial, runtime, request, response);
     }
@@ -843,7 +892,22 @@ static int foc_serial_dispatch(
     case FOC_MSG_TELEMETRY_READ:
         return foc_serial_status(serial, uart, runtime, now_us, response);
     case FOC_MSG_STOP:
+        if (serial->calibration.abort != NULL) {
+            serial->calibration.abort(serial->calibration.context);
+        }
         foc_runtime_revoke_command(runtime);
+        return FOC_PROTO_ACCEPTED;
+    case FOC_MSG_CALIBRATE_START:
+        return serial->calibration.start == NULL
+            ? FOC_PROTO_NOT_SUPPORTED
+            : serial->calibration.start(serial->calibration.context, now_us);
+    case FOC_MSG_CALIBRATE_READ:
+        return foc_serial_calibrate_read(serial, response);
+    case FOC_MSG_CALIBRATE_ABORT:
+        if (serial->calibration.abort == NULL) {
+            return FOC_PROTO_NOT_SUPPORTED;
+        }
+        serial->calibration.abort(serial->calibration.context);
         return FOC_PROTO_ACCEPTED;
     case FOC_MSG_ARM:
     case FOC_MSG_START: {
@@ -959,6 +1023,17 @@ void foc_serial_attach_boot(
     if (serial != NULL) {
         serial->boot_reader = reader;
         serial->boot_context = context;
+    }
+}
+
+void foc_serial_attach_calibration(
+    struct foc_serial *serial,
+    const struct foc_serial_calibration *calibration
+)
+{
+    if (serial != NULL) {
+        serial->calibration =
+            calibration != NULL ? *calibration : (struct foc_serial_calibration){0};
     }
 }
 

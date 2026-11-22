@@ -97,6 +97,8 @@ enum foc_runtime_mode {
     FOC_RUNTIME_MODE_POSITION,
     /** H1 maps a coherent mechanical observation to a bounded torque request. */
     FOC_RUNTIME_MODE_IMPEDANCE,
+    /** Foreground supplies a d/q voltage and electrical angle (calibration drive). */
+    FOC_RUNTIME_MODE_CALIBRATION,
 };
 
 /** Impedance reference for one motion session and continuous mechanical frame. */
@@ -199,6 +201,11 @@ struct foc_runtime_command {
         float motion_ref;
         /** Continuous mechanical impedance reference for IMPEDANCE. */
         struct foc_runtime_impedance_command impedance;
+        /** d/q voltage in V at an electrical angle in rad for CALIBRATION. */
+        struct {
+            struct foc_vector_dq voltage_v;
+            float theta_elec_rad;
+        } calibration;
     } target;
 };
 
@@ -740,6 +747,15 @@ int foc_runtime_apply_tuning(struct foc_runtime *runtime, const struct foc_runti
 /** Read the latest tuning result, or PENDING with the published request identity. */
 int foc_runtime_read_tuning_result(struct foc_runtime *runtime,
                                    struct foc_runtime_tuning_result *result);
+
+/**
+ * Publish a CALIBRATION drive command for H0. The voltage is applied open loop at
+ * the given electrical angle, bounded by the PWM voltage limit, and stopped if the
+ * decoded phase current exceeds the current limit. Same lease as other commands.
+ */
+int foc_runtime_publish_calibration_command(struct foc_runtime *runtime,
+                                            const struct foc_runtime_command *command,
+                                            uint32_t now_us);
 
 /** Validate and publish one due H1 sample. Current time and simulated cost are in µs. */
 int foc_runtime_h1_step(struct foc_runtime *runtime,

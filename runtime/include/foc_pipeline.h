@@ -166,6 +166,13 @@ struct foc_pipeline_input {
     const struct foc_pipeline_command *cycle_target;
     /** Reject UPDATE if the owner requires a derived target and none was supplied. */
     bool require_cycle_target;
+    /**
+     * Calibration drive: the command target is a d/q voltage in V at theta_elec_rad,
+     * applied without the current PI. Phase current is still decoded every cycle and
+     * a vector above current_limit_a stops the output. Safety, lease, gate and
+     * submission are unchanged.
+     */
+    bool voltage_drive;
 };
 
 /** Monotonic input watermark that survives fault clear and explicit disable. */

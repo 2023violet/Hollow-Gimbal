@@ -34,7 +34,9 @@ Scenarios (`--sil-scenario`): `current` (default), `velocity` and `position`
 while RUNNING, readback and revision, then a tuned run), `recover` (lease
 expiry, FAULT_CLEAR, re-run) and `persist` (tune, `save`, power cycle on the same
 `--sil-flash` file, restored values and a tuned run, a damaged record refused,
-`erase-config`). Single requests use the same names:
+`erase-config`) and `calibrate` (on-MCU CAL-1/CAL-2 of a motor the firmware does
+not know; velocity fails before and tracks after; STOP aborts). Single requests
+use the same names (`calibrate`, `calibrate-read`, `calibrate-abort` included):
 
 ```powershell
 python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe request set-mode --mode velocity

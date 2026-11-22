@@ -30,9 +30,11 @@
 
 #include "foc_board.h"
 #include "foc_board_boot.h"
+#include "foc_board_calibrate.h"
 #include "foc_board_store.h"
 #include "foc_board_timing.h"
 #include "foc_serial.h"
+#include "foc_virtual_bootstrap_instrument.h"
 #include "foc_virtual_motor.h"
 
 #include <math.h>
@@ -115,6 +117,7 @@ struct sil_device {
     struct foc_uart_buffer uart;
     struct foc_serial serial;
     struct foc_board_persistence persistence;
+    struct foc_board_calibration calibration;
     /* Virtual peripherals. */
     struct sil_flash flash;
     struct sil_plant plant;
@@ -159,9 +162,11 @@ static int sil_plant_advance(struct sil_plant *plant, uint32_t now_us)
             step = SIL_PLANT_STEP_US;
         }
         const double dt_s = (double)step * 1.0e-6;
+        /* HIGH_Z: all bridge switches off. Winding current has already decayed
+         * through the diodes; the open winding carries none and the shaft coasts. */
         const int status = plant->drive == SIL_DRIVE_UPDATE
             ? foc_virtual_motor_apply_duty(&plant->motor, &plant->active, plant->vbus_v, dt_s)
-            : foc_virtual_motor_step(&plant->motor, 0.0, 0.0, dt_s);
+            : foc_virtual_motor_step_open_circuit(&plant->motor, 0.0, 0.0, dt_s);
         if (status != 0) {
             return status;
         }
@@ -183,6 +188,11 @@ static bool sil_output_backend(void *argument, const struct foc_device_pwm_reque
     }
     if (request->action == FOC_DEVICE_OUTPUT_INHIBIT) {
         (void)sil_plant_advance(plant, device->now_us);
+        /* Diode freewheeling ends within about L*I/VBUS (tens of µs), far below one slot. */
+        plant->motor.state.id_a = 0.0;
+        plant->motor.state.iq_a = 0.0;
+        plant->motor.v_alpha_v = 0.0;
+        plant->motor.v_beta_v = 0.0;
         plant->drive = SIL_DRIVE_HIGH_Z;
         plant->pending_valid = false;
         plant->inhibits++;
@@ -466,6 +476,7 @@ static void sil_foreground(struct sil_device *device)
     struct foc_runtime_foreground_result result;
     (void)foc_runtime_foreground_poll(&device->runtime, device->now_us, 0U, 0U, &result);
     foc_serial_poll(&device->serial, &device->uart, &device->runtime, sil_serial_clock, device);
+    foc_board_calibration_poll(&device->calibration, device->now_us);
     sil_drain_tx(device);
     sil_report(device);
 }
@@ -827,6 +838,20 @@ int main(int argc, char **argv)
     const struct foc_serial_persistence persistence =
         foc_board_persistence_serial(&device.persistence);
     foc_serial_attach_persistence(&device.serial, &persistence);
+    /* Single-threaded SIL: no producer runs while the manager reconfigures. */
+    foc_board_calibration_bind(
+        &device.calibration,
+        &device.runtime,
+        &device.output,
+        &device.encoder,
+        &device.adc,
+        &device.serial,
+        NULL,
+        NULL
+    );
+    const struct foc_serial_calibration calibration =
+        foc_board_calibration_serial(&device.calibration);
+    foc_serial_attach_calibration(&device.serial, &calibration);
     if (!foc_board_adc_init_timing(&device.adc, 0U, 0U, 0U)) {
         fprintf(stderr, "FALCONF0C_META {\"kind\":\"error\",\"reason\":\"adc timing\"}\n");
         return 1;

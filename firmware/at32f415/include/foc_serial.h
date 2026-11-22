@@ -79,6 +79,32 @@ struct foc_serial_persistence {
     bool (*read)(const void *context, struct foc_serial_persistence_view *view);
 };
 
+/** Calibration progress and the latest results, as reported by CALIBRATE_READ. */
+struct foc_serial_calibration_view {
+    uint8_t state;
+    uint8_t failure;
+    uint8_t failed_state;
+    uint8_t admission_failure;
+    uint16_t samples;
+    uint16_t pole_pairs;
+    int8_t calibration_direction;
+    int8_t runtime_direction;
+    float electrical_offset_rad;
+    float rotor_residual_rad;
+    float adc_offset_count[3];
+    float adc_noise_rms_count;
+    uint32_t applied_runs;
+};
+
+/** Optional on-MCU calibration owner. start returns a FOC_PROTO_* result code. */
+struct foc_serial_calibration {
+    void *context;
+    int (*start)(void *context, uint32_t now_us);
+    void (*abort)(void *context);
+    bool (*busy)(const void *context);
+    bool (*read)(const void *context, struct foc_serial_calibration_view *view);
+};
+
 /** Fixed UART queue depth and default number of bytes examined per poll. */
 enum foc_serial_limits {
     FOC_UART_RX_CAPACITY = 256,
@@ -162,6 +188,8 @@ struct foc_serial {
     const void *boot_context;
     /** Optional persistent storage; PARAM_SAVE and CONFIG_ERASE are NOT_SUPPORTED without it. */
     struct foc_serial_persistence persistence;
+    /** Optional calibration manager; CALIBRATE_* are NOT_SUPPORTED without it. */
+    struct foc_serial_calibration calibration;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -197,6 +225,10 @@ void foc_serial_attach_boot(struct foc_serial *serial,
 /** Attach persistent storage before receiving bytes. */
 void foc_serial_attach_persistence(struct foc_serial *serial,
                                    const struct foc_serial_persistence *persistence);
+
+/** Attach the calibration manager before receiving bytes. */
+void foc_serial_attach_calibration(struct foc_serial *serial,
+                                   const struct foc_serial_calibration *calibration);
 
 /** Read the Runtime lifecycle result associated with the latest Host request. */
 int foc_serial_read_lifecycle_result(const struct foc_serial *serial,

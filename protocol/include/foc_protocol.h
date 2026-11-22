@@ -67,6 +67,12 @@ enum foc_protocol_message {
     FOC_MSG_CONFIG_ERASE = 0x33,
     FOC_MSG_TELEMETRY_READ = 0x40,
     FOC_MSG_TELEMETRY_STREAM = 0x41,
+    /** Start on-MCU calibration CAL-1 and CAL-2 (M3, appended). */
+    FOC_MSG_CALIBRATE_START = 0x50,
+    /** Read calibration progress and results (M3, appended). */
+    FOC_MSG_CALIBRATE_READ = 0x51,
+    /** Abort a running calibration (M3, appended). */
+    FOC_MSG_CALIBRATE_ABORT = 0x52,
 };
 
 /** First response payload byte. MORE is local to the stream parser. */

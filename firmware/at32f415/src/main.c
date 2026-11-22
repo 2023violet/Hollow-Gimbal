@@ -14,6 +14,7 @@
 #include "at32f415.h"
 #include "foc_board.h"
 #include "foc_board_boot.h"
+#include "foc_board_calibrate.h"
 #include "foc_board_timing.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
@@ -74,6 +75,7 @@ static uint16_t spi_word;
 static uint32_t spi_rx_us;
 static struct foc_uart_buffer uart;
 static struct foc_serial serial;
+static struct foc_board_calibration calibration;
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
 static struct foc_board_persistence persistence;
 #endif
@@ -361,6 +363,22 @@ static struct foc_board_adc_event foc_at32_adc_event(void)
     return event;
 }
 
+/* Hold the H0/H1 producers while the calibration manager re-initializes the instance. */
+static void foc_at32_quiesce(void *argument, bool hold)
+{
+    (void)argument;
+    const IRQn_Type producers[] = {TMR1_CH_IRQn, ADC1_IRQn, TMR5_GLOBAL_IRQn, SPI1_IRQn};
+    for (unsigned int index = 0U; index < sizeof producers / sizeof producers[0]; ++index) {
+        if (hold) {
+            NVIC_DisableIRQ(producers[index]);
+        } else {
+            NVIC_EnableIRQ(producers[index]);
+        }
+    }
+    __DSB();
+    __ISB();
+}
+
 static uint32_t foc_at32_serial_now(void *argument)
 {
     (void)argument;
@@ -619,6 +637,19 @@ int main(void)
         foc_at32_timers_init();
         foc_serial_init(&serial, &runtime);
         foc_serial_attach_boot(&serial, foc_board_boot_serial_readback, &boot);
+        /* The locked image answers CALIBRATE_START with OUTPUT_LOCKED: CAL-2 must drive. */
+        foc_board_calibration_bind(
+            &calibration,
+            &runtime,
+            &output,
+            &encoder,
+            &adc,
+            &serial,
+            foc_at32_quiesce,
+            NULL
+        );
+        const struct foc_serial_calibration calibrate = foc_board_calibration_serial(&calibration);
+        foc_serial_attach_calibration(&serial, &calibrate);
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
         /* Restore saved settings before any producer or IRQ starts. */
         persistence.driver = foc_at32_store_driver();
@@ -657,6 +688,7 @@ int main(void)
                 (void)foc_runtime_foreground_poll(&runtime, foc_at32_now_us(), 0U, 0U, &result);
 #endif
                 foc_serial_poll(&serial, &uart, &runtime, foc_at32_serial_now, NULL);
+                foc_board_calibration_poll(&calibration, foc_at32_now_us());
                 if (!foc_uart_tx_available(&uart)) {
                     usart_interrupt_enable(USART1, USART_TDBE_INT, TRUE);
                 }

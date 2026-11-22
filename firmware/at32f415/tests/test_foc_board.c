@@ -561,13 +561,134 @@ static int test_tuning_mailbox(void)
     return 0;
 }
 
+/* Board-like schedule: an H1 encoder frame every 500 us, then H0 at slot + 88 us. */
+struct drive_bench {
+    struct foc_runtime runtime;
+    struct foc_board_output output;
+    struct foc_board_encoder encoder;
+    struct backend_probe probe;
+    uint32_t next_h1_us;
+};
+
+static int drive_cycle(
+    struct drive_bench *bench,
+    uint32_t cycle,
+    enum foc_runtime_action action,
+    uint16_t phase_a,
+    uint16_t phase_b
+)
+{
+    struct foc_runtime_foreground_result foreground;
+    const uint32_t time = cycle * FOC_BOARD_H0_US + 80U;
+    while (bench->next_h1_us + 70U <= time) {
+        if (foc_board_encoder_begin(&bench->encoder, bench->next_h1_us)) {
+            (void)foc_board_encoder_complete(
+                &bench->runtime,
+                &bench->encoder,
+                bench->next_h1_us + 70U,
+                FOC_BOARD_ENCODER_OK,
+                100U
+            );
+        }
+        bench->next_h1_us += FOC_BOARD_H1_US;
+    }
+    const uint16_t phase_c = (uint16_t)(3U * 2048U - phase_a - phase_b);
+    const struct foc_runtime_fast_input input = {
+        .adc = {1241U, phase_a, phase_b, phase_c, FOC_DEVICE_SAMPLE_ALL_VALID, cycle, time},
+        .now_us = time + 8U,
+        .action = action,
+        .requested_mode = FOC_RUNTIME_MODE_CALIBRATION,
+    };
+    const int status = foc_runtime_h0_step(&bench->runtime, &input);
+    (void)foc_runtime_foreground_poll(&bench->runtime, time + 9U, 0U, 0U, &foreground);
+    return status;
+}
+
+static int publish_drive(struct drive_bench *bench, uint32_t seq, uint32_t cycle)
+{
+    const struct foc_runtime_command drive = {
+        .mode = FOC_RUNTIME_MODE_CALIBRATION,
+        .seq = seq,
+        .produced_us = cycle * FOC_BOARD_H0_US,
+        .target.calibration = {.voltage_v = {0.5f, 0.0f}, .theta_elec_rad = 0.3f},
+    };
+    return foc_runtime_publish_calibration_command(&bench->runtime, &drive, drive.produced_us);
+}
+
+static int test_calibration_drive(void)
+{
+    static struct drive_bench bench;
+    bench = (struct drive_bench){.probe = {.accept = true}};
+    struct foc_runtime *runtime = &bench.runtime;
+    CHECK(foc_board_init(runtime, &bench.output, 0U) == FOC_RUNTIME_OK);
+    CHECK(foc_board_output_attach(&bench.output, backend_record, &bench.probe));
+    (void)drive_cycle(&bench, 0U, FOC_RUNTIME_ACTION_NONE, 2048U, 2048U);
+    (void)drive_cycle(&bench, 1U, FOC_RUNTIME_ACTION_SET_MODE, 2048U, 2048U);
+    CHECK(runtime->mode == FOC_RUNTIME_MODE_CALIBRATION);
+
+    /* Without a drive command (e.g. after STOP) the cycle observes like CURRENT does:
+     * no invalid-sample latch from a missing commanded angle. */
+    for (uint32_t cycle = 2U; cycle < 12U; ++cycle) {
+        (void)drive_cycle(&bench, cycle, FOC_RUNTIME_ACTION_NONE, 2048U, 2048U);
+    }
+    CHECK(runtime->pipeline.safety.latched_faults == 0U);
+    CHECK(runtime->pipeline.safety.state == FOC_SAFE_STATE_DISABLED);
+
+    /* Only finite CALIBRATION commands are published. */
+    struct foc_runtime_command bad = {
+        .mode = FOC_RUNTIME_MODE_CALIBRATION,
+        .seq = 1U,
+        .produced_us = 12U * FOC_BOARD_H0_US,
+        .target.calibration = {.voltage_v = {0.5f, 0.0f}, .theta_elec_rad = NAN},
+    };
+    CHECK(
+        foc_runtime_publish_calibration_command(runtime, &bad, bad.produced_us) ==
+        FOC_RUNTIME_ERR_INPUT
+    );
+    bad.target.calibration.theta_elec_rad = 0.3f;
+    bad.mode = FOC_RUNTIME_MODE_CURRENT;
+    CHECK(
+        foc_runtime_publish_calibration_command(runtime, &bad, bad.produced_us) ==
+        FOC_RUNTIME_ERR_INPUT
+    );
+
+    CHECK(publish_drive(&bench, 1U, 12U) == FOC_RUNTIME_OK);
+    (void)drive_cycle(&bench, 12U, FOC_RUNTIME_ACTION_ARM, 2048U, 2048U);
+    CHECK(runtime->pipeline.safety.state == FOC_SAFE_STATE_READY);
+    CHECK(publish_drive(&bench, 2U, 13U) == FOC_RUNTIME_OK);
+    (void)drive_cycle(&bench, 13U, FOC_RUNTIME_ACTION_START, 2048U, 2048U);
+    CHECK(runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING);
+
+    /* The commanded voltage reaches the output at the commanded angle; the PI is unused. */
+    CHECK(publish_drive(&bench, 3U, 14U) == FOC_RUNTIME_OK);
+    const uint32_t applied = bench.output.applied_updates;
+    CHECK(drive_cycle(&bench, 14U, FOC_RUNTIME_ACTION_NONE, 2048U, 2048U) == FOC_RUNTIME_OK);
+    CHECK(bench.output.applied_updates == applied + 1U);
+    CHECK(bench.probe.last_action == FOC_DEVICE_OUTPUT_UPDATE);
+    CHECK(runtime->pipeline.target_dq_a.d == 0.5f && runtime->pipeline.target_dq_a.q == 0.0f);
+    CHECK(
+        runtime->pipeline.current.integral_v.d == 0.0f &&
+        runtime->pipeline.current.integral_v.q == 0.0f
+    );
+    const struct foc_device_pwm_request *request = &bench.output.request;
+    CHECK(request->duty_a > request->duty_b && request->duty_b > request->duty_c);
+
+    /* A phase current above the current limit stops the drive. */
+    CHECK(publish_drive(&bench, 4U, 15U) == FOC_RUNTIME_OK);
+    (void)drive_cycle(&bench, 15U, FOC_RUNTIME_ACTION_NONE, 2048U + 1700U, 2048U - 850U);
+    CHECK(runtime->pipeline.safety.state != FOC_SAFE_STATE_RUNNING);
+    CHECK(runtime->pipeline_status == FOC_PIPELINE_ERR_CORE);
+    CHECK(bench.probe.last_action == FOC_DEVICE_OUTPUT_INHIBIT);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
 {
     return test_time() || test_adc() || test_encoder() || test_output() ||
         test_rejected_transaction() || test_output_backend() || test_applied_transaction() ||
-        test_tuning_mailbox();
+        test_tuning_mailbox() || test_calibration_drive();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

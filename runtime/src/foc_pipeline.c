@@ -405,28 +405,47 @@ int foc_pipeline_step_guarded(
     }
     struct foc_current_context trial = pipeline->current;
     struct foc_current_output result;
-    const struct foc_current_input current_input = {
-        .phase_current_a = measurement.phase_current_a,
-        .theta_elec_rad = input->theta_elec_rad,
-        .target_a = target,
-        .vbus_v = measurement.core.vbus_v,
-        .dt_s = input->dt_s,
-    };
-    if (pipeline->feedforward.enabled &&
-        !foc_pipeline_feedforward_feedback_valid(pipeline, input)) {
-        return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_FEEDBACK);
-    }
-    const int current_status = pipeline->feedforward.enabled
-        ? foc_current_step_with_feedforward(
-              &trial,
-              &current_input,
-              &pipeline->feedforward,
-              input->electrical_feedback.state.velocity_rad_s,
-              &result
-          )
-        : foc_current_step(&trial, &current_input, &result);
-    if (current_status != FOC_STATUS_OK || result.output_enable == 0U) {
-        return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_CORE);
+    if (input->voltage_drive) {
+        /* Calibration drive: no PI state is used or kept. */
+        struct foc_vector_alpha_beta measured_ab;
+        struct foc_vector_alpha_beta voltage_ab;
+        const float limit = trial.config.current_limit_a;
+        result = (struct foc_current_output){.output_enable = 1U, .voltage_dq_v = target};
+        if (foc_current_reset(&trial) != FOC_STATUS_OK ||
+            foc_clarke(&measurement.phase_current_a, &measured_ab) != FOC_STATUS_OK ||
+            foc_park(&measured_ab, input->theta_elec_rad, &result.measured_dq_a) != FOC_STATUS_OK ||
+            !(result.measured_dq_a.d * result.measured_dq_a.d +
+                  result.measured_dq_a.q * result.measured_dq_a.q <=
+              limit * limit) ||
+            foc_inverse_park(&target, input->theta_elec_rad, &voltage_ab) != FOC_STATUS_OK ||
+            foc_svpwm(&voltage_ab, measurement.core.vbus_v, &trial.config.pwm, &result.svpwm) !=
+                FOC_STATUS_OK) {
+            return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_CORE);
+        }
+    } else {
+        const struct foc_current_input current_input = {
+            .phase_current_a = measurement.phase_current_a,
+            .theta_elec_rad = input->theta_elec_rad,
+            .target_a = target,
+            .vbus_v = measurement.core.vbus_v,
+            .dt_s = input->dt_s,
+        };
+        if (pipeline->feedforward.enabled &&
+            !foc_pipeline_feedforward_feedback_valid(pipeline, input)) {
+            return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_FEEDBACK);
+        }
+        const int current_status = pipeline->feedforward.enabled
+            ? foc_current_step_with_feedforward(
+                  &trial,
+                  &current_input,
+                  &pipeline->feedforward,
+                  input->electrical_feedback.state.velocity_rad_s,
+                  &result
+              )
+            : foc_current_step(&trial, &current_input, &result);
+        if (current_status != FOC_STATUS_OK || result.output_enable == 0U) {
+            return foc_pipeline_stop(pipeline, FOC_PIPELINE_ERR_CORE);
+        }
     }
     const struct foc_output core_output = {
         .output_enable = result.output_enable,

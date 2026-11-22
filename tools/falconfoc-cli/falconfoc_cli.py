@@ -23,6 +23,7 @@ MESSAGES = {
     "fault": 0x20,
     "clear": 0x21, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
+    "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
@@ -45,6 +46,10 @@ PARAMETERS = {
     "velocity-limit": 72, "iq-limit": 73, "command-lease-us": 74,
 }
 PARAMETER_TYPES = {74: "u32", 1: "u32"}
+CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
+              "DRIVE_STOP", "APPLY", "DONE", "FAILED"]
+CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
+                "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT"]
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
@@ -255,6 +260,24 @@ def describe(frame):
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
         result["publication_sequence"] = struct.unpack_from("<I", body, 1)[0]
+    elif frame.type == 0x51 and body[0] == 0:
+        if len(body) != 39:
+            raise ValueError("BAD_RESPONSE")
+        name = lambda table, index: table[index] if index < len(table) else index
+        result.update(
+            calibration_state=name(CAL_STATES, body[1]),
+            calibration_failure=name(CAL_FAILURES, body[2]),
+            failed_state=name(CAL_STATES, body[3]), admission_failure=body[4],
+            samples=struct.unpack_from("<H", body, 5)[0],
+            pole_pairs=struct.unpack_from("<H", body, 7)[0],
+            calibration_direction=struct.unpack_from("<b", body, 9)[0],
+            runtime_direction=struct.unpack_from("<b", body, 10)[0],
+            electrical_offset_rad=struct.unpack_from("<f", body, 11)[0],
+            rotor_residual_rad=struct.unpack_from("<f", body, 15)[0],
+            adc_offset_count=list(struct.unpack_from("<3f", body, 19)),
+            adc_noise_rms_count=struct.unpack_from("<f", body, 31)[0],
+            applied_runs=struct.unpack_from("<I", body, 35)[0],
+        )
     elif frame.type == 0x32 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -793,7 +816,7 @@ def run_virtual_demo(
 
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
-SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist")
+SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1152,6 +1175,141 @@ def run_sil_persist(simulator, base_arguments, flash_path, json_path=None):
     return summary
 
 
+# A motor that differs from the Board1 nominal configuration (7 pole pairs, zero
+# offset, 2048-count ADC zero). Only the plant knows these values; the firmware
+# is never told them. The checks below compare its findings against them.
+SIL_CALIBRATE_PLANT = {"pole_pairs": 11, "offset_rad": 1.1, "adc_offset": (2078, 2030, 2060)}
+SIL_CALIBRATE_ARGUMENTS = [
+    "--motor-pole-pairs", str(SIL_CALIBRATE_PLANT["pole_pairs"]),
+    "--motor-offset-rad", str(SIL_CALIBRATE_PLANT["offset_rad"]),
+    "--adc-offset", ",".join(map(str, SIL_CALIBRATE_PLANT["adc_offset"])),
+]
+
+
+def _calibrate_wait(session, stop_at=None, limit=40000):
+    """Poll CALIBRATE_READ (which also moves lockstep time) until DONE or FAILED."""
+    seen = []
+    for _ in range(limit):
+        view = session.call("calibrate-read", quiet=True)
+        if not seen or seen[-1] != view["calibration_state"]:
+            seen.append(view["calibration_state"])
+        if stop_at is not None and view["calibration_state"] == stop_at:
+            return view, seen
+        if view["calibration_state"] in ("DONE", "FAILED"):
+            return view, seen
+    return view, seen
+
+
+def _wait_still(session, limit=20000):
+    """Calibration requires a still shaft: poll telemetry until the speed is near zero."""
+    for _ in range(limit):
+        telemetry = session.call("telemetry", quiet=True)
+        if abs(telemetry["velocity_rad_s"]) < 0.2:
+            return True
+    return False
+
+
+def run_sil_calibrate(client, transport, json_path=None):
+    """On-MCU calibration (CAL-1 ADC zero, CAL-2 direction/pole pairs/offset) of a motor
+    whose parameters the firmware does not know, then control with the result.
+    Nothing here is physical evidence."""
+
+    session = SilSession(client, transport)
+    checks, metrics, stages = {}, {}, {}
+    plant = SIL_CALIBRATE_PLANT
+    checks["calibration_capability"] = bool(session.call("capability")["capabilities"] & 128)
+    # A Host streaming setpoints over a real link raises the lease (ID 74; default 2.5 ms).
+    checks["host_lease_applied"] = session.tune("command-lease-us", 50000) == "APPLIED"
+    metrics["nominal_pole_pairs"] = session.read("pole-pairs")
+
+    # 1. With the nominal configuration this motor does not follow a speed target.
+    checks["set_mode_velocity"] = session.lifecycle("set-mode", SIL_STATE_DISABLED,
+                                                    mode="velocity") == "APPLIED"
+    steps, samples = session.run("velocity", 5.0, 300000)
+    running = [s for s in samples if s["state"] == SIL_STATE_RUNNING]
+    tail = running[len(running) * 3 // 4:]
+    before_error = sum(abs(5.0 - s["velocity_rad_s"]) for s in tail) / len(tail) if tail else None
+    metrics["uncalibrated_velocity_tail_error"] = before_error
+    checks["uncalibrated_motor_does_not_track"] = before_error is None or before_error > 1.0
+    session.stop()
+    checks["shaft_settles"] = _wait_still(session)
+
+    # 2. STOP during the drive aborts and keeps the previous configuration.
+    started = session.call("calibrate")
+    checks["calibration_accepted"] = started["result"] == "ACCEPTED"
+    checks["controls_refused_while_calibrating"] = (
+        session.call("set-mode", set_mode("current"))["result"] == "BUSY")
+    view, _ = _calibrate_wait(session, stop_at="SWEEP")
+    for _ in range(400):  # let the sweep move the shaft before STOP
+        session.status()
+    session.stop()
+    view, _ = _calibrate_wait(session)
+    metrics["abort"] = {key: view[key] for key in ("calibration_state", "calibration_failure",
+                                                   "failed_state")}
+    checks["stop_aborts_calibration"] = (view["calibration_state"] == "FAILED"
+                                         and view["calibration_failure"] == "ABORTED")
+    checks["abort_keeps_configuration"] = session.read("pole-pairs") == metrics["nominal_pole_pairs"]
+    for _ in range(200):  # STOP is applied by H0: wait for DISABLED with INHIBIT confirmed
+        status = session.status()
+        if status["state"] == SIL_STATE_DISABLED and status["software_output_acknowledged"]:
+            break
+    _wait_still(session)
+
+    # 3. Full run.
+    started = session.call("calibrate")
+    checks["full_run_accepted"] = started["result"] == "ACCEPTED"
+    view, seen = _calibrate_wait(session)
+    stages["sequence"] = seen
+    metrics["calibration"] = {key: view[key] for key in (
+        "calibration_state", "calibration_failure", "failed_state", "admission_failure", "samples",
+        "pole_pairs", "calibration_direction", "runtime_direction", "electrical_offset_rad",
+        "rotor_residual_rad", "adc_offset_count", "adc_noise_rms_count", "applied_runs")}
+    offset_error = abs((view["electrical_offset_rad"] - plant["offset_rad"] + math.pi)
+                       % (2 * math.pi) - math.pi)
+    adc_error = max(abs(found - true) for found, true in zip(view["adc_offset_count"],
+                                                           plant["adc_offset"]))
+    metrics["offset_error_rad"], metrics["adc_offset_error_count"] = offset_error, adc_error
+    checks["calibration_done"] = view["calibration_state"] == "DONE"
+    checks["pole_pairs_found"] = view["pole_pairs"] == plant["pole_pairs"]
+    checks["electrical_offset_found"] = offset_error < 0.05
+    checks["adc_zero_found"] = adc_error <= 2.0
+    checks["tuning_survives_calibration"] = session.read("command-lease-us") == 50000
+    checks["applied_to_live_firmware"] = (session.read("pole-pairs") == plant["pole_pairs"]
+                                          and abs(session.read("phase-a-offset")
+                                                  - view["adc_offset_count"][0]) < 1e-3)
+
+    # 4. The calibrated firmware controls this motor.
+    checks["set_mode_velocity_after"] = session.lifecycle("set-mode", SIL_STATE_DISABLED,
+                                                          mode="velocity") == "APPLIED"
+    steps, samples = session.run("velocity", 5.0, 600000)
+    velocity_metrics, velocity_checks = _tracking(session, "velocity", 5.0, 600000, samples, steps)
+    metrics["velocity"] = velocity_metrics
+    checks.update({f"calibrated_velocity_{k}": v for k, v in velocity_checks.items()})
+    session.stop()
+    checks["set_mode_current_after"] = session.lifecycle("set-mode", SIL_STATE_DISABLED,
+                                                         mode="current") == "APPLIED"
+    session.metadata.clear()
+    steps, samples = session.run("current", 0.4, 20000)
+    current_metrics, current_checks = _tracking(session, "current", 0.4, 20000, samples, steps)
+    metrics["current"] = current_metrics
+    checks.update({f"calibrated_current_{k}": v for k, v in current_checks.items()})
+    _finish(session, checks, metrics)
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-calibrate",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "plant_truth_for_checks_only": {
+                   "pole_pairs": plant["pole_pairs"], "offset_rad": plant["offset_rad"],
+                   "adc_offset": list(plant["adc_offset"])},
+               "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "stages": stages, "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -1431,6 +1589,8 @@ def main():
                     ["--lockstep-us", str(args.sil_lockstep_us)] if args.sil_lockstep_us > 0
                     else ["--speed", str(args.sil_speed)]
                 )
+            if args.action == "sil-demo" and args.sil_scenario == "calibrate":
+                simulator_arguments += SIL_CALIBRATE_ARGUMENTS
             if args.action == "sil-demo" and args.sil_scenario == "persist":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-persist-flash.bin"))
@@ -1489,6 +1649,10 @@ def main():
                             }.items() if value is not None
                         },
                     )
+                elif args.action == "sil-demo" and args.sil_scenario == "calibrate":
+                    summary = run_sil_calibrate(client, transport, args.json)
+                    if summary["status"] != "SIL_PASS":
+                        return 3
                 elif args.action == "sil-demo":
                     summary = run_sil_demo(
                         client,

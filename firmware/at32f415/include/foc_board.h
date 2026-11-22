@@ -226,6 +226,12 @@ struct foc_board_adc_diagnostics {
     struct foc_board_adc_transaction transaction;
 };
 
+/** Optional H0 observer of each valid ADC frame (ranks VBUS, A, B, C in rank order). */
+typedef void (*foc_board_adc_tap)(void *argument,
+                                  const uint16_t *ranks,
+                                  uint32_t generation,
+                                  uint32_t sample_us);
+
 /** Two non-preempting IRQs own the clock, token and live diagnostics.
  * A single foreground reader requests a coherent copy through snapshot_state. */
 struct foc_board_adc {
@@ -239,6 +245,9 @@ struct foc_board_adc {
     struct foc_board_adc_diagnostics live;
     atomic_uint snapshot_state;
     struct foc_board_adc_diagnostics published;
+    /** Optional observer, set before producers start; never set in the locked image path. */
+    foc_board_adc_tap tap;
+    void *tap_argument;
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
     foc_board_trace_clock trace_cycles;
 #endif
@@ -369,6 +378,17 @@ int foc_board_encoder_complete(struct foc_runtime *runtime,
                                uint32_t now_us,
                                enum foc_board_encoder_result transport,
                                uint16_t code);
+
+/**
+ * Re-initialize a quiescent instance with an accepted calibration snapshot.
+ * The caller holds H0/H1 producers off for the duration. The output backend
+ * survives; on failure Runtime, journal and encoder keep their previous state.
+ */
+int foc_board_reconfigure(struct foc_runtime *runtime,
+                          struct foc_board_output *output,
+                          struct foc_board_encoder *encoder,
+                          const struct foc_calibration_snapshot *snapshot,
+                          uint32_t now_us);
 
 /** Validate a complete request and record its disposition. Without a backend
  * UPDATE, ZERO_DUTY and ACTIVE_BRAKE are declined and INHIBIT is software-only. */

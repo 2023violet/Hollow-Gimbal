@@ -95,6 +95,9 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 33 | CONFIG_ERASE | Empty | APPLIED; the next boot uses the boot configuration. NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
+| 50 | CALIBRATE_START | Empty | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still; OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
+| 51 | CALIBRATE_READ | Empty | 39-byte calibration progress and results (below) |
+| 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
 and continuous mechanical rad. Setpoints must match the current Runtime mode.
@@ -139,10 +142,10 @@ and sample validity cleared.
 Capability response bytes are result, protocol version, three firmware version
 bytes, algorithm mode bitmask, physical mode bitmask, and capability u16.
 Current values are protocol 1, firmware 0.1.0, algorithms 7, physical modes 0,
-and capabilities 63, or 127 when the image has persistent storage. Capability
-bits are output lock 0, RAM policy parameters 1, polling telemetry 2, UART
-transport 3, remote mode switch 4, controller tuning 5 and persistent settings
-6. No calibration claim is set.
+and capabilities 63 plus 64 for persistent storage and 128 for on-MCU
+calibration. Capability bits are output lock 0, RAM policy parameters 1,
+polling telemetry 2, UART transport 3, remote mode switch 4, controller tuning
+5, persistent settings 6 and on-MCU calibration 7.
 
 | Status offset | Type | Meaning |
 | --- | --- | --- |
@@ -242,6 +245,44 @@ CANCELLED 4) for request ID 62; ID 60 and TELEMETRY bytes 71–74 carry the
 revision. A write while another is pending returns BUSY. The current limit may
 be lowered below its boot value but never raised above it; the q-current limit
 stays at or below the current limit.
+
+### On-MCU calibration
+
+CALIBRATE_START runs CAL-1 and CAL-2 in the firmware:
+
+1. CAL-1 ADC zero: with the output inhibited and the shaft still, H0 feeds 256
+   valid ADC frames to the current-zero estimator.
+2. CAL-2 rotor mapping: the manager selects the internal CALIBRATION mode,
+   ARMs and STARTs, ramps a d-axis voltage at electrical angle 0 until the
+   decoded current reaches 0.5 A, then sweeps the commanded angle two electrical
+   turns forward and back at one turn per second, pairing each angle with the
+   encoder position. Forward and backward points at the same angle are averaged
+   (the drive lag cancels); the estimators fit direction, pole pairs (1–30) and
+   electrical offset.
+3. The existing admission builds one snapshot; the instance is re-initialized
+   with it and the controller tuning re-applied. All results apply, or none.
+
+While a run is active, SETPOINT, ARM, START, SET_MODE, PARAM_WRITE, PARAM_SAVE,
+CONFIG_ERASE, FAULT_CLEAR and CALIBRATE_START return BUSY. STOP or
+CALIBRATE_ABORT ends the run and keeps the previous configuration. The result
+is not stored; PARAM_SAVE does not yet carry calibration (planned).
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | u8 | Result OK |
+| 1 / 2 / 3 | u8 | State, failure, state at failure (below) |
+| 4 | u8 | Admission failure code when failure is 9 |
+| 5 / 7 | u16 / u16 | Sweep samples / fitted pole pairs |
+| 9 / 10 | i8 / i8 | Fitted direction / Runtime encoder direction of the applied result (0 before) |
+| 11 / 15 | f32 / f32 | Electrical offset rad / rotor fit rms residual rad |
+| 19 / 23 / 27 | f32 | ADC zero A / B / C in counts |
+| 31 / 35 | f32 / u32 | Largest ADC noise rms in counts / applied runs |
+
+States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
+SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10. Failures: none 0, state 1,
+ADC 2, lifecycle 3, drive 4, current 5, sensor 6, rotor 7, offset 8,
+admission 9, apply 10, aborted 11, timeout 12. After DONE, IDs 16, 17 and 38–42
+read the applied values.
 
 ### Persistent settings
 

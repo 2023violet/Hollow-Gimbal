@@ -292,6 +292,8 @@ static int restore_boot(struct restore_fixture *fixture, bool keep_flash)
         &fixture->persistence,
         &fixture->boot,
         &fixture->runtime,
+        &fixture->output,
+        &fixture->encoder,
         &fixture->serial
     );
     return 0;
@@ -385,11 +387,130 @@ static int test_restore(void)
     return 0;
 }
 
+/* M3c: format 2 carries an applied rotor calibration; format 1 still decodes. */
+static uint32_t test_crc32(const uint8_t *bytes, size_t size)
+{
+    uint32_t crc = UINT32_MAX;
+    for (size_t index = 0U; index < size; ++index) {
+        crc ^= bytes[index];
+        for (unsigned int bit = 0U; bit < 8U; ++bit) {
+            crc = (crc >> 1) ^ (UINT32_C(0xEDB88320) & (0U - (crc & 1U)));
+        }
+    }
+    return crc ^ UINT32_MAX;
+}
+
+static void put_word(uint8_t *bytes, uint32_t value)
+{
+    bytes[0] = (uint8_t)value;
+    bytes[1] = (uint8_t)(value >> 8);
+    bytes[2] = (uint8_t)(value >> 16);
+    bytes[3] = (uint8_t)(value >> 24);
+}
+
+/* Board1-consistent calibration: raw source -1, fitted -1, Runtime +1. */
+static struct foc_calibration_snapshot calibrated(void)
+{
+    struct foc_calibration_snapshot snapshot = {
+        .phase_a_offset_count = 2031.5f,
+        .phase_b_offset_count = 2063.25f,
+        .phase_c_offset_count = 2017.75f,
+        .calibration_direction = -1,
+        .runtime_encoder_direction = 1,
+        .pole_pairs = 11U,
+        .electrical_offset_rad = 1.25f,
+        .accepted = true,
+    };
+    foc_board_calibration_identity(11U, &snapshot.source_identity);
+    return snapshot;
+}
+
+static int test_calibration_record(void)
+{
+    uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
+    struct foc_board_settings in = settings_with_kp(2.0f);
+    in.calibration_present = true;
+    in.calibration = calibrated();
+    foc_board_store_encode(&nominal, &in, 3U, record);
+    put_word(record, UINT32_C(0xC35A4C7E));
+    struct foc_board_store_identity identity;
+    struct foc_board_settings out;
+    uint32_t sequence = 0U;
+    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.calibration_present && out.calibration.accepted);
+    CHECK(out.calibration.pole_pairs == 11U && out.calibration.electrical_offset_rad == 1.25f);
+    CHECK(out.calibration.phase_b_offset_count == 2063.25f);
+    CHECK(
+        out.calibration.calibration_direction == -1 &&
+        out.calibration.runtime_encoder_direction == 1
+    );
+    CHECK(out.calibration.source_identity.pole_pairs == 11U);
+    CHECK(out.tuning.current_kp_v_per_a.q == 2.0f);
+
+    /* A format-1 record (108 bytes, CRC at 104) decodes as tuning without calibration. */
+    uint8_t v1[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v1, 0xFF, sizeof v1);
+    memcpy(v1, record, 104U);
+    v1[8] = 1U;
+    v1[9] = 0U;
+    v1[10] = 108U;
+    v1[11] = 0U;
+    put_word(v1 + 104, test_crc32(v1 + 4, 100U));
+    CHECK(foc_board_store_decode(v1, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(!out.calibration_present && out.tuning.current_kp_v_per_a.q == 2.0f && sequence == 3U);
+    /* Unknown flag bits are refused. */
+    record[104] = 3U;
+    put_word(record + 136, test_crc32(record + 4, 132U));
+    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    return 0;
+}
+
+static int test_restore_calibration(void)
+{
+    static struct restore_fixture fixture;
+    CHECK(restore_boot(&fixture, false) == 0);
+    struct foc_board_store_identity boot_identity;
+    CHECK(foc_board_store_identity_from_boot(&fixture.boot, &boot_identity));
+
+    /* A stored calibration re-initializes the instance, then the tuning applies. */
+    struct foc_board_settings in = settings_with_kp(2.2f);
+    in.calibration_present = true;
+    in.calibration = calibrated();
+    CHECK(write_record(&fixture.flash, &boot_identity, &in) == 0);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.state == FOC_BOARD_STORE_LOADED);
+    CHECK(fixture.persistence.calibration_restored);
+    CHECK(fixture.runtime.config.motion.rotor.pole_pairs == 11U);
+    CHECK(fixture.runtime.config.motion.rotor.electrical_offset_rad == 1.25f);
+    CHECK(fixture.runtime.pipeline.adc_config.phase_b_offset_count == 2063.25f);
+    CHECK(
+        fixture.encoder.config_valid &&
+        fixture.encoder.config.direction == FOC_ENCODER_DIRECTION_NORMAL
+    );
+    CHECK(fixture.runtime.pipeline.current.config.kp_v_per_a.q == 2.2f);
+    CHECK(fixture.persistence.restored_calibration.pole_pairs == 11U);
+
+    /* An inconsistent calibration (direction product) is refused and nothing changes,
+     * the tuning included. */
+    struct foc_board_settings bad = in;
+    bad.calibration.runtime_encoder_direction = -1;
+    memset(fixture.flash.slots, 0xFF, sizeof fixture.flash.slots);
+    CHECK(write_record(&fixture.flash, &boot_identity, &bad) == 0);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.state == FOC_BOARD_STORE_VALUE_REJECTED);
+    CHECK(!fixture.persistence.calibration_restored);
+    CHECK(fixture.runtime.config.motion.rotor.pole_pairs == 7U);
+    CHECK(fixture.runtime.pipeline.current.config.kp_v_per_a.q == 1.35f);
+    CHECK(!fixture.encoder.config_valid);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
 {
-    return test_codec() || test_slots() || test_sequence_wrap() || test_restore();
+    return test_codec() || test_slots() || test_sequence_wrap() || test_restore() ||
+        test_calibration_record() || test_restore_calibration();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

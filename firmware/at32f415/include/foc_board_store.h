@@ -43,7 +43,8 @@ enum foc_board_store_limits {
     /** Bytes reserved per slot; the device erase unit must fit inside. */
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
     /** Encoded record size and programming unit. */
-    FOC_BOARD_STORE_RECORD_BYTES = 108,
+    /** Format 2 record; format 1 (108 bytes, no calibration) still decodes. */
+    FOC_BOARD_STORE_RECORD_BYTES = 140,
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 
@@ -76,6 +77,9 @@ struct foc_board_settings {
     uint32_t rx_budget;
     float remote_current_cap_a;
     float remote_position_cap_rad;
+    /** Format 2: an applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
+    bool calibration_present;
+    struct foc_calibration_snapshot calibration;
 };
 
 /** Wire values of UART PARAM_READ ID 48. */
@@ -115,6 +119,11 @@ struct foc_board_persistence {
     /** Sequence of the newest committed record, after boot or the last save. */
     uint32_t stored_sequence;
     bool stored;
+    /** Applied calibration a save writes (the calibration manager's snapshot); may be NULL. */
+    const struct foc_calibration_snapshot *calibration_source;
+    /** True when boot restore re-initialized the instance with a stored calibration. */
+    bool calibration_restored;
+    struct foc_calibration_snapshot restored_calibration;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -152,13 +161,17 @@ int foc_board_store_save(const struct foc_board_store_driver *driver,
 int foc_board_store_erase(const struct foc_board_store_driver *driver);
 
 /**
- * Boot restore. Load the newest record; apply it only when its identity equals
- * the effective boot configuration and every value passes the Runtime and UART
- * checks. The outcome is recorded in persistence->state.
+ * Boot restore, before any producer. Load the newest record; apply it only when
+ * its identity equals the effective boot configuration and every value passes
+ * the Runtime and UART checks. A stored calibration re-initializes the instance
+ * first (foc_board_reconfigure), then the tuning is applied; on any refusal
+ * nothing changes. The outcome is recorded in persistence->state.
  */
 void foc_board_persistence_restore(struct foc_board_persistence *persistence,
                                    const struct foc_board_boot *boot,
                                    struct foc_runtime *runtime,
+                                   struct foc_board_output *output,
+                                   struct foc_board_encoder *encoder,
                                    struct foc_serial *serial);
 
 /** UART adapter callbacks bound to this persistence instance. */

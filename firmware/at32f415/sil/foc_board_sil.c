@@ -833,6 +833,8 @@ int main(int argc, char **argv)
         &device.persistence,
         &device.boot,
         &device.runtime,
+        &device.output,
+        &device.encoder,
         &device.serial
     );
     const struct foc_serial_persistence persistence =
@@ -852,6 +854,11 @@ int main(int argc, char **argv)
     const struct foc_serial_calibration calibration =
         foc_board_calibration_serial(&device.calibration);
     foc_serial_attach_calibration(&device.serial, &calibration);
+    /* A calibration restored from storage is the manager's applied result; saves keep it. */
+    if (device.persistence.calibration_restored) {
+        foc_board_calibration_adopt(&device.calibration, &device.persistence.restored_calibration);
+    }
+    device.persistence.calibration_source = &device.calibration.snapshot;
     if (!foc_board_adc_init_timing(&device.adc, 0U, 0U, 0U)) {
         fprintf(stderr, "FALCONF0C_META {\"kind\":\"error\",\"reason\":\"adc timing\"}\n");
         return 1;

@@ -190,6 +190,9 @@ struct foc_board_calibration {
     struct foc_motor_rl_model rl_model;
     struct foc_flux_id_result flux_result;
     struct foc_motor_pi_candidate pi;
+    /* M3c: CAL-3 probes the drive voltage when no alignment ran in this boot. */
+    bool probing;
+    float probe_current_a;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -205,10 +208,15 @@ void foc_board_calibration_bind(struct foc_board_calibration *calibration,
                                 void *quiesce_argument);
 
 /** Start the stages in the mask (FOC_BOARD_CAL_STAGE_*). Requires DISABLED, INHIBIT
- * confirmed and a still shaft; the electrical stages alone need an applied rotor result. */
+ * confirmed and a still shaft; the electrical stages alone need a rotor result applied
+ * in this boot, by a run or by boot restore. */
 int foc_board_calibration_start(struct foc_board_calibration *calibration,
                                 uint32_t now_us,
                                 unsigned int stages);
+
+/** Adopt a calibration applied at boot from storage (electrical stages, later saves). */
+void foc_board_calibration_adopt(struct foc_board_calibration *calibration,
+                                 const struct foc_calibration_snapshot *snapshot);
 
 /** Advance the state machine. Foreground only, every pass. */
 void foc_board_calibration_poll(struct foc_board_calibration *calibration, uint32_t now_us);

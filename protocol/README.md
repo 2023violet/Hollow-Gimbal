@@ -280,8 +280,10 @@ hardware it includes dead-time and switch-drop error, which biases Rs. With
 While a run is active, SETPOINT, ARM, START, SET_MODE, PARAM_WRITE, PARAM_SAVE,
 CONFIG_ERASE, FAULT_CLEAR and CALIBRATE_START return BUSY. STOP or
 CALIBRATE_ABORT ends the run and keeps the previous configuration. The result
-is not stored; PARAM_SAVE does not yet carry the rotor calibration (planned),
-while the CAL-5 PI is part of the tuning PARAM_SAVE stores.
+is applied to RAM; PARAM_SAVE stores it (below) together with the tuning,
+which includes the CAL-5 PI. After a boot that restored a calibration, the
+electrical stages may run alone: CAL-3 then first ramps the d-axis voltage on the
+rotor angle until 0.5 A to find its excitation scale.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
@@ -308,11 +310,15 @@ After DONE, IDs 16, 17, 38–42 and 64–67 read the applied values.
 ### Persistent settings
 
 PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
-pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74) and the
-RAM policies (IDs 1–3) in one record bound to the effective motor configuration
-(IDs 32, 16, 17, 38–42). At boot, before any interrupt, a stored record is
-applied only when that configuration is identical and every value passes the
-same checks as a UART write; otherwise the boot configuration stays in use.
+pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
+RAM policies (IDs 1–3) and, when one is applied, the on-MCU calibration result
+(ADC zero, direction, pole pairs, electrical offset) in one record (format 2,
+140 bytes; format-1 records without calibration still load) bound to the
+image's boot motor configuration. At boot, before any interrupt, a stored
+record is applied only when that boot configuration is identical and every
+value passes the same checks as a UART write and the calibration passes the
+same re-initialization as a live run; it applies completely or not at all,
+otherwise the boot configuration stays in use.
 Two slots and a separately programmed commit word keep the previous record
 when a save is interrupted. A successful save clears the dirty flag.
 
@@ -321,6 +327,7 @@ when a save is interrupted. A successful save clears the dirty flag.
 | 48 | Boot outcome | 0 unavailable (no storage), 1 empty, 2 loaded, 3 invalid record, 4 identity mismatch, 5 value rejected, 6 I/O error |
 | 49 | Applied record sequence | 0 when none was applied |
 | 50 | Newest stored record sequence | 0 when storage is erased |
+| 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot |
 
 ### Controller tuning
 

@@ -66,6 +66,8 @@ struct foc_serial_persistence_view {
     uint32_t loaded_sequence;
     /** Sequence of the newest committed record, zero when storage is erased. */
     uint32_t stored_sequence;
+    /** 1 when boot restore applied a stored on-MCU calibration. */
+    uint32_t calibration_restored;
 };
 
 /** Optional storage owner. save and erase return a FOC_PROTO_* result code. */

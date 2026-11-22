@@ -45,6 +45,7 @@ enum {
     PARAM_STORE_STATE = 48,
     PARAM_STORE_LOADED_SEQUENCE = 49,
     PARAM_STORE_STORED_SEQUENCE = 50,
+    PARAM_STORE_CALIBRATION = 51,
     /* Controller tuning receipt, read only. */
     PARAM_TUNING_REVISION = 60,
     PARAM_TUNING_RESULT = 61,
@@ -492,7 +493,7 @@ static bool foc_serial_parameter_read(
         foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
-    if (id >= PARAM_STORE_STATE && id <= PARAM_STORE_STORED_SEQUENCE) {
+    if (id >= PARAM_STORE_STATE && id <= PARAM_STORE_CALIBRATION) {
         struct foc_serial_persistence_view view = {0};
         if (serial->persistence.read != NULL) {
             (void)serial->persistence.read(serial->persistence.context, &view);
@@ -500,7 +501,8 @@ static bool foc_serial_parameter_read(
         *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
         parameter->value = id == PARAM_STORE_STATE ? view.state
             : id == PARAM_STORE_LOADED_SEQUENCE    ? view.loaded_sequence
-                                                   : view.stored_sequence;
+            : id == PARAM_STORE_STORED_SEQUENCE    ? view.stored_sequence
+                                                   : view.calibration_restored;
         parameter->minimum = parameter->maximum = parameter->value;
         return true;
     }

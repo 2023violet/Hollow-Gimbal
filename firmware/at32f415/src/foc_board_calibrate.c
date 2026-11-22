@@ -441,7 +441,9 @@ static bool cal_flux_begin(struct foc_board_calibration *cal)
                 .speed_chain = 1U,
                 .clock = 1U,
                 .rl_revision = cal->capture_serial,
-                .poles_revision = cal->applied_runs,
+                /* Rotor mapping revision: 1 is the boot one (restored or nominal),
+                 * each applied CAL-1/2 run in this boot adds one; never 0. */
+                .poles_revision = cal->applied_runs + 1U,
                 .phase_order = 0U,
                 .pole_pairs = cal->runtime->config.motion.rotor.pole_pairs,
             },
@@ -574,7 +576,9 @@ static bool cal_drain(struct foc_board_calibration *cal)
     const unsigned int head = atomic_load_explicit(&cal->ring_head, memory_order_acquire);
     bool ok = true;
     while (tail != head && ok) {
-        ok = cal_record(cal, &cal->ring[tail % FOC_BOARD_CAL_RING]);
+        const struct foc_board_cal_record *record = &cal->ring[tail % FOC_BOARD_CAL_RING];
+        cal->probe_current_a = hypotf(record->current_a.d, record->current_a.q);
+        ok = cal_record(cal, record);
         ++tail;
     }
     atomic_store_explicit(&cal->ring_tail, tail, memory_order_release);
@@ -600,6 +604,27 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         return;
     }
     const uint32_t elapsed = now_us - cal->state_us;
+    if (cal->probing) {
+        /* No alignment in this boot: ramp the d axis on the rotor angle (no torque) to
+         * the alignment current, then start CAL-3 with that voltage as its scale. */
+        const float limit = cal_voltage_limit(cal);
+        const float voltage = fminf(CAL_RAMP_V_PER_S * (float)elapsed * 1.0e-6f, limit);
+        if (cal->probe_current_a >= CAL_ALIGN_CURRENT_A ||
+            (voltage >= limit && cal->probe_current_a >= CAL_MIN_CURRENT_A)) {
+            cal->align_voltage_v = voltage;
+            cal->probing = false;
+            if (!cal_rl_begin(cal, FOC_MOTOR_ID_D)) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
+                return;
+            }
+            cal->state_us = now_us;
+        } else if (voltage >= limit) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_CURRENT, now_us);
+            return;
+        }
+        cal_drive_dq(cal, voltage, 0.0f, 0.0f, true, now_us);
+        return;
+    }
     if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
         /* d: a varied pulse train (no torque on the d axis). q: a zero-mean train, so the
          * free shaft only dithers and the back-EMF stays negligible. */
@@ -831,7 +856,7 @@ int foc_board_calibration_start(
     atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
     if ((stages & FOC_BOARD_CAL_STAGE_ROTOR) == 0U) {
         /* The electrical stages commutate with the rotor mapping applied in this boot. */
-        if (!cal->snapshot.accepted || !(cal->align_voltage_v > 0.0f)) {
+        if (!cal->snapshot.accepted) {
             return FOC_PROTO_BAD_STATE;
         }
         cal->electrical_phase = true;
@@ -843,6 +868,18 @@ int foc_board_calibration_start(
     cal_enter(cal, FOC_BOARD_CAL_ADC_ZERO, now_us);
     atomic_store_explicit(&cal->adc_active, 1U, memory_order_release);
     return FOC_PROTO_ACCEPTED;
+}
+
+void foc_board_calibration_adopt(
+    struct foc_board_calibration *calibration,
+    const struct foc_calibration_snapshot *snapshot
+)
+{
+    if (calibration != NULL && snapshot != NULL && snapshot->accepted &&
+        !foc_board_calibration_busy(calibration)) {
+        calibration->snapshot = *snapshot;
+        calibration->align_voltage_v = 0.0f;
+    }
 }
 
 void foc_board_calibration_abort(struct foc_board_calibration *calibration)
@@ -931,7 +968,11 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         if (cal->state == FOC_BOARD_CAL_RL_D) {
             atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
             atomic_store(&cal->record_active, 1U);
-            if (!cal_rl_begin(cal, FOC_MOTOR_ID_D)) {
+            cal->probe_current_a = 0.0f;
+            cal->probing = !(cal->align_voltage_v > 0.0f);
+            if (cal->probing) {
+                cal->capturing = false;
+            } else if (!cal_rl_begin(cal, FOC_MOTOR_ID_D)) {
                 cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
             }
         }

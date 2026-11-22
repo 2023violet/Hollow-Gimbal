@@ -6,10 +6,11 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 1, 108 bytes, little-endian:
+ * Record "FBP1", format 2, 140 bytes, little-endian (format 1 is bytes 0–107 with
+ * its CRC at 104 and no calibration section; it still decodes):
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 1     10 length u16 = 108
+ *   4  magic "FBP1"          8  format u16 = 2     10 length u16 = 140
  *   12 sequence u32
  *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
  *   28 runtime encoder direction i32   32 electrical offset f32
@@ -18,7 +19,10 @@
  *   68/72 velocity Kp/Ki     76 position Kp        80 speed reference limit
  *   84 q-current limit (all f32)                   88 command lease u32 µs
  *   92 UART RX budget u32    96 remote current cap f32   100 remote position cap f32
- *   104 CRC-32 (IEEE, reflected) of bytes 4–103
+ *   104 flags u32 (bit 0: calibration present)
+ *   108/112/116 calibrated phase A/B/C ADC offset f32   120 pole pairs u32
+ *   124 electrical offset f32   128 calibration direction i32   132 Runtime direction i32
+ *   136 CRC-32 (IEEE, reflected) of bytes 4–135
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -30,11 +34,14 @@
 
 /* Private Macros --------------------------------------------------------------- */
 
-#define STORE_COMMIT UINT32_C(0xC35A4C7E)
-#define STORE_MAGIC  UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT 1U
-#define STORE_CRC_AT 104U
-#define STORE_HALF   UINT32_C(0x80000000)
+#define STORE_COMMIT    UINT32_C(0xC35A4C7E)
+#define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
+#define STORE_FORMAT    2U
+#define STORE_CRC_AT    136U
+#define STORE_V1_BYTES  108U
+#define STORE_V1_CRC_AT 104U
+#define STORE_FLAG_CAL  1U
+#define STORE_HALF      UINT32_C(0x80000000)
 
 _Static_assert(FOC_BOARD_STORE_RECORD_BYTES == STORE_CRC_AT + 4U, "record layout");
 _Static_assert(FOC_BOARD_STORE_RECORD_BYTES % FOC_BOARD_STORE_PROGRAM_BYTES == 0, "program unit");
@@ -266,6 +273,17 @@ void foc_board_store_encode(
     put_u32(record + 92, settings->rx_budget);
     put_f32(record + 96, settings->remote_current_cap_a);
     put_f32(record + 100, settings->remote_position_cap_rad);
+    const struct foc_calibration_snapshot *cal = &settings->calibration;
+    if (settings->calibration_present) {
+        put_u32(record + 104, STORE_FLAG_CAL);
+        put_f32(record + 108, cal->phase_a_offset_count);
+        put_f32(record + 112, cal->phase_b_offset_count);
+        put_f32(record + 116, cal->phase_c_offset_count);
+        put_u32(record + 120, cal->pole_pairs);
+        put_f32(record + 124, cal->electrical_offset_rad);
+        put_u32(record + 128, (uint32_t)cal->calibration_direction);
+        put_u32(record + 132, (uint32_t)cal->runtime_encoder_direction);
+    }
     put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
 }
 
@@ -276,10 +294,14 @@ int foc_board_store_decode(
     uint32_t *sequence
 )
 {
-    if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
-        (record[8] | (record[9] << 8)) != STORE_FORMAT ||
-        (record[10] | (record[11] << 8)) != FOC_BOARD_STORE_RECORD_BYTES ||
-        get_u32(record + STORE_CRC_AT) != store_crc32(record + 4, STORE_CRC_AT - 4U)) {
+    const unsigned int format = record[8] | (record[9] << 8);
+    const unsigned int length = record[10] | (record[11] << 8);
+    const bool v1 = format == 1U && length == STORE_V1_BYTES;
+    const bool v2 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
+    const size_t crc_at = v1 ? STORE_V1_CRC_AT : STORE_CRC_AT;
+    if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC || !(v1 || v2) ||
+        get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
+        (v2 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
     }
     *sequence = get_u32(record + 12);
@@ -307,7 +329,23 @@ int foc_board_store_decode(
         .rx_budget = get_u32(record + 92),
         .remote_current_cap_a = get_f32(record + 96),
         .remote_position_cap_rad = get_f32(record + 100),
+        .calibration_present = v2 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
     };
+    if (settings->calibration_present) {
+        const uint16_t pole_pairs = (uint16_t)get_u32(record + 120);
+        settings->calibration = (struct foc_calibration_snapshot){
+            .phase_a_offset_count = get_f32(record + 108),
+            .phase_b_offset_count = get_f32(record + 112),
+            .phase_c_offset_count = get_f32(record + 116),
+            .calibration_direction = (int32_t)get_u32(record + 128),
+            .runtime_encoder_direction = (int32_t)get_u32(record + 132),
+            .pole_pairs = pole_pairs,
+            .electrical_offset_rad = get_f32(record + 124),
+            .accepted = get_u32(record + 120) <= UINT16_MAX,
+        };
+        /* The source identity is Board1's own fact set at the stored pole pairs. */
+        foc_board_calibration_identity(pole_pairs, &settings->calibration.source_identity);
+    }
     return FOC_BOARD_STORE_OK;
 }
 
@@ -396,6 +434,8 @@ void foc_board_persistence_restore(
     struct foc_board_persistence *persistence,
     const struct foc_board_boot *boot,
     struct foc_runtime *runtime,
+    struct foc_board_output *output,
+    struct foc_board_encoder *encoder,
     struct foc_serial *serial
 )
 {
@@ -405,6 +445,7 @@ void foc_board_persistence_restore(
     persistence->loaded_sequence = 0U;
     persistence->stored_sequence = 0U;
     persistence->stored = false;
+    persistence->calibration_restored = false;
     if (!foc_board_store_identity_from_boot(boot, &persistence->identity)) {
         persistence->state = FOC_BOARD_STORE_UNAVAILABLE;
         return;
@@ -432,12 +473,35 @@ void foc_board_persistence_restore(
         persistence->state = FOC_BOARD_STORE_IDENTITY_MISMATCH;
         return;
     }
-    /* The boot current limit stays the ceiling, as for a UART write (ID 68). */
+    /* The boot current limit stays the ceiling, as for a UART write (ID 68). Tuning is
+     * checked on the boot instance first, so a refused value changes nothing. */
+    struct foc_runtime_tuning boot_tuning;
     if (!serial_caps_valid(&settings) ||
         !(settings.tuning.current_limit_a <= serial->current_limit_ceiling_a) ||
+        foc_runtime_read_tuning(runtime, &boot_tuning) != FOC_RUNTIME_OK ||
         foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
+    }
+    if (settings.calibration_present) {
+        /* Re-initialization validates the snapshot against Board1's facts; it keeps
+         * the instance unchanged when it refuses, so the boot tuning is put back. */
+        if (output == NULL || encoder == NULL ||
+            foc_board_reconfigure(
+                runtime,
+                output,
+                encoder,
+                &settings.calibration,
+                runtime->boot_us
+            ) != FOC_RUNTIME_OK) {
+            (void)foc_runtime_apply_tuning(runtime, &boot_tuning);
+            persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
+            return;
+        }
+        /* Re-initialization starts from defaults: the already checked tuning again. */
+        (void)foc_runtime_apply_tuning(runtime, &settings.tuning);
+        persistence->restored_calibration = settings.calibration;
+        persistence->calibration_restored = true;
     }
     serial->rx_budget = settings.rx_budget;
     serial->current_limit_a = settings.remote_current_cap_a;
@@ -465,6 +529,11 @@ static int persistence_save(
     }
     if (!serial_caps_valid(&settings)) {
         return FOC_PROTO_BAD_STATE;
+    }
+    const struct foc_calibration_snapshot *calibration = persistence->calibration_source;
+    settings.calibration_present = calibration != NULL && calibration->accepted;
+    if (settings.calibration_present) {
+        settings.calibration = *calibration;
     }
     if (foc_board_store_save(&persistence->driver, &persistence->identity, &settings, sequence) !=
         FOC_BOARD_STORE_OK) {
@@ -496,6 +565,7 @@ static bool persistence_read(const void *context, struct foc_serial_persistence_
         .state = (uint32_t)persistence->state,
         .loaded_sequence = persistence->loaded_sequence,
         .stored_sequence = persistence->stored ? persistence->stored_sequence : 0U,
+        .calibration_restored = persistence->calibration_restored ? 1U : 0U,
     };
     return true;
 }

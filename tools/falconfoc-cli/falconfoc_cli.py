@@ -40,6 +40,7 @@ PARAMETERS = {
     "boot-configuration": 32, "calibration-input": 33, "phase-a-offset": 38,
     "phase-b-offset": 39, "phase-c-offset": 40, "measurement-qualified": 45,
     "store-state": 48, "store-loaded-sequence": 49, "store-stored-sequence": 50,
+    "store-calibration": 51,
     "tuning-revision": 60, "tuning-result": 61, "tuning-sequence": 62,
     "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
     "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
@@ -822,7 +823,8 @@ def run_virtual_demo(
 
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
-SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate")
+SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
+                 "calibrate-persist")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1362,6 +1364,105 @@ def run_sil_calibrate(client, transport, json_path=None):
     return summary
 
 
+def run_sil_calibrate_persist(simulator, base_arguments, flash_path, json_path=None):
+    """Calibrate a motor the firmware does not know, save, power-cycle (new device process
+    on the same flash) and run without recalibrating; erase restores the defaults.
+    Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    if flash_path.exists():
+        flash_path.unlink()
+    plant = SIL_CALIBRATE_PLANT
+    arguments = list(base_arguments) + SIL_CALIBRATE_ARGUMENTS + ["--flash", str(flash_path)]
+    checks, metrics, boots = {}, {}, []
+
+    def boot(note):
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        record = {"boot": note, "store_state": STORE_STATES[session.read("store-state")],
+                  "calibration_restored": session.read("store-calibration"),
+                  "pole_pairs": session.read("pole-pairs"),
+                  "electrical_offset_rad": session.read("electrical-offset"),
+                  "phase_a_offset": session.read("phase-a-offset"),
+                  "current_kp_q": session.read("current-kp-q")}
+        boots.append(record)
+        print(json.dumps(record, allow_nan=False))
+        return transport, session, record
+
+    def velocity_run(session, duration_us=600000):
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, samples = session.run("velocity", 5.0, duration_us)
+        result = _tracking(session, "velocity", 5.0, duration_us, samples, steps)
+        session.stop()
+        _wait_still(session)
+        return result
+
+    # 1. Calibrate (all stages) and save.
+    transport, session, first = boot("fresh")
+    checks["fresh_storage_empty"] = first["store_state"] == "EMPTY"
+    checks["host_lease_applied"] = session.tune("command-lease-us", 50000) == "APPLIED"
+    session.call("calibrate")
+    view, _ = _calibrate_wait(session)
+    checks["calibration_done"] = view["calibration_state"] == "DONE"
+    calibrated = {"pole_pairs": view["pole_pairs"], "offset": view["electrical_offset_rad"],
+                  "adc_a": view["adc_offset_count"][0], "kp_q": view["kp_q_v_per_a"]}
+    metrics["calibrated"] = calibrated
+    saved = session.call("save")
+    checks["save_applied"] = saved["result"] == "APPLIED"
+    transport.__exit__()
+
+    # 2. Power cycle: restored before any producer; the motor runs without recalibrating.
+    transport, session, second = boot("after-save")
+    checks["calibration_restored"] = (second["store_state"] == "LOADED"
+                                      and second["calibration_restored"] == 1)
+    checks["rotor_mapping_restored"] = (second["pole_pairs"] == plant["pole_pairs"]
+                                        and abs(second["electrical_offset_rad"]
+                                                - calibrated["offset"]) < 1e-6)
+    checks["adc_zero_restored"] = abs(second["phase_a_offset"] - calibrated["adc_a"]) < 1e-3
+    checks["current_pi_restored"] = abs(second["current_kp_q"] - calibrated["kp_q"]) < 1e-6
+    velocity_metrics, velocity_checks = velocity_run(session)
+    metrics["velocity_after_restore"] = velocity_metrics
+    checks.update({f"restored_velocity_{k}": v for k, v in velocity_checks.items()})
+
+    # 3. After a reboot the electrical stages run alone on the restored rotor mapping.
+    rerun = session.call("calibrate", bytes([CAL_STAGES["electrical"]]))
+    view, seen = _calibrate_wait(session)
+    metrics["electrical_after_restore"] = {key: view[key] for key in (
+        "calibration_state", "calibration_failure", "admission_failure", "rs_ohm", "flux_wb")}
+    checks["electrical_rerun_after_restore"] = (rerun["result"] == "ACCEPTED"
+                                                and view["calibration_state"] == "DONE"
+                                                and _relative_error(view["rs_ohm"],
+                                                                    plant["rs_ohm"]) < 0.05)
+    checks["erase_applied"] = session.call("erase-config")["result"] == "APPLIED"
+    transport.__exit__()
+
+    # 4. Erased: Board1 defaults again, and this motor no longer follows a speed target.
+    transport, session, third = boot("after-erase")
+    checks["defaults_after_erase"] = (third["store_state"] == "EMPTY"
+                                      and third["calibration_restored"] == 0
+                                      and third["pole_pairs"] == 7)
+    session.tune("command-lease-us", 50000)
+    velocity_metrics, _ = velocity_run(session, 300000)
+    tail_error = velocity_metrics["tail_mean_abs_error"]
+    metrics["velocity_after_erase_tail_error"] = tail_error
+    checks["uncalibrated_again_after_erase"] = tail_error is None or tail_error > 1.0
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-calibrate-persist",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "boots": boots, "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -1643,6 +1744,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "calibrate-persist":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-calibrate-flash.bin"))
+                summary = run_sil_calibrate_persist(os.path.abspath(args.simulator),
+                                                    simulator_arguments, flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "persist":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-persist-flash.bin"))

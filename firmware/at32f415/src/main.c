@@ -653,9 +653,13 @@ int main(void)
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
         /* Restore saved settings before any producer or IRQ starts. */
         persistence.driver = foc_at32_store_driver();
-        foc_board_persistence_restore(&persistence, &boot, &runtime, &serial);
+        foc_board_persistence_restore(&persistence, &boot, &runtime, &output, &encoder, &serial);
         const struct foc_serial_persistence store = foc_board_persistence_serial(&persistence);
         foc_serial_attach_persistence(&serial, &store);
+        if (persistence.calibration_restored) {
+            foc_board_calibration_adopt(&calibration, &persistence.restored_calibration);
+        }
+        persistence.calibration_source = &calibration.snapshot;
 #endif
         foc_at32_uart_init();
         foc_at32_irq_enable();

@@ -287,6 +287,21 @@ level be its own segment. The manager shares the UART adapter's publication and
 lifecycle sequences, so the Host keeps control after a run. `sil-demo --sil-scenario
 calibrate` uses a plant whose Rs, L and flux also differ from the Board1 defaults.
 
+### M3c stored calibration
+
+The settings record grows to format 2 (140 bytes): a flags word and the applied
+calibration snapshot (calibrated ADC zero, pole pairs, electrical offset,
+calibration and Runtime directions). The identity stays the image's boot
+configuration, so a calibrated motor still matches. At boot
+`foc_board_persistence_restore()` re-initializes the instance with
+`foc_board_reconfigure()` before applying the tuning; a refused calibration
+restores the boot tuning and reports VALUE_REJECTED. The manager adopts the
+restored snapshot (`foc_board_calibration_adopt()`), so later saves keep it and
+the electrical stages can rerun alone; without an alignment in this boot CAL-3
+first probes its drive voltage. Readback ID 51 reports the restore.
+`sil-demo --sil-scenario calibrate-persist` calibrates the hidden plant, saves,
+power-cycles, runs velocity without recalibrating, reruns CAL-3/4/5 and erases.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

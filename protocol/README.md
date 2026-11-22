@@ -174,16 +174,21 @@ electrical offset of the selected configuration.
 | --- | --- | --- | --- |
 | 32 | Effective configuration | u32 | 0 none, 1 NOMINAL_CONFIGURATION, 2 CALIBRATED_CONFIGURATION |
 | 33 | Calibration input | u32 | 1 NOT_AVAILABLE, 2 ACCEPTED, 3 REJECTED |
-| 34 | Rejection | u32 | 0 none, 1 format, 2 supply identity, 3 coordinate, 4 admission, 5 snapshot mismatch, 6 Board identity, 7 Board range, 8 direction product, 9 initialization |
+| 34 | Rejection | u32 | 0 none, 1 format, 2 supply identity, 3 coordinate, 4 admission, 5 snapshot mismatch, 6 Board identity, 7 Board range, 8 direction product, 9 initialization, 10 missing review reference (appended; 0–9 unchanged) |
 | 35 | Admission failure | u32 | `foc_calibration_admission_failure` code, 0 none |
 | 36 | Supply identity | u32 | 0 when absent |
-| 37 | Review identity | u32 | 0 when absent |
+| 37 | Review reference | u32 | 0 when absent; nonzero for every accepted supply |
 | 38–40 | Phase A/B/C ADC offset | f32 counts | Effective decode offsets |
 | 41 | Encoder counts per revolution | u32 | Effective Sensor policy |
 | 42 | Runtime encoder direction | u32 | 1 = +1, 2 = −1 |
 | 43 | Raw source encoder direction | u32 | 1 = +1, 2 = −1 |
 | 44 | Calibration direction | u32 | 0 none, 1 = +1, 2 = −1 |
 | 45 | Physical current measurement qualified | u32 | Always 0 in the locked image |
+
+ID 36 is compared with the build's independent expected supply identity. ID 37
+is only a reference to the review material: its presence is required, but it is
+not matched against any expectation, not signature-verified and not a proof of
+physical provenance.
 
 Accepting calibration parameters does not qualify physical current
 measurement. The TELEMETRY_READ validity bits stay zero.

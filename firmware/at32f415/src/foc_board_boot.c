@@ -117,6 +117,10 @@ enum foc_board_calibration_rejection foc_board_boot_qualify(
     if (expected == NULL || supply->supply_id == 0U || supply->supply_id != expected->supply_id) {
         return FOC_BOARD_REJECTION_SUPPLY_IDENTITY;
     }
+    /* Presence only: review_id is a reference, not independently matched. */
+    if (supply->review_id == 0U) {
+        return FOC_BOARD_REJECTION_REVIEW_REFERENCE;
+    }
     if (supply->coordinate != FOC_BOARD_COORDINATE_RAW_NO_LUT) {
         return FOC_BOARD_REJECTION_COORDINATE;
     }
@@ -293,6 +297,9 @@ bool foc_board_boot_capture_profile(
         .encoder_direction = view.runtime_encoder_direction,
         .pole_pairs = view.pole_pairs,
         .phase_order = (uint32_t)boot->runtime->pipeline.adc_config.phase_order,
+        .configuration = view.configuration == FOC_BOARD_CALIBRATED_CONFIGURATION
+            ? FOC_CAPTURE_CONFIGURATION_CALIBRATED
+            : FOC_CAPTURE_CONFIGURATION_NOMINAL,
     };
     return true;
 }

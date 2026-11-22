@@ -67,7 +67,14 @@ int main(int argc, char *argv[])
         .encoder_direction = -1,
         .pole_pairs = 7U,
         .phase_order = 0U,
+        .configuration = FOC_CAPTURE_CONFIGURATION_NOMINAL,
     };
+    /* An undeclared configuration discriminator never starts a capture. */
+    struct foc_capture_profile undeclared = profile;
+    undeclared.configuration = 0U;
+    CHECK(!foc_board_capture_start(&recorder, 17U, FOC_CAPTURE_HOST, start, &undeclared));
+    undeclared.configuration = 3U;
+    CHECK(!foc_board_capture_start(&recorder, 17U, FOC_CAPTURE_HOST, start, &undeclared));
     CHECK(foc_board_capture_start(&recorder, 17U, FOC_CAPTURE_HOST, start, &profile));
     CHECK(foc_board_capture_adc(&recorder, start - 1U) == NULL);
     CHECK(!foc_board_capture_start(&recorder, 18U, FOC_CAPTURE_HOST, start, &profile));

@@ -20,6 +20,13 @@
 #error "The build must define FOC_BOARD_EXPECTED_SUPPLY_ID and FOC_BOARD_EXPECTED_POLE_PAIRS"
 #endif
 
+/* Checked on the un-narrowed literal, so 0x156464331 cannot alias 0x56464331. */
+_Static_assert((FOC_BOARD_EXPECTED_SUPPLY_ID) <= 0xFFFFFFFFULL, "supply ID must fit uint32");
+#if defined(FOC_BOARD_EXPECTED_SUPPLY_REQUIRED)
+_Static_assert((FOC_BOARD_EXPECTED_SUPPLY_ID) != 0ULL, "a supplied build needs a nonzero ID");
+#else
+_Static_assert((FOC_BOARD_EXPECTED_SUPPLY_ID) == 0ULL, "the NONE build reserves supply ID 0");
+#endif
 _Static_assert(FOC_BOARD_EXPECTED_POLE_PAIRS > 0, "expected pole pairs");
 _Static_assert(FOC_BOARD_EXPECTED_POLE_PAIRS <= FOC_BOARD_POLE_PAIRS_MAX, "expected pole pairs");
 

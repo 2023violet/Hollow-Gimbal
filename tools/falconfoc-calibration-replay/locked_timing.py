@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from board_capture import IMAGE_BYTES, observations, read_image, sha256
+from board_capture import IMAGE_BYTES, observations, read_configuration, read_image, sha256
 from replay import HALF_RANGE_MAX, JSON_LIMIT, UINT32_MAX, PackError, read_bounded, require
 
 
@@ -72,12 +72,13 @@ def stack_summary(data, low, painted_end, top):
             "scope": "PAINTED_REGION_ONLY"}
 
 
-def capture_summary(path, source, clock_hz):
+def capture_summary(path, source, clock_hz, configuration=None):
     raw = read_bounded(path, IMAGE_BYTES)
-    header, adc, encoder = read_image(raw)
+    header, adc, encoder = read_image(raw, configuration)
     require(header["producer"] == (1 if source == "BOARD_DECLARED" else 2),
             "SOURCE_MISMATCH", "SRAM producer and observation source disagree.")
-    result = {"capture_id": header["id"], "sha256": sha256(raw), "health": observations(header, adc, encoder)}
+    result = {"capture_id": header["id"], "sha256": sha256(raw), "identity_check": header["identity_check"],
+              "configuration_profile": header["encoder_profile"], "health": observations(header, adc, encoder)}
     for lane, rows, flag, key in (("h0", adc, 64, "h0_cycles"), ("h1", encoder, 64, "h1_cycles")):
         cycles = [row[key] for row in rows if row["flags"] & flag]
         require(all(0 < value <= HALF_RANGE_MAX for value in cycles), "SPAN_ORDER", "Invalid captured DWT duration.")
@@ -93,6 +94,8 @@ def main():
     parser.add_argument("--source", choices=("HOST_FIXTURE", "BOARD_DECLARED"), required=True)
     parser.add_argument("--variant", choices=("CAPTURE_OFF", "CAPTURE_ON"), required=True)
     parser.add_argument("--capture", type=Path, help="Optional contemporaneous frozen V1 image, Capture ON only.")
+    parser.add_argument("--capture-configuration", type=Path,
+                        help="External configuration declaration; required for a calibrated capture.")
     parser.add_argument("--stack-dump", type=Path)
     parser.add_argument("--stack-range", nargs=3, metavar=("LOW", "PAINTED_END", "TOP"),
                         type=lambda s: int(s, 0))
@@ -102,12 +105,15 @@ def main():
                 "Supply both the dump and its painted range.")
         require(args.capture is None or args.variant == "CAPTURE_ON", "VARIANT_MISMATCH",
                 "Capture OFF cannot supply a frozen SRAM image.")
+        require(args.capture_configuration is None or args.capture is not None, "VARIANT_MISMATCH",
+                "A capture configuration declaration needs a capture image.")
         log = read_bounded(args.log, JSON_LIMIT)
         report = parse_snapshot(log.decode("utf-8-sig"), args.clock_hz)
         report.update(source=args.source, variant=args.variant, snapshot_sha256=sha256(log),
                       provenance="PROVENANCE_UNVERIFIED" if args.source == "BOARD_DECLARED" else "PROVENANCE_DECLARED")
         if args.capture:
-            report["capture"] = capture_summary(args.capture, args.source, args.clock_hz)
+            report["capture"] = capture_summary(args.capture, args.source, args.clock_hz,
+                                                read_configuration(args.capture_configuration))
         if args.stack_dump:
             report["stack"] = stack_summary(read_bounded(args.stack_dump, 32768), *args.stack_range)
         print(json.dumps(report, indent=2, sort_keys=True))

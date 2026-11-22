@@ -3126,3 +3126,14 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - V2 Board1 启动链变更：`main()` 在输出锁和时钟之后、ADC/SPI/定时器/UART/IRQ 之前调用 `foc_board_boot_select()`。新增构建期只读供应接口 `foc_board_calibration_supply()` 与独立期望 `foc_board_calibration_expectation()`。默认构建无供应，报告 NOMINAL_CONFIGURATION + CALIBRATION_NOT_AVAILABLE，Runtime 与原 `foc_board_init()` 一致。
 - 供应须通过格式、身份、RAW_NO_LUT 坐标、Board 事实下重算的 `foc_calibration_admit()`、快照逐位一致、方向乘积和 Board 窗口检查，才进入 `foc_board_init_with_calibration()`。拒绝或初始化失败时清除候选并重建标称配置；标称也失败则锁定停机。PARAM_READ 新增只读 ID 32–45 读回生效值。采集元数据改用生效配置。
 - 新增独立命名的合成验证 ARM 镜像。两组镜像保持原 TMR1/GPIO 锁定、UART 拒绝与适配器 UPDATE 拒绝。物理输出、目标 WCET 未验证，G3-PWR LOCKED。 [验收报告](../evidence/2026-11-21-next-fw-integ-01.md)
+
+## 2026-11-21 · NEXT-FW-INTEG-01R Board1 校准启动集成修复
+
+- Capture：V1 布局不变，头部 `encoder_profile` 作配置区分符（1 标称原义，2 校准）。`board_capture.py`、`locked_timing.py` 以冻结 Board1 常量和冻结标称或元数据格式 2 的外部配置声明核对身份，标称镜像与旧 V1 样本照常读入，校准镜像需声明。
+- 供应 ID 在 CMake 中于窄化前限定为非零 uint32，`foc_board_expectation.c` 对未窄化字面量静态断言。可接纳供应须带非零 `review_id`（新增拒绝值 10，原值不变）；`review_id` 只是审核材料引用。
+- 复现脚本迁入 `scripts/flows/fwinteg/`：原始退出码逐步记录，按冻结用例清单逐名核对三工具链，分类判定，顶层故障注入覆盖 18 类负例与全绿对照。物理输出、物理校准与目标 WCET 未验证，G3-PWR LOCKED。 [验收报告](../evidence/2026-11-21-next-fw-integ-01r.md)
+
+## 2026-11-21 · FW-ADC-01 Capture 至 ADC 零偏候选（Host）
+
+- 新增 Host 适配层：`board_adc_candidate.py` 复用生产 `board_capture.py` 的镜像校验与 ADC_ZERO Trace，`foc-board-adc-candidate` 调用既有 `foc_calibration_adc_collect/finalize`，与既有审核 Rotor/Offset 候选组成隔离供应，经 `foc_board_boot_select()` 读回 Runtime、解码与 UART，正式实例不变。无新统计或配置系统，ARM 源码未改。
+- 零电流资格只来自调用方前提：Host 夹具见证可生成标注来源的候选；Board 记录无独立证明时为 `PRECONDITION_UNVERIFIED`，不生成候选。两电流 rank 互换无法由现有证据识别。物理 ADC 零点、物理零电流、采样孔径、增益与 WCET 未验证，G3-PWR LOCKED。 [验收报告](../evidence/2026-11-21-fw-adc-01.md)

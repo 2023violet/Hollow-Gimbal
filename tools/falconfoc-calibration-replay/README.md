@@ -27,3 +27,15 @@ For real-source packages, leave provenance unverified unless an independent acqu
 firmware and archives raw bytes and source declarations. It can prepare a
 selected ADC_ZERO Trace V1 when the caller supplies the required witness.
 See [Board1 capture and SOFT-06 import](../../firmware/at32f415/BOARD_CAPTURE.md).
+
+A calibrated-configuration image (header `encoder_profile` 2) is read only with an
+external configuration declaration: metadata format 2 for `import`,
+`describe --configuration <file>`, or `locked_timing.py --capture-configuration <file>`.
+Nominal images and existing V1 samples read as before. See
+[configuration identity](../../firmware/at32f415/BOARD_CAPTURE.md#configuration-identity).
+
+`board_adc_candidate.py` runs the importer, applies the zero-current gate and calls the
+Host adapter `foc-board-adc-candidate` (existing ADC estimator, isolated
+`foc_board_boot_select()` and readback). Board-recorded captures stop at
+`PRECONDITION_UNVERIFIED`. See
+[ADC zero candidate](../../firmware/at32f415/BOARD_CAPTURE.md#adc-zero-candidate).

@@ -209,6 +209,7 @@ struct foc_capture_profile foc_board_capture_default_profile(void)
         .encoder_direction = encoder_config.direction,
         .pole_pairs = runtime_config.motion.rotor.pole_pairs,
         .phase_order = pipeline_config.adc.phase_order,
+        .configuration = FOC_CAPTURE_CONFIGURATION_NOMINAL,
     };
 }
 #endif

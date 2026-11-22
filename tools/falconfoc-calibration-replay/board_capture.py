@@ -27,6 +27,19 @@ HALF_RANGE = 1 << 31
 PRODUCERS = {1: "BOARD_RECORDED", 2: "HOST_VIRTUAL"}
 META = ("format_version", "source", "capture_id", "raw_sha256", "build_tag",
         "firmware_sha256", "identity", "origin_note")
+# Metadata format 2 adds an external configuration declaration (see CONFIGURATION).
+META_V2 = META + ("configuration",)
+
+# Frozen Board1 hardware facts. They never come from the image under test.
+BOARD_PROFILE, BOARD_CPR, BOARD_RAW_DIRECTION, BOARD_PHASE_ORDER = 1, 65536, -1, 0
+# V1 header word encoder_profile: 1 keeps the original meaning (fixed raw profile),
+# 2 carries the effective calibrated Runtime direction and pole pairs.
+NOMINAL_PROFILE, CALIBRATED_PROFILE = 1, 2
+# Frozen nominal configuration: the original locked Board1 V1 profile.
+NOMINAL_DIRECTION, NOMINAL_POLE_PAIRS = -1, 7
+CONFIGURATION = ("profile", "source_direction", "calibration_direction", "runtime_direction",
+                 "pole_pairs", "coordinate", "supply_id", "review_id")
+COORDINATES = ("RAW_NO_LUT", "LUT_CORRECTED", "UNKNOWN")
 WITNESS = ("format_version", "stage", "capture_id", "raw_sha256", "firmware_sha256",
            "covers_start_us", "covers_end_us", "witness_source", "independent_zero_current",
            "sampling_window_verified", "amp_per_count", "instrument", "evidence_reference")
@@ -82,7 +95,60 @@ def read_lane(raw, header, keys, start, count, capacity, completion):
     return rows
 
 
-def read_image(raw):
+def validate_configuration(value):
+    """Check an external configuration declaration on its own, before any image comparison."""
+    reason = "CONFIGURATION_INVALID"
+    cfg = fields(value, CONFIGURATION, "configuration", reason)
+    require(cfg["profile"] in ("NOMINAL", "CALIBRATED") and cfg["coordinate"] in COORDINATES
+            and type(cfg["source_direction"]) is int and cfg["source_direction"] in (-1, 1)
+            and type(cfg["runtime_direction"]) is int and cfg["runtime_direction"] in (-1, 1)
+            and type(cfg["calibration_direction"]) is int and cfg["calibration_direction"] in (-1, 0, 1)
+            and integer(cfg["pole_pairs"], 1, 64) and integer(cfg["supply_id"]) and integer(cfg["review_id"]),
+            reason, "Configuration needs a profile, coordinate, ±1 directions, 1–64 pole pairs and uint32 IDs.")
+    if cfg["profile"] == "NOMINAL":
+        require((cfg["calibration_direction"], cfg["supply_id"], cfg["review_id"]) == (0, 0, 0)
+                and cfg["coordinate"] == "RAW_NO_LUT", reason,
+                "A nominal declaration has no calibration direction, supply or review reference.")
+    else:
+        require(cfg["calibration_direction"] != 0 and cfg["supply_id"] != 0 and cfg["review_id"] != 0,
+                reason, "A calibrated declaration needs its calibration direction, supply and review IDs.")
+    require(cfg["runtime_direction"] == cfg["source_direction"] * (cfg["calibration_direction"] or 1),
+            reason, "Runtime direction must equal source direction times calibration direction.")
+    return cfg
+
+
+def check_identity(header, configuration):
+    """Compare header identity with frozen Board facts and an independent expectation."""
+    require((header["board_profile"], header["encoder_cpr"], header["phase_order"])
+            == (BOARD_PROFILE, BOARD_CPR, BOARD_PHASE_ORDER),
+            "RAW_IDENTITY", "Unexpected Board1 hardware profile, encoder CPR or phase order.")
+    require(header["encoder_profile"] in (NOMINAL_PROFILE, CALIBRATED_PROFILE),
+            "RAW_IDENTITY", "Unknown Board1 configuration profile.")
+    observed = (header["encoder_direction"], header["pole_pairs"])
+    if configuration is None:
+        # Legacy V1 contract: only the frozen nominal profile is self-identifying.
+        require(header["encoder_profile"] == NOMINAL_PROFILE, "CONFIGURATION_REQUIRED",
+                "A calibrated-configuration image needs an external configuration declaration.")
+        require(observed == (NOMINAL_DIRECTION, NOMINAL_POLE_PAIRS),
+                "RAW_IDENTITY", "Unexpected immutable locked Board1 profile.")
+        return "FROZEN_NOMINAL"
+    declared = CALIBRATED_PROFILE if configuration["profile"] == "CALIBRATED" else NOMINAL_PROFILE
+    require(header["encoder_profile"] == declared, "CONFIGURATION_MISMATCH",
+            "The declared configuration profile disagrees with the image.")
+    require(configuration["source_direction"] == BOARD_RAW_DIRECTION, "CONFIGURATION_MISMATCH",
+            "The declared raw source direction is not the Board1 encoder fact.")
+    require(configuration["coordinate"] == "RAW_NO_LUT", "COORDINATE_UNSUPPORTED",
+            "Board1 accepts only raw, non-LUT encoder coordinates.")
+    if declared == NOMINAL_PROFILE:
+        require((configuration["runtime_direction"], configuration["pole_pairs"])
+                == (NOMINAL_DIRECTION, NOMINAL_POLE_PAIRS),
+                "CONFIGURATION_MISMATCH", "A nominal declaration must be the frozen Board1 profile.")
+    require(observed == (configuration["runtime_direction"], configuration["pole_pairs"]),
+            "RAW_IDENTITY", "Image direction or pole pairs disagree with the declared configuration.")
+    return "DECLARED_CONFIGURATION"
+
+
+def read_image(raw, configuration=None):
     require(len(raw) == IMAGE_BYTES, "RAW_SIZE", f"Recorder V1 requires precisely {IMAGE_BYTES} bytes.")
     header = decode(raw, HEADER, 0)
     require((header["magic"], header["version"]) == (0x31434246, 1), "RAW_VERSION",
@@ -105,9 +171,7 @@ def read_image(raw):
     require((header["ranks"], header["logical_channels"]) == (0x06050401, 0x00060504),
             "RANK_MAP", "Expected VBUS/IC/IB/IA and Board1 A/B/C channel order 4/5/6.")
     header["encoder_direction"] = signed(header["encoder_direction"])
-    require((header["board_profile"], header["encoder_profile"], header["encoder_cpr"],
-             header["encoder_direction"], header["pole_pairs"], header["phase_order"]) == (1, 1, 65536, -1, 7, 0),
-            "RAW_IDENTITY", "Unexpected immutable locked Board1 profile.")
+    header["identity_check"] = check_identity(header, configuration)
     adc = read_lane(raw, header, ADC, 128, header["adc_count"], ADC_CAPACITY, "completion_us")
     encoder = read_lane(raw, header, ENCODER, 128 + ADC_CAPACITY * 100,
                         header["encoder_count"], ENCODER_CAPACITY, "close_us")
@@ -152,9 +216,17 @@ def read_image(raw):
     return header, adc, encoder
 
 
+def metadata_configuration(metadata):
+    """Format 1 declares no configuration (frozen nominal); format 2 must declare one."""
+    require(type(metadata) is dict and metadata.get("format_version") in (1, 2), "METADATA_INVALID",
+            "Metadata format_version must be 1 or 2.")
+    fields(metadata, META if metadata["format_version"] == 1 else META_V2, "metadata", "METADATA_INVALID")
+    return None if metadata["format_version"] == 1 else validate_configuration(metadata["configuration"])
+
+
 def inspect_metadata(raw, metadata, header):
-    fields(metadata, META, "metadata", "METADATA_INVALID")
-    require(integer(metadata["format_version"], 1, 1) and label(metadata["origin_note"])
+    metadata_configuration(metadata)
+    require(integer(metadata["format_version"], 1, 2) and label(metadata["origin_note"])
             and integer(metadata["build_tag"]) and integer(metadata["capture_id"], 1)
             and (metadata["firmware_sha256"] is None or sha256_string(metadata["firmware_sha256"])),
             "METADATA_INVALID", "Invalid version, origin note, capture ID, build tag or declared firmware digest.")
@@ -247,7 +319,9 @@ def prepare_trace(raw_witness, header, adc, metadata, health):
         "time": {"unit": "us", "clock_id": 1, "max_age_us": ADC_FENCE_US, "max_skew_us": 0,
                  "allow_wrap": header["end_us"] < header["start_us"], "alignment": "SAME_CLOCK_PAIR"},
         "adc": {"max_count": 4095, "amp_per_count": witness["amp_per_count"], "channel_map": [4, 5, 6]},
-        "encoder": {"cpr": header["encoder_cpr"], "raw_direction": header["encoder_direction"],
+        # raw_direction is the Board1 raw encoder fact; a calibrated header carries the
+        # effective Runtime direction instead, so it is never copied here.
+        "encoder": {"cpr": header["encoder_cpr"], "raw_direction": BOARD_RAW_DIRECTION,
                     "phase_order": header["phase_order"], "pole_pairs": header["pole_pairs"]},
         "reference": {"id": 0, "zero_rad": 0, "frame_direction": 1}, "torque_model_id": 0,
         "units": UNITS, "instruments": [witness["instrument"]], "preconditions": descriptions,
@@ -277,10 +351,12 @@ def import_image(args):
         (args.out / "source.json").write_bytes(meta)
         files["source.json"] = sha256(meta)
         metadata = json_object(meta, "METADATA_INVALID")
-        header, adc, encoder = read_image(raw)
+        configuration = metadata_configuration(metadata)
+        header, adc, encoder = read_image(raw, configuration)
         provenance = inspect_metadata(raw, metadata, header)
         health = observations(header, adc, encoder)
         report.update(status="DIAGNOSTIC_OBSERVATION", source=metadata["source"], provenance=provenance,
+                      configuration=configuration, identity_check=header["identity_check"],
                       header=header, health=health, adc=adc, encoder=encoder,
                       stage_status={"ADC_ZERO": ("INDEPENDENT_ZERO_CURRENT_AND_TIMING_WITNESS_REQUIRED"
                                                  if health["complete"] else "ACQUISITION_INCOMPLETE"),
@@ -306,7 +382,15 @@ def import_image(args):
     (args.out / "diagnostic.json").write_bytes(json_bytes(report))
     if error is not None:
         raise error
-    return {"status": report["status"], "provenance": report["provenance"], "health": report["health"]}
+    return {"status": report["status"], "provenance": report["provenance"],
+            "identity_check": report["identity_check"], "health": report["health"]}
+
+
+def read_configuration(path):
+    """Load an external configuration declaration file for describe/locked_timing."""
+    if path is None:
+        return None
+    return validate_configuration(json_object(read_bounded(path, JSON_LIMIT), "CONFIGURATION_INVALID"))
 
 
 def main():
@@ -319,13 +403,15 @@ def main():
     importer.add_argument("--qualification", type=Path)
     inspect = commands.add_parser("describe", help="Decode a frozen raw image without declaring its provenance.")
     inspect.add_argument("image", type=Path)
+    inspect.add_argument("--configuration", type=Path,
+                         help="External configuration declaration; required for a calibrated image.")
     args = parser.parse_args()
     try:
         if args.command == "import":
             result = import_image(args)
         else:
             raw = read_bounded(args.image, 8192)
-            header, adc, encoder = read_image(raw)
+            header, adc, encoder = read_image(raw, read_configuration(args.configuration))
             result = {"raw_sha256": sha256(raw), "header": header, "health": observations(header, adc, encoder)}
         print(json.dumps(result, ensure_ascii=True))
         return 0

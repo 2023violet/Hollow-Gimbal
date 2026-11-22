@@ -73,6 +73,42 @@ python -B tools/falconfoc-calibration-replay/replay.py replay board1-archive/tra
 
 只选择 ADC_ZERO 的回放能给出当前阶段的偏置和噪声诊断。完整配置候选、应用、持久化另受原有工作流限制。对外部来源使用 `--attestation` 前，可信审查人须核实来源和所用仪器、绑定 `manifest.json` 的摘要，并独立保存见证材料。
 
+<a id="configuration-identity"></a>
+
+## 配置身份合同
+
+V1 布局、128 B 头和 5480 B 镜像不变。头部 `encoder_profile` 字作为配置区分符：原有镜像恒为 1，含义保持不变；校准启动写 2。
+
+| 信息 | 声明方 | 核对方与依据 |
+| --- | --- | --- |
+| 板级硬件身份：`board_profile=1`、rank/逻辑通道、CPR 65536、原始编码器方向 −1、相序 ABC | 固件 Writer 常量 | `board_capture.py` 用冻结的 Board1 常量核对，不从镜像反读 |
+| 配置区分符 `encoder_profile` | Writer，取自启动报告的生效配置（1 标称，2 校准；其他值拒绝启动采集） | 导入器要求 1 或 2，并与外部声明的 profile 一致 |
+| 标称（1）：头部方向/极对数 = Board1 原始 −1/7（V1 原义） | Writer | 无声明时按冻结标称 −1/7 核对（V1 旧样本与旧元数据格式 1 照常读入）；声明 NOMINAL 时同样要求冻结值 |
+| 校准（2）：头部方向 = Runtime 原始码→机械方向，极对数 = Runtime 极对数 | Writer，取自生效 Runtime/Encoder | 必须由元数据格式 2 的 `configuration` 外部声明提供期望值：`source_direction`（须为 Board −1）、`calibration_direction`、`runtime_direction`（须等于两者乘积）、`pole_pairs`、`coordinate`（只接受 `RAW_NO_LUT`）、非零 `supply_id` 与 `review_id`。头部值须与声明一致 |
+| 采集来源 | `producer` 字与元数据 `source` | 两者须一致；Host 夹具标 HOST，`BOARD_RECORDED` 保持 `PROVENANCE_UNVERIFIED` |
+| 完整性 | CRC32 | 只证明字节未变；重算 CRC 后的身份篡改仍被身份核对拒绝 |
+
+`supply_id` 与 `review_id` 在声明中只作为引用记录，导入器不把它们与镜像比对，也不据此证明物理来源。电角 Offset 不在头部：当前唯一消费者 ADC_ZERO Trace 不需要它，Trace 清单中的 `raw_direction` 恒取 Board 原始方向 −1，`pole_pairs` 取已核对的头部值。
+
+拒绝原因：无声明的校准镜像为 `CONFIGURATION_REQUIRED`；标称镜像声明为校准、或校准镜像声明为标称为 `CONFIGURATION_MISMATCH`；声明与头部方向或极对数不符、或硬件字段不符为 `RAW_IDENTITY`；坐标非 `RAW_NO_LUT` 为 `COORDINATE_UNSUPPORTED`；声明自身不自洽为 `CONFIGURATION_INVALID`。`board_capture.py describe --configuration` 与 `locked_timing.py --capture-configuration` 使用同一核对。
+
+<a id="adc-zero-candidate"></a>
+
+## ADC 零偏候选（FW-ADC-01，Host）
+
+`tools/falconfoc-calibration-replay/board_adc_candidate.py` 串起既有组件，不新增统计：生产 `board_capture.py` 完成镜像、CRC、身份、配置声明、序列与时间校验并在独立零电流见证下生成 ADC_ZERO Trace（p1..p3 = rank 2/3/4 = 逻辑 A/B/C）；`foc-board-adc-candidate`（`tests/foc_board_adc_candidate.c`，仅 Host）逐行调用 `foc_calibration_adc_collect/finalize`，把合格候选与既有审核 Rotor/Offset 候选组成隔离供应，经 `foc_board_boot_select()` 初始化隔离实例，读回 Runtime Offset、`foc_device_decode_sample()` 解码和 UART，并核对另行启动的正式实例未变。
+
+| 映射 | 依据 |
+| --- | --- |
+| rank 1 = ADC1_IN1 PA1 = VBUS | `main.c:foc_at32_adc_init`、头部 `ranks=0x06050401` |
+| rank 2 = IN4 PA4 = 驱动 IC = 逻辑 A | 同上、`logical_channels=0x00060504`、`foc_device_decode_sample` 的 rank2→a |
+| rank 3 = IN5 PA5 = 驱动 IB = 逻辑 B | 同上 |
+| rank 4 = IN6 PA6 = 驱动 IA = 逻辑 C | 同上 |
+
+两个电流 rank 在接线层面互换时，镜像中没有独立电流参考，现有证据无法识别该错误（测试保留该事实）。
+
+零电流资格：`zero_current_confirmed` 只由调用方前提给出。Host 生产者加夹具见证得到 `QUALIFIED_MEASUREMENT_TRACE`，候选标为 `HOST_SYNTHETIC`/`HOST_VIRTUAL` 夹具声明；Board 生产者即使附外部仪器见证也只到 `TRACE_PREPARED_PROVENANCE_UNVERIFIED`，编排器报告 `PRECONDITION_UNVERIFIED` 且不生成候选；无见证为 `PRECONDITION_REQUIRED`。软件 INHIBIT 不是绕组零电流证明。候选只代表 ADC 零偏，正式 Runtime Offset 不被替换。
+
 ## 时间与物理见证
 
 | 数据 | 合同 |

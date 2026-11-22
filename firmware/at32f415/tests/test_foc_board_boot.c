@@ -310,6 +310,7 @@ static int test_verification_supply_is_accepted(void)
     CHECK(foc_board_boot_capture_profile(&fixture.boot, 5U, &profile));
     CHECK(profile.build_tag == 5U && profile.encoder_cpr == 65536U);
     CHECK(profile.encoder_direction == 1 && profile.pole_pairs == 11U && profile.phase_order == 0U);
+    CHECK(profile.configuration == FOC_CAPTURE_CONFIGURATION_CALIBRATED);
     printf(
         "accepted supply 0x%08lx review 0x%08lx: offsets %.2f/%.2f/%.2f pp %u eoff %.7f dir "
         "src %ld x cal %ld = runtime %ld\n",
@@ -518,8 +519,22 @@ static int test_rejections_fall_back_to_nominal(void)
         ) == 0
     );
 
+    /* review_id: a nonzero reference is required, but it never substitutes for checks. */
+    CHECK(reviewed->review_id != 0U);
+    bad = *reviewed;
+    bad.review_id = 0U;
+    CHECK(
+        expect_rejected(
+            &bad,
+            &expectation,
+            FOC_BOARD_REJECTION_REVIEW_REFERENCE,
+            FOC_CALIBRATION_ADMISSION_NONE
+        ) == 0
+    );
+    /* Valid review reference, wrong supply identity. */
     bad = *reviewed;
     bad.supply_id ^= 1U;
+    CHECK(bad.review_id != 0U);
     CHECK(
         expect_rejected(
             &bad,
@@ -528,6 +543,35 @@ static int test_rejections_fall_back_to_nominal(void)
             FOC_CALIBRATION_ADMISSION_NONE
         ) == 0
     );
+    /* Valid review reference, mathematically unqualified candidate. */
+    bad = *reviewed;
+    bad.rotor.residual_rms_rad = 0.5f;
+    CHECK(
+        expect_rejected(
+            &bad,
+            &expectation,
+            FOC_BOARD_REJECTION_ADMISSION,
+            FOC_CALIBRATION_ADMISSION_ROTOR_MAPPING
+        ) == 0
+    );
+    /* Valid review reference, snapshot that the candidates do not reproduce. */
+    bad = *reviewed;
+    bad.snapshot.electrical_offset_rad += 0.01f;
+    CHECK(
+        expect_rejected(
+            &bad,
+            &expectation,
+            FOC_BOARD_REJECTION_SNAPSHOT_MISMATCH,
+            FOC_CALIBRATION_ADMISSION_NONE
+        ) == 0
+    );
+    /* A different nonzero review reference is still accepted: it is not matched. */
+    bad = *reviewed;
+    bad.review_id ^= 0x00010000U;
+    reset_fixture();
+    CHECK(foc_boot_test_select(&fixture, &bad, &expectation) == FOC_RUNTIME_OK);
+    CHECK(fixture.boot.configuration == FOC_BOARD_CALIBRATED_CONFIGURATION);
+    CHECK(fixture.boot.review_id == bad.review_id);
     const struct foc_board_calibration_expectation none = {0U, 11U};
     bad = *reviewed;
     bad.supply_id = 0U;
@@ -910,6 +954,8 @@ static int check_locked_uart(struct foc_boot_test *test, bool calibrated)
     CHECK(parameter.value == view.supply_id);
     CHECK(foc_boot_test_read(test, PARAM_REVIEW_ID, &parameter) == FOC_PROTO_OK);
     CHECK(parameter.value == view.review_id);
+    CHECK(parameter.value == (calibrated ? 0x01210001U : 0U));
+    CHECK(parameter.type == 1U && parameter.attributes == 2U);
     const float offsets[] = {
         test->runtime.pipeline.adc_config.phase_a_offset_count,
         test->runtime.pipeline.adc_config.phase_b_offset_count,

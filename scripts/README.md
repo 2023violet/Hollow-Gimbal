@@ -23,6 +23,11 @@ Current official entry points:
 - V2 binary UART protocol, shared vectors and CLI reproduction: [wire specification](../protocol/README.md) and [Host tool](../tools/falconfoc-cli/README.md)
 - Keil bridge: `scripts/build_project.ps1`
 - Servo SDK internal packaging and release gate: [SDK packaging](../docs/servo/sdk-packaging.md)
+- V2 Board1 integration reproduction (Host matrices, witnesses, ARM images, static, UART, Legacy presets,
+  Strict Scope all, fault injection): `bash scripts/flows/fwinteg/run_fwinteg.sh <new output dir>`
+  from the repository root. The top-level exit code is the verdict of `fwinteg_verdict.py`; see
+  [NEXT-FW-INTEG-01R](../docs/evidence/2026-11-21-next-fw-integ-01r.md). The earlier
+  `build/fwinteg/run-final.sh` lived in the ignored `build/` tree, always exited 0 and is superseded.
 
 Layout:
 
@@ -33,6 +38,10 @@ Layout:
   - includes the no-board FOC peripheral contract check; it only reads source
     and generated configuration and never connects to a debugger or board
 - `scripts/flows/board/`: canonical FalconFoc board smoke flows
+- `scripts/flows/fwinteg/`: V2 Board1 integration reproduction. `run_fwinteg.sh` records each raw step
+  exit code; `fwinteg_verdict.py` checks every toolchain's CTest names against `expected_tests.tsv`,
+  log completeness and each category; `--stub` with `FWINTEG_INJECT` drives
+  `test_fault_injection.py`. No board access
 - `scripts/lib/`: reusable helpers
 - root-level `check_*` and `run_*`: compatibility wrappers for the canonical
   paths that remain

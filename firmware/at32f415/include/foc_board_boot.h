@@ -64,7 +64,11 @@ struct foc_board_calibration_supply {
     uint32_t format;
     /** Declared supply identity, compared with an independent build expectation. */
     uint32_t supply_id;
-    /** Reference to the review material that produced the candidates. */
+    /**
+     * Reference to the review material that produced the candidates. Must be
+     * nonzero for any accepted supply. It is a reference only: no independent
+     * expectation, signature or physical provenance is checked against it.
+     */
     uint32_t review_id;
     /** Encoder coordinate of the rotor and offset fit. */
     enum foc_board_encoder_coordinate coordinate;
@@ -131,6 +135,8 @@ enum foc_board_calibration_rejection {
     FOC_BOARD_REJECTION_DIRECTION_PRODUCT = 8,
     /** Calibrated initialization failed after qualification. */
     FOC_BOARD_REJECTION_INITIALIZATION = 9,
+    /** The supply carries no review reference (review_id 0). Appended; values 0–9 unchanged. */
+    FOC_BOARD_REJECTION_REVIEW_REFERENCE = 10,
 };
 
 /** Board qualification window applied after admission, in raw counts and pole pairs. */

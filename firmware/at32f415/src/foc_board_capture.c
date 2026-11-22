@@ -49,6 +49,9 @@ bool foc_board_capture_start(
 )
 {
     if (id == 0U || (producer != FOC_CAPTURE_BOARD && producer != FOC_CAPTURE_HOST) ||
+        profile == NULL ||
+        (profile->configuration != FOC_CAPTURE_CONFIGURATION_NOMINAL &&
+         profile->configuration != FOC_CAPTURE_CONFIGURATION_CALIBRATED) ||
         atomic_load_explicit(&capture->state, memory_order_relaxed) != FOC_CAPTURE_IDLE) {
         return false;
     }
@@ -76,7 +79,7 @@ bool foc_board_capture_start(
         .adc_capacity = FOC_CAPTURE_ADC_CAPACITY,
         .encoder_capacity = FOC_CAPTURE_ENCODER_CAPACITY,
         .board_profile = 1U,
-        .encoder_profile = 1U,
+        .encoder_profile = profile->configuration,
         .clock_hz = FOC_BOARD_US_HZ,
     };
     capture->crc = UINT32_MAX;

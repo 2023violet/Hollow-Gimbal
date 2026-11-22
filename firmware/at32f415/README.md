@@ -72,8 +72,9 @@ expected motor pole pairs, set by CMake, never by the supply).
   report is `NOMINAL_CONFIGURATION` + `CALIBRATION_NOT_AVAILABLE`, with the same
   Runtime as `foc_board_init()`.
 - A supply carries the existing admission candidates (ADC zero, rotor, offset),
-  their limits and the recorded snapshot. Startup checks format, supply identity
-  and the encoder coordinate (only `RAW_NO_LUT` is accepted), recomputes
+  their limits and the recorded snapshot. Startup checks format, supply identity,
+  the presence of a nonzero review reference and the encoder coordinate (only
+  `RAW_NO_LUT` is accepted), recomputes
   `foc_calibration_admit()` with Board facts and the expected pole pairs,
   requires the recomputed snapshot to equal the supplied one bit for bit, checks
   runtime direction = source direction × calibration direction and the Board
@@ -85,11 +86,21 @@ expected motor pole pairs, set by CMake, never by the supply).
   initialization fails too, nothing is reported ready and `main()` stays in the
   locked `__WFI()` loop with no producer.
 
+The supply identity is matched against the independent CMake expectation. The
+review ID is a reference to review material only; it is required to be nonzero
+but is not matched, signed or treated as proof of physical provenance. CMake
+rejects a verification supply ID outside 0x1–0xFFFFFFFF (aliases such as
+0x156464331 included) and pole pairs outside 1–64 before compilation, and
+`foc_board_expectation.c` re-checks the un-narrowed literal with static
+assertions.
+
 Only the three ADC offsets, encoder direction, pole pairs and rotor electrical
 offset are consumed. R/L, flux, Kt, J/B, PI and LUT stay outside Board1 startup
 and FCAL is not parsed. UART reads the result with PARAM_READ IDs 32–45 (see
 the protocol README). The optional capture recorder takes its CPR, direction,
-pole pairs and phase order from the effective configuration.
+pole pairs and phase order from the effective configuration and marks the
+configuration in the V1 header word `encoder_profile` (1 nominal, 2 calibrated);
+see [BOARD_CAPTURE.md](BOARD_CAPTURE.md#configuration-identity).
 
 The synthetic verification image is a separate, explicitly named build:
 

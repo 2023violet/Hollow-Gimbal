@@ -41,6 +41,21 @@ if(NOT FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID MATCHES "^0[xX][0-9a-fA-F]+$"
 )
   message(FATAL_ERROR "Supply a hexadecimal supply ID and a positive pole-pair count")
 endif()
+# Range checks on the original text, before any C conversion can narrow it. The
+# verification supply ID is a nonzero uint32; zero is reserved for NONE.
+string(REGEX REPLACE "^0[xX]0*" "" supply_id_digits "${FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID}")
+string(LENGTH "${supply_id_digits}" supply_id_length)
+if(supply_id_length EQUAL 0 OR supply_id_length GREATER 8)
+  message(
+    FATAL_ERROR
+      "FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID must be a nonzero uint32 (0x1..0xFFFFFFFF), got "
+      "'${FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID}'"
+  )
+endif()
+string(LENGTH "${FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS}" pole_pairs_length)
+if(pole_pairs_length GREATER 2 OR FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS GREATER 64)
+  message(FATAL_ERROR "FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS must be 1..64")
+endif()
 
 set(repo "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(vendor "${repo}/platform/at/at32f415/vendor")
@@ -109,7 +124,7 @@ add_library(
 )
 target_link_libraries(falconfoc-board1-supply-none PUBLIC falconfoc-board1)
 target_compile_definitions(
-  falconfoc-board1-supply-none PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=0U
+  falconfoc-board1-supply-none PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=0ULL
                                        FOC_BOARD_EXPECTED_POLE_PAIRS=7U
 )
 add_library(
@@ -119,7 +134,8 @@ add_library(
 target_link_libraries(falconfoc-board1-supply-verification PUBLIC falconfoc-board1)
 target_compile_definitions(
   falconfoc-board1-supply-verification
-  PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=${FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID}U
+  PRIVATE FOC_BOARD_EXPECTED_SUPPLY_ID=${FALCONFOC_BOARD_VERIFICATION_SUPPLY_ID}ULL
+          FOC_BOARD_EXPECTED_SUPPLY_REQUIRED=1
           FOC_BOARD_EXPECTED_POLE_PAIRS=${FALCONFOC_BOARD_VERIFICATION_POLE_PAIRS}U
 )
 foreach(supply falconfoc-board1-supply-none falconfoc-board1-supply-verification)
@@ -224,6 +240,30 @@ else()
   add_test(NAME test-foc-locked-timing-import
            COMMAND "${Python3_EXECUTABLE}" -B
                    "${repo}/tools/falconfoc-calibration-replay/tests/test_locked_timing.py"
+  )
+  # Formal boot -> production SRAM writer -> Host import -> Locked Timing, both boots.
+  add_executable(foc-board-capture-boot-fixture tests/foc_board_capture_boot_fixture.c)
+  target_link_libraries(foc-board-capture-boot-fixture PRIVATE falconfoc-board1-supply-verification)
+  # FW-ADC-01: production ADC_ZERO trace -> existing estimator -> isolated Runtime.
+  add_executable(foc-board-adc-candidate tests/foc_board_adc_candidate.c)
+  target_link_libraries(foc-board-adc-candidate PRIVATE falconfoc-board1-supply-verification)
+  add_test(NAME test-foc-adc-candidate
+           COMMAND "${Python3_EXECUTABLE}" -B
+                   "${repo}/tools/falconfoc-calibration-replay/tests/test_board_adc_candidate.py"
+  )
+  set_tests_properties(
+    test-foc-adc-candidate
+    PROPERTIES
+      ENVIRONMENT
+      "FOC_CAPTURE_BOOT_FIXTURE=$<TARGET_FILE:foc-board-capture-boot-fixture>;FOC_ADC_CANDIDATE=$<TARGET_FILE:foc-board-adc-candidate>"
+  )
+  add_test(NAME test-foc-capture-boot-import
+           COMMAND "${Python3_EXECUTABLE}" -B
+                   "${repo}/tools/falconfoc-calibration-replay/tests/test_board_capture_boot.py"
+  )
+  set_tests_properties(
+    test-foc-capture-boot-import
+    PROPERTIES ENVIRONMENT "FOC_CAPTURE_BOOT_FIXTURE=$<TARGET_FILE:foc-board-capture-boot-fixture>"
   )
   add_test(NAME test-foc-python COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s
                                         "${repo}/tools/falconfoc-cli" -p test_falconfoc_cli.py -v

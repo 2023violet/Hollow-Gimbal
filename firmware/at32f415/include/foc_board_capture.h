@@ -79,12 +79,27 @@ enum {
     FOC_CAPTURE_STOP_PENDING = 1U << 10,
 };
 
+/**
+ * Configuration discriminator written to the V1 header word `encoder_profile`.
+ *
+ * NOMINAL keeps the original V1 meaning: `encoder_direction`/`pole_pairs` are the
+ * fixed Board1 raw profile (-1/7). CALIBRATED means they are the effective Runtime
+ * raw-to-mechanical direction and pole pairs of an accepted calibration snapshot;
+ * a consumer must check them against an independent configuration declaration.
+ */
+enum foc_capture_configuration {
+    FOC_CAPTURE_CONFIGURATION_NOMINAL = 1U,
+    FOC_CAPTURE_CONFIGURATION_CALIBRATED = 2U,
+};
+
 struct foc_capture_profile {
     uint32_t build_tag;
     uint32_t encoder_cpr;
     int32_t encoder_direction;
     uint32_t pole_pairs;
     uint32_t phase_order;
+    /** enum foc_capture_configuration; any other value refuses the capture. */
+    uint32_t configuration;
 };
 
 struct foc_capture_header {

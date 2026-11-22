@@ -60,7 +60,18 @@ enum foc_board_output_result {
     FOC_BOARD_ACTIVE_BRAKE_LOCKED,
     /** The action or its payload failed validation. */
     FOC_BOARD_OUTPUT_INVALID,
+    /** An attached backend applied a validated action. Appended; earlier values unchanged. */
+    FOC_BOARD_OUTPUT_APPLIED,
 };
+
+/**
+ * Optional output backend for a validated request. The locked AT32 image
+ * attaches none, so every UPDATE stays FOC_BOARD_UPDATE_NOT_APPLIED. A Host
+ * SIL attaches a virtual plant. Called from H0 only; return true when the
+ * request took effect at the backend.
+ */
+typedef bool (*foc_board_output_backend)(void *argument,
+                                         const struct foc_device_pwm_request *request);
 
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
 enum foc_board_trace_point {
@@ -117,6 +128,11 @@ struct foc_board_output {
     enum foc_board_output_result result;
     /** Number of valid UPDATEs declined by the board. */
     uint32_t declined_updates;
+    /** Number of valid UPDATEs applied by the attached backend. */
+    uint32_t applied_updates;
+    /** Optional backend and its argument; NULL keeps the locked policy. */
+    foc_board_output_backend backend;
+    void *backend_argument;
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
     struct foc_board_adc *trace_owner;
 #endif
@@ -354,7 +370,17 @@ int foc_board_encoder_complete(struct foc_runtime *runtime,
                                enum foc_board_encoder_result transport,
                                uint16_t code);
 
-/** Validate a complete request and record its locked disposition. */
+/** Validate a complete request and record its disposition. Without a backend
+ * UPDATE, ZERO_DUTY and ACTIVE_BRAKE are declined and INHIBIT is software-only. */
 bool foc_board_output_submit(void *argument, const struct foc_device_pwm_request *request);
+
+/**
+ * Attach a backend after boot selection and before any producer starts.
+ * Boot selection rewrites the journal, so attaching earlier has no effect.
+ * Rejects NULL arguments and a second attachment.
+ */
+bool foc_board_output_attach(struct foc_board_output *output,
+                             foc_board_output_backend backend,
+                             void *argument);
 
 /* ---------------------------------------- end of file ----------------------------------------- */

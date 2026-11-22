@@ -39,6 +39,7 @@ enum {
     SNAPSHOT_SAMPLE_SEEN = 1U << 3,
     SNAPSHOT_OUTER_SEEN = 1U << 4,
     SNAPSHOT_SENSOR_VALID = 1U << 5,
+    SNAPSHOT_CURRENT_VALID = 1U << 6,
 };
 
 enum {
@@ -67,6 +68,10 @@ enum {
     WORD_COMMAND_SEQ,
     WORD_FOLLOWING_STATE,
     WORD_MOTION_REJECTION,
+    WORD_MEASURED_ID,
+    WORD_MEASURED_IQ,
+    WORD_TARGET_ID,
+    WORD_TARGET_IQ,
     WORD_COUNT,
 };
 
@@ -146,7 +151,11 @@ static void foc_runtime_publish_snapshot(struct foc_runtime *runtime)
             (safe->command_seen ? SNAPSHOT_COMMAND_SEEN : 0U) |
             (safe->sample_seen ? SNAPSHOT_SAMPLE_SEEN : 0U) |
             (runtime->accepted_outer_seen ? SNAPSHOT_OUTER_SEEN : 0U) |
-            (runtime->observed_sensor.valid ? SNAPSHOT_SENSOR_VALID : 0U),
+            (runtime->observed_sensor.valid ? SNAPSHOT_SENSOR_VALID : 0U) |
+            (mock->output_confirmed && mock->last_request.action == FOC_DEVICE_OUTPUT_UPDATE &&
+                     runtime->pipeline.last_reason == FOC_PIPELINE_OK
+                 ? SNAPSHOT_CURRENT_VALID
+                 : 0U),
         [WORD_STATE] = safe->state,
         [WORD_FAULTS] = safe->latched_faults,
         [WORD_ACTION] = mock->last_request.action,
@@ -171,6 +180,10 @@ static void foc_runtime_publish_snapshot(struct foc_runtime *runtime)
         [WORD_COMMAND_SEQ] = safe->command_seq,
         [WORD_FOLLOWING_STATE] = (unsigned int)runtime->following.status,
         [WORD_MOTION_REJECTION] = (unsigned int)runtime->motion_rejection,
+        [WORD_MEASURED_ID] = foc_runtime_float_word(runtime->pipeline.measured_dq_a.d),
+        [WORD_MEASURED_IQ] = foc_runtime_float_word(runtime->pipeline.measured_dq_a.q),
+        [WORD_TARGET_ID] = foc_runtime_float_word(runtime->pipeline.target_dq_a.d),
+        [WORD_TARGET_IQ] = foc_runtime_float_word(runtime->pipeline.target_dq_a.q),
     };
     for (unsigned int index = 0U; index < WORD_COUNT; ++index) {
         atomic_store(&runtime->telemetry_words[index], words[index]);
@@ -240,6 +253,11 @@ static int foc_runtime_copy_snapshot(
         .sensor_valid = (words[WORD_FLAGS] & SNAPSHOT_SENSOR_VALID) != 0U,
         .following_state = (enum foc_following_state)words[WORD_FOLLOWING_STATE],
         .motion_rejection = (enum foc_motion_rejection)words[WORD_MOTION_REJECTION],
+        .measured_id_a = foc_runtime_word_float(words[WORD_MEASURED_ID]),
+        .measured_iq_a = foc_runtime_word_float(words[WORD_MEASURED_IQ]),
+        .current_valid = (words[WORD_FLAGS] & SNAPSHOT_CURRENT_VALID) != 0U,
+        .target_id_a = foc_runtime_word_float(words[WORD_TARGET_ID]),
+        .target_iq_a = foc_runtime_word_float(words[WORD_TARGET_IQ]),
     };
     return FOC_RUNTIME_OK;
 }
@@ -1262,7 +1280,186 @@ static bool foc_runtime_protection_valid(const struct foc_runtime_motion_config 
          motion->impedance.mechanical_frame_id == motion->limits.mechanical_frame_id);
 }
 
+/* Tuning ---------------------------------------------------------------------- */
+
+/* The same checks foc_runtime_init() applies, on candidate copies only. */
+static int foc_runtime_tuning_check(
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_tuning *tuning,
+    struct foc_current_context *current,
+    struct foc_velocity_context *velocity
+)
+{
+    if (tuning == NULL || runtime->pipeline.feedforward.enabled ||
+        runtime->config.motion.impedance.enabled || !isfinite(tuning->current_limit_a) ||
+        tuning->command_timeout_us < FOC_RUNTIME_LEASE_MIN_US ||
+        tuning->command_timeout_us > FOC_RUNTIME_LEASE_MAX_US ||
+        tuning->command_timeout_us < runtime->pipeline.safety.config.sample_timeout_us) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    struct foc_current_config inner = runtime->pipeline.current.config;
+    inner.kp_v_per_a = tuning->current_kp_v_per_a;
+    inner.ki_v_per_a_s = tuning->current_ki_v_per_a_s;
+    inner.current_limit_a = tuning->current_limit_a;
+    if (foc_current_init(current, &inner) != FOC_STATUS_OK) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    *velocity = runtime->outer_velocity;
+    if (!runtime->config.motion.enabled) {
+        return FOC_RUNTIME_OK;
+    }
+    struct foc_velocity_config outer = runtime->config.motion.velocity;
+    outer.kp_a_per_rad_s = tuning->velocity_kp_a_per_rad_s;
+    outer.ki_a_per_rad = tuning->velocity_ki_a_per_rad;
+    const struct foc_position_config position = {
+        .kp_per_s = tuning->position_kp_per_s,
+        .velocity_limit_rad_s = tuning->velocity_limit_rad_s,
+    };
+    struct foc_position_output check;
+    if (!isfinite(tuning->iq_limit_a) || tuning->iq_limit_a <= 0.0f ||
+        tuning->iq_limit_a > tuning->current_limit_a ||
+        foc_position_step(&position, 0.0f, 0.0f, &check) != FOC_STATUS_OK ||
+        foc_velocity_init(velocity, &outer) != FOC_STATUS_OK) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    return FOC_RUNTIME_OK;
+}
+
+static void foc_runtime_tuning_write_result(
+    struct foc_runtime *runtime,
+    enum foc_runtime_request_result result,
+    uint32_t now_us,
+    int status
+)
+{
+    const unsigned int current =
+        atomic_load_explicit(&runtime->tuning_result_slot, memory_order_relaxed);
+    const unsigned int next = current == 0U ? 1U : 0U;
+    runtime->tuning_results[next] = (struct foc_runtime_tuning_result){
+        .result = result,
+        .request_sequence = runtime->tuning_request_sequence,
+        .revision = runtime->tuning_revision,
+        .h0_us = now_us,
+        .status = status,
+    };
+    atomic_store_explicit(&runtime->tuning_result_slot, next, memory_order_release);
+}
+
+/* H0 only, after the cycle. A candidate takes effect from the next cycle. H1 reads the
+ * outer gains only while RUNNING, which cannot begin in the cycle that applies them. */
+static void foc_runtime_tuning_service(struct foc_runtime *runtime, uint32_t now_us, bool cancel)
+{
+    unsigned int expected = FOC_RUNTIME_REQUEST_PUBLISHED;
+    if (!atomic_compare_exchange_strong_explicit(
+            &runtime->tuning_pending,
+            &expected,
+            FOC_RUNTIME_REQUEST_CLAIMED,
+            memory_order_acquire,
+            memory_order_relaxed
+        )) {
+        return;
+    }
+    const struct foc_pipeline *pipeline = &runtime->pipeline;
+    const struct foc_runtime_tuning tuning = runtime->tuning_request;
+    enum foc_runtime_request_result result = FOC_RUNTIME_REQUEST_REJECTED;
+    int status = FOC_RUNTIME_ERR_CONTROL;
+    struct foc_current_context current;
+    struct foc_velocity_context velocity;
+    if (cancel || atomic_load(&runtime->stop_requests) != 0U) {
+        result = FOC_RUNTIME_REQUEST_CANCELLED;
+    } else if (
+        pipeline->safety.state == FOC_SAFE_STATE_DISABLED && pipeline->mock.output_confirmed &&
+        pipeline->mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT
+    ) {
+        status = foc_runtime_tuning_check(runtime, &tuning, &current, &velocity);
+        if (status == FOC_RUNTIME_OK) {
+            runtime->pipeline.current = current;
+            runtime->pipeline.safety.config.command_timeout_us = tuning.command_timeout_us;
+            if (runtime->config.motion.enabled) {
+                runtime->outer_velocity = velocity;
+                runtime->config.motion.velocity = velocity.config;
+                runtime->config.motion.position.kp_per_s = tuning.position_kp_per_s;
+                runtime->config.motion.position.velocity_limit_rad_s = tuning.velocity_limit_rad_s;
+                runtime->config.motion.iq_limit_a = tuning.iq_limit_a;
+            }
+            runtime->tuning_revision++;
+            result = FOC_RUNTIME_REQUEST_APPLIED;
+        }
+    }
+    foc_runtime_tuning_write_result(runtime, result, now_us, status);
+    atomic_store_explicit(&runtime->tuning_pending, FOC_RUNTIME_REQUEST_IDLE, memory_order_release);
+}
+
 /* Public Functions ------------------------------------------------------------- */
+
+int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtime_tuning *tuning)
+{
+    if (runtime == NULL || !runtime->initialized || tuning == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const struct foc_current_config *inner = &runtime->pipeline.current.config;
+    const struct foc_runtime_motion_config *motion = &runtime->config.motion;
+    *tuning = (struct foc_runtime_tuning){
+        .current_kp_v_per_a = inner->kp_v_per_a,
+        .current_ki_v_per_a_s = inner->ki_v_per_a_s,
+        .current_limit_a = inner->current_limit_a,
+        .velocity_kp_a_per_rad_s = motion->velocity.kp_a_per_rad_s,
+        .velocity_ki_a_per_rad = motion->velocity.ki_a_per_rad,
+        .position_kp_per_s = motion->position.kp_per_s,
+        .velocity_limit_rad_s = motion->position.velocity_limit_rad_s,
+        .iq_limit_a = motion->iq_limit_a,
+        .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
+    };
+    return FOC_RUNTIME_OK;
+}
+
+int foc_runtime_publish_tuning(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_tuning *tuning,
+    uint32_t request_sequence
+)
+{
+    if (runtime == NULL || !runtime->initialized || tuning == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    struct foc_current_context current;
+    struct foc_velocity_context velocity;
+    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity) != FOC_RUNTIME_OK) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    if (atomic_load_explicit(&runtime->tuning_pending, memory_order_acquire) !=
+        FOC_RUNTIME_REQUEST_IDLE) {
+        return FOC_RUNTIME_ERR_BUSY;
+    }
+    runtime->tuning_request = *tuning;
+    runtime->tuning_request_sequence = request_sequence;
+    atomic_store_explicit(
+        &runtime->tuning_pending,
+        FOC_RUNTIME_REQUEST_PUBLISHED,
+        memory_order_release
+    );
+    return FOC_RUNTIME_OK;
+}
+
+int foc_runtime_read_tuning_result(
+    struct foc_runtime *runtime,
+    struct foc_runtime_tuning_result *result
+)
+{
+    if (runtime == NULL || !runtime->initialized || result == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const unsigned int pending =
+        atomic_load_explicit(&runtime->tuning_pending, memory_order_acquire);
+    const unsigned int slot =
+        atomic_load_explicit(&runtime->tuning_result_slot, memory_order_acquire);
+    *result = runtime->tuning_results[slot];
+    if (pending != FOC_RUNTIME_REQUEST_IDLE) {
+        result->result = FOC_RUNTIME_REQUEST_PENDING;
+        result->request_sequence = runtime->tuning_request_sequence;
+    }
+    return FOC_RUNTIME_OK;
+}
 
 int foc_runtime_init(
     struct foc_runtime *runtime,
@@ -1342,6 +1539,8 @@ int foc_runtime_init(
     atomic_init(&runtime->lifecycle_result_slot, 0U);
     atomic_init(&runtime->lifecycle_last_sequence, 0U);
     atomic_init(&runtime->lifecycle_sequence_seen, 0U);
+    atomic_init(&runtime->tuning_pending, FOC_RUNTIME_REQUEST_IDLE);
+    atomic_init(&runtime->tuning_result_slot, 0U);
     runtime->lifecycle_results[0] = (struct foc_runtime_lifecycle_result){
         .result = FOC_RUNTIME_REQUEST_NONE,
         .state = FOC_SAFE_STATE_BOOT,
@@ -1742,6 +1941,7 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
             lifecycle_status
         );
     }
+    foc_runtime_tuning_service(runtime, input->now_us, stopped || schedule < 0 || clearing);
     foc_runtime_publish_snapshot(runtime);
     return status;
 }

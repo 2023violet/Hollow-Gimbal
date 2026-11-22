@@ -232,6 +232,8 @@ struct foc_pipeline {
     void *output_arg;
     /** Feedback in A for the latest accepted cycle, cleared on rejection. */
     struct foc_vector_dq measured_dq_a;
+    /** Current target in A of the latest accepted cycle, cleared on rejection. */
+    struct foc_vector_dq target_dq_a;
     /** Safety causes for the last step or explicit stop. */
     uint32_t safety_reasons;
     /** Step or stop cause prior to any fallback INHIBIT submission failure. */

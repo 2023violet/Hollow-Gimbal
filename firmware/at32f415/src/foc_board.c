@@ -777,11 +777,20 @@ bool foc_board_output_submit(void *argument, const struct foc_device_pwm_request
             mapped.channel1_compare == request->channel1_compare &&
             mapped.channel2_compare == request->channel2_compare &&
             mapped.channel3_compare == request->channel3_compare) {
+            if (output->backend != NULL && output->backend(output->backend_argument, request)) {
+                output->result = FOC_BOARD_OUTPUT_APPLIED;
+                output->applied_updates++;
+                return true;
+            }
             output->result = FOC_BOARD_UPDATE_NOT_APPLIED;
             output->declined_updates++;
         }
     } else if (foc_board_compares_zero(request)) {
         if (request->action == FOC_DEVICE_OUTPUT_INHIBIT && request->output_enable_request == 0U) {
+            /* INHIBIT is always accepted; a backend also removes its drive. */
+            if (output->backend != NULL) {
+                (void)output->backend(output->backend_argument, request);
+            }
             output->result = FOC_BOARD_INHIBIT_SOFTWARE;
             return true;
         }
@@ -794,6 +803,20 @@ bool foc_board_output_submit(void *argument, const struct foc_device_pwm_request
         }
     }
     return false;
+}
+
+bool foc_board_output_attach(
+    struct foc_board_output *output,
+    foc_board_output_backend backend,
+    void *argument
+)
+{
+    if (output == NULL || backend == NULL || output->backend != NULL) {
+        return false;
+    }
+    output->backend_argument = argument;
+    output->backend = backend;
+    return true;
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -19,7 +19,8 @@ import time
 
 MESSAGES = {
     "hello": 1, "capability": 2, "status": 3, "setpoint": 0x10,
-    "stop": 0x11, "arm": 0x12, "start": 0x13, "fault": 0x20,
+    "stop": 0x11, "arm": 0x12, "start": 0x13, "set-mode": 0x14, "lifecycle": 0x15,
+    "fault": 0x20,
     "clear": 0x21, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "telemetry": 0x40, "stream": 0x41,
 }
@@ -28,6 +29,21 @@ RESULTS = [
     "UNSUPPORTED_VERSION", "UNKNOWN_COMMAND", "INVALID_ARGUMENT", "BAD_SESSION",
     "REPLAY", "BUSY", "BAD_STATE", "OUTPUT_LOCKED", "NOT_SUPPORTED", "INTERNAL_ERROR",
 ]
+MODES = {"current": 0, "velocity": 1, "position": 2}
+LIFECYCLE_RESULTS = ["NONE", "PENDING", "APPLIED", "REJECTED", "CANCELLED"]
+LIFECYCLE_ACTIONS = ["NONE", "ARM", "START", "CLEAR_FAULT", "SET_MODE"]
+# UART V1 parameter IDs by name (protocol/README.md).
+PARAMETERS = {
+    "rx-budget": 1, "remote-current-cap": 2, "remote-position-cap": 3,
+    "pole-pairs": 16, "electrical-offset": 17, "velocity-limit-ro": 18,
+    "boot-configuration": 32, "calibration-input": 33, "phase-a-offset": 38,
+    "phase-b-offset": 39, "phase-c-offset": 40, "measurement-qualified": 45,
+    "tuning-revision": 60, "tuning-result": 61, "tuning-sequence": 62,
+    "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
+    "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
+    "velocity-limit": 72, "iq-limit": 73, "command-lease-us": 74,
+}
+PARAMETER_TYPES = {74: "u32", 1: "u32"}
 WIRE_MAX = 116
 HEADER = struct.Struct("<2sBBBBIIH")
 
@@ -153,10 +169,13 @@ def parameter_write(identifier, kind, value):
 def setpoint(mode, first, second=0.0):
     if not math.isfinite(first) or not math.isfinite(second):
         raise ValueError("Setpoint must be finite")
-    modes = {"current": 0, "velocity": 1, "position": 2}
-    return struct.pack("<Bff", modes[mode], first, second) if mode == "current" else (
-        struct.pack("<Bf", modes[mode], first)
+    return struct.pack("<Bff", MODES[mode], first, second) if mode == "current" else (
+        struct.pack("<Bf", MODES[mode], first)
     )
+
+
+def set_mode(mode):
+    return struct.pack("<B", MODES[mode])
 
 
 def describe(frame):
@@ -182,7 +201,8 @@ def describe(frame):
                       algorithm_modes=body[5], physical_modes=body[6],
                       output_locked=bool(body[7] & 1), capabilities=int.from_bytes(body[7:9], "little"))
     elif frame.type in (3, 0x20, 0x40) and body[0] == 0:
-        if len(body) != (63 if frame.type == 0x40 else 30):
+        # TELEMETRY is 75 bytes since M1; 63 from earlier firmware is still decoded.
+        if len(body) not in ((63, 75) if frame.type == 0x40 else (30,)):
             raise ValueError("BAD_RESPONSE")
         flags = body[3]
         result.update(
@@ -209,11 +229,20 @@ def describe(frame):
                 current_valid=bool(body[62] & 2), physical_applied=bool(body[62] & 1),
                 sensor_calibrated=bool(body[62] & 4),
             )
-    elif frame.type in (0x30, 0x31) and body[0] in (0, 2):
+            if len(body) == 75:
+                result.update(
+                    id_target_a=struct.unpack_from("<f", body, 63)[0],
+                    iq_target_a=struct.unpack_from("<f", body, 67)[0],
+                    tuning_revision=struct.unpack_from("<I", body, 71)[0],
+                )
+    elif frame.type in (0x30, 0x31) and body[0] in (0, 1, 2):
         if len(body) != 18 or body[3] not in (1, 2):
             raise ValueError("BAD_RESPONSE")
         kind = "<I" if body[3] == 1 else "<f"
-        result.update(parameter_id=struct.unpack_from("<H", body, 1)[0],
+        identifier = struct.unpack_from("<H", body, 1)[0]
+        result.update(parameter_id=identifier,
+                      parameter=next((name for name, value in PARAMETERS.items()
+                                      if value == identifier), None),
                       parameter_type="u32" if body[3] == 1 else "f32", unit=body[4],
                       writable=bool(body[5] & 1), applied=bool(body[5] & 2),
                       calibration_required=bool(body[5] & 4))
@@ -223,6 +252,25 @@ def describe(frame):
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
         result["publication_sequence"] = struct.unpack_from("<I", body, 1)[0]
+    elif frame.type in (0x12, 0x13, 0x14) and body[0] == 1:
+        # Earlier virtual targets answered ARM/START with the result byte only.
+        if len(body) == 1 and frame.type != 0x14:
+            return result
+        if len(body) != 5:
+            raise ValueError("BAD_RESPONSE")
+        result["lifecycle_sequence"] = struct.unpack_from("<I", body, 1)[0]
+    elif frame.type == 0x15 and body[0] == 0:
+        if len(body) != 25:
+            raise ValueError("BAD_RESPONSE")
+        result.update(
+            lifecycle_result=LIFECYCLE_RESULTS[body[1]] if body[1] < len(LIFECYCLE_RESULTS) else body[1],
+            lifecycle_action=LIFECYCLE_ACTIONS[body[2]] if body[2] < len(LIFECYCLE_ACTIONS) else body[2],
+            requested_mode=body[3], lifecycle_sequence=struct.unpack_from("<I", body, 4)[0],
+            state=body[8], faults=struct.unpack_from("<I", body, 9)[0],
+            h0_us=struct.unpack_from("<I", body, 13)[0],
+            pipeline_result=struct.unpack_from("<i", body, 17)[0],
+            motion_session=struct.unpack_from("<I", body, 21)[0],
+        )
     elif len(body) != 1:
         raise ValueError("BAD_RESPONSE")
     return result
@@ -737,6 +785,278 @@ def run_virtual_demo(
     return summary
 
 
+SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
+SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover")
+# Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
+# tail tolerance and plant/firmware agreement tolerance.
+SIL_DEFAULTS = {
+    "current": (0.4, 20000, "iq_a", "sample_plant_iq_a", "firmware_iq_a", 0.05, 0.02),
+    "velocity": (5.0, 600000, "velocity_rad_s", "plant_velocity_rad_s", "firmware_velocity_rad_s",
+                 0.3, 0.5),
+    "position": (2.0, 1500000, "position_rad", "plant_position_rad", "firmware_position_rad",
+                 0.05, 0.01),
+}
+
+
+class SilSession:
+    """Host side of one Board1 SIL connection: calls, lifecycle waits and records."""
+
+    def __init__(self, client, transport):
+        self.client, self.transport = client, transport
+        self.metadata, self.log = [], []
+
+    def call(self, name, payload=b"", quiet=False):
+        frame = describe(self.client.call(name, payload))
+        if not quiet:
+            print(json.dumps(frame, allow_nan=False))
+        self.metadata.extend(self.transport.drain_metadata())
+        return frame
+
+    def status(self):
+        return self.call("status", quiet=True)
+
+    def lifecycle(self, action, state, keep_alive=None, mode=None):
+        """Publish ARM/START/SET_MODE and wait for H0's receipt. Returns the receipt name.
+        H0 rejects ARM/START until fresh sensing follows boot or STOP; retry those."""
+        receipt_name = "TIMEOUT"
+        for _ in range(50):
+            if keep_alive is not None:
+                self.call("setpoint", keep_alive, quiet=True)
+            payload = set_mode(mode) if action == "set-mode" else b""
+            result = self.call(action, payload)["result"]
+            if result == "BUSY":
+                continue
+            if result != "ACCEPTED":
+                return result
+            for _ in range(40):
+                if keep_alive is not None:
+                    self.call("setpoint", keep_alive, quiet=True)
+                receipt = self.call("lifecycle", quiet=True)
+                receipt_name = receipt["lifecycle_result"]
+                if receipt_name not in ("PENDING", "NONE"):
+                    self.log.append({"action": action, "receipt": receipt_name,
+                                     "state": receipt["state"],
+                                     "pipeline_result": receipt["pipeline_result"]})
+                    break
+            if receipt_name == "APPLIED" or action == "set-mode" or receipt_name == "PENDING":
+                return receipt_name
+            for _ in range(5):  # let fresh samples arrive before retrying
+                if keep_alive is not None:
+                    self.call("setpoint", keep_alive, quiet=True)
+                self.status()
+        return receipt_name
+
+    def tune(self, name, value):
+        """Write one controller parameter and wait for H0 to apply it."""
+        identifier = PARAMETERS[name]
+        kind = PARAMETER_TYPES.get(identifier, "f32")
+        written = self.call("param-write", parameter_write(identifier, kind, value))
+        if written["result"] != "ACCEPTED":
+            return written["result"]
+        for _ in range(40):
+            self.status()  # lets H0 run in lockstep mode
+            receipt = self.call("param-read", parameter_read(PARAMETERS["tuning-result"]), quiet=True)
+            if receipt["value"] not in (0, 1):
+                return LIFECYCLE_RESULTS[receipt["value"]]
+        return "TIMEOUT"
+
+    def read(self, name):
+        return self.call("param-read", parameter_read(PARAMETERS[name]), quiet=True)["value"]
+
+    def stop(self):
+        self.call("stop")
+        for _ in range(100):
+            stopped = self.status()
+            if stopped["state"] != SIL_STATE_RUNNING:
+                return stopped
+        return stopped
+
+    def run(self, mode, reference, duration_us):
+        """ARM, START and stream one target; returns telemetry samples while it ran."""
+        payload = setpoint(mode, 0.0, reference) if mode == "current" else setpoint(mode, reference)
+        steps = {"arm": self.lifecycle("arm", SIL_STATE_ARMED, payload)}
+        steps["start"] = (self.lifecycle("start", SIL_STATE_RUNNING, payload)
+                          if steps["arm"] == "APPLIED" else "SKIPPED")
+        samples, started = [], None
+        while steps["start"] == "APPLIED":
+            self.call("setpoint", payload, quiet=True)
+            telemetry = self.call("telemetry", quiet=True)
+            started = telemetry["uptime_us_mod32"] if started is None else started
+            elapsed = (telemetry["uptime_us_mod32"] - started) & 0xFFFFFFFF
+            samples.append({"elapsed_us": elapsed, **{key: telemetry[key] for key in (
+                "state", "mode", "faults", "iq_a", "id_a", "iq_target_a", "current_valid",
+                "velocity_rad_s", "position_rad", "tuning_revision", "physical_applied")}})
+            if elapsed >= duration_us or telemetry["state"] != SIL_STATE_RUNNING:
+                break
+        return steps, samples
+
+    def sil_records(self):
+        return [record for record in self.metadata if record.get("kind") == "sil"]
+
+
+def _tracking(session, scenario, reference, duration_us, samples, steps):
+    _, _, key, plant_key, firmware_key, tolerance, agreement_tolerance = SIL_DEFAULTS[scenario]
+    running = [sample for sample in samples if sample["state"] == SIL_STATE_RUNNING]
+    tail = running[len(running) * 3 // 4:]
+    sil = session.sil_records()
+    window = [record for record in sil if record["state"] == SIL_STATE_RUNNING]
+    window = window[len(window) * 3 // 4:] if scenario != "current" else [
+        record for record in sil if record["firmware_current_valid"]]
+    agreement = [abs(record[plant_key] - record[firmware_key]) for record in window]
+    metrics = {
+        "running_samples": len(running),
+        "tail_mean_abs_error": (sum(abs(reference - sample[key]) for sample in tail) / len(tail)
+                                if tail else None),
+        "final_value": running[-1][key] if running else None,
+        "max_plant_firmware_delta": max(agreement) if agreement else None,
+        "faults_while_running": sorted({sample["faults"] for sample in running}),
+        "uart_current_valid": bool(tail) and all(sample["current_valid"] for sample in tail),
+    }
+    checks = {
+        "lifecycle_applied": steps == {"arm": "APPLIED", "start": "APPLIED"},
+        "tracks_reference": metrics["tail_mean_abs_error"] is not None
+        and metrics["tail_mean_abs_error"] < tolerance,
+        "firmware_matches_plant": metrics["max_plant_firmware_delta"] is not None
+        and metrics["max_plant_firmware_delta"] < agreement_tolerance,
+        "no_faults_while_running": metrics["faults_while_running"] == [0],
+        "uart_current_valid": metrics["uart_current_valid"],
+    }
+    return metrics, checks
+
+
+def _finish(session, checks, metrics):
+    stopped = session.stop()
+    time.sleep(0.1)
+    session.metadata.extend(session.transport.drain_metadata())
+    sil = session.sil_records()
+    last = sil[-1] if sil else {}
+    metrics.update({
+        "board_applied_updates": last.get("board_applied"),
+        "adc_h0_consumed": last.get("adc_h0_consumed"),
+        "adc_missing_slots": last.get("adc_missing_slots"),
+        "adc_timing_rejections": last.get("adc_timing_rejections"),
+        "encoder_losses": last.get("encoder_losses"),
+        "drive_after_stop": last.get("drive"),
+        "state_after_stop": stopped["state"],
+    })
+    checks.update({
+        "adc_slots_complete": metrics["adc_missing_slots"] == 0,
+        "encoder_frames_complete": metrics["encoder_losses"] == 0,
+        "stop_disables_drive": metrics["drive_after_stop"] == "HIGH_Z"
+        and metrics["state_after_stop"] == SIL_STATE_DISABLED,
+    })
+
+
+def run_sil_demo(client, transport, reference=None, duration_us=None, json_path=None,
+                 scenario="current"):
+    """One Board1 SIL product scenario over the V1 wire. The device runs the production
+    Board1 path; only the motor is virtual. Nothing here is physical evidence."""
+
+    session = SilSession(client, transport)
+    session.call("capability")
+    boot = {name: session.read(name) for name in (
+        "boot-configuration", "calibration-input", "measurement-qualified")}
+    checks, metrics, samples = {}, {}, []
+
+    if scenario in ("current", "velocity", "position"):
+        default_reference, default_duration = SIL_DEFAULTS[scenario][:2]
+        reference = default_reference if reference is None else reference
+        duration_us = default_duration if duration_us is None else duration_us
+        if scenario != "current":
+            checks["set_mode_applied"] = session.lifecycle("set-mode", SIL_STATE_DISABLED,
+                                                           mode=scenario) == "APPLIED"
+            checks["mode_reported"] = session.status()["mode"] == MODES[scenario]
+        steps, samples = session.run(scenario, reference, duration_us)
+        tracking_metrics, tracking_checks = _tracking(session, scenario, reference, duration_us,
+                                                      samples, steps)
+        metrics.update(tracking_metrics)
+        checks.update(tracking_checks)
+        _finish(session, checks, metrics)
+
+    elif scenario == "tuning":
+        reference = 0.4 if reference is None else reference
+        duration_us = 20000 if duration_us is None else duration_us
+        revision = session.read("tuning-revision")
+        checks["kp_applied"] = session.tune("current-kp-q", 2.0) == "APPLIED"
+        checks["ki_applied"] = session.tune("current-ki-q", 800.0) == "APPLIED"
+        checks["lease_applied"] = session.tune("command-lease-us", 20000) == "APPLIED"
+        checks["readback_matches"] = (
+            abs(session.read("current-kp-q") - 2.0) < 1e-6
+            and abs(session.read("current-ki-q") - 800.0) < 1e-3
+            and session.read("command-lease-us") == 20000)
+        checks["revision_counts_applies"] = session.read("tuning-revision") == revision + 3
+        bad = session.call("param-write", parameter_write(PARAMETERS["current-kp-q"], "f32", 99.0))
+        checks["out_of_range_rejected"] = bad["result"] == "INVALID_ARGUMENT"
+        over = session.call("param-write", parameter_write(PARAMETERS["current-limit"], "f32", 3.0))
+        checks["boot_current_ceiling_kept"] = over["result"] == "INVALID_ARGUMENT"
+        inner = session.call("param-write", parameter_write(PARAMETERS["iq-limit"], "f32", 2.6))
+        checks["iq_limit_bounded_by_current_limit"] = inner["result"] == "INVALID_ARGUMENT"
+        payload = setpoint("current", 0.0, reference)
+        steps = {"arm": session.lifecycle("arm", SIL_STATE_ARMED, payload)}
+        steps["start"] = session.lifecycle("start", SIL_STATE_RUNNING, payload)
+        running_write = session.call("param-write",
+                                     parameter_write(PARAMETERS["current-kp-q"], "f32", 1.0))
+        checks["write_refused_while_running"] = running_write["result"] == "BAD_STATE"
+        running_mode = session.call("set-mode", set_mode("velocity"))
+        checks["mode_refused_while_running"] = running_mode["result"] == "BAD_STATE"
+        session.stop()
+        # The tuned controller still tracks.
+        steps, samples = session.run("current", reference, duration_us)
+        tracking_metrics, tracking_checks = _tracking(session, "current", reference, duration_us,
+                                                      samples, steps)
+        metrics.update(tracking_metrics)
+        checks.update({f"tuned_{key}": value for key, value in tracking_checks.items()})
+        metrics["tuning_revision"] = session.read("tuning-revision")
+        _finish(session, checks, metrics)
+
+    elif scenario == "recover":
+        reference = 0.4 if reference is None else reference
+        duration_us = 10000 if duration_us is None else duration_us
+        steps, samples = session.run("current", reference, duration_us)
+        checks["first_run_started"] = steps == {"arm": "APPLIED", "start": "APPLIED"}
+        # The Host stops refreshing the target; status polls still move device time.
+        faulted = None
+        for _ in range(200):
+            faulted = session.status()
+            if faulted["state"] == SIL_STATE_FAULT:
+                break
+        checks["lease_expiry_faults"] = faulted is not None and faulted["state"] == SIL_STATE_FAULT
+        metrics["fault_bits"] = faulted["faults"] if faulted else None
+        clear = session.call("clear")
+        recovered = None
+        for _ in range(200):
+            recovered = session.status()
+            if recovered["state"] == SIL_STATE_DISABLED and recovered["faults"] == 0:
+                break
+        checks["clear_accepted"] = clear["result"] == "ACCEPTED"
+        checks["recovered_to_disabled"] = (recovered is not None
+                                           and recovered["state"] == SIL_STATE_DISABLED
+                                           and recovered["faults"] == 0)
+        session.metadata.clear()
+        steps, samples = session.run("current", reference, duration_us)
+        tracking_metrics, tracking_checks = _tracking(session, "current", reference, duration_us,
+                                                      samples, steps)
+        metrics.update(tracking_metrics)
+        checks.update({f"rerun_{key}": value for key, value in tracking_checks.items()})
+        _finish(session, checks, metrics)
+    else:
+        raise ValueError(f"unknown SIL scenario {scenario}")
+
+    passed = bool(checks) and all(checks.values())
+    summary = {"kind": "summary", "demo": f"board1-sil-{scenario}",
+               "status": "SIL_PASS" if passed else "SIL_FAIL",
+               "simulated": True, "physical_applied": False, "reference": reference,
+               "duration_us": duration_us, "boot": boot, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "lifecycle": session.log, "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(
+            {"summary": summary, "samples": samples, "metadata": session.metadata}, indent=2),
+            encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -840,7 +1160,9 @@ def main():
     connection.add_argument("--port", help="Optional pyserial port. Connects when selected.")
     connection.add_argument("--simulator", help="Host foc-serial-sim executable")
     parser.add_argument(
-        "action", choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "calibrate"]
+        "action",
+        choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "sil-demo",
+                 "calibrate"],
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
     parser.add_argument("--hex", default="", help="Wire hex for decode, including delimiter")
@@ -850,6 +1172,8 @@ def main():
     parser.add_argument("--first", type=float, default=0)
     parser.add_argument("--second", type=float, default=0)
     parser.add_argument("--id", type=int, default=1)
+    parser.add_argument("--param", choices=sorted(PARAMETERS),
+                        help="parameter by name; overrides --id and selects its type")
     parser.add_argument("--type", choices=["u32", "f32"], default="u32")
     parser.add_argument("--value", type=float, default=0)
     parser.add_argument(
@@ -858,6 +1182,12 @@ def main():
         default="current",
     )
     parser.add_argument("--advance-us", type=int, default=500)
+    parser.add_argument("--sil-speed", type=float, default=0.02,
+                        help="sil-demo: virtual/wall time ratio of the free-running device")
+    parser.add_argument("--sil-scenario", choices=SIL_SCENARIOS, default="current",
+                        help="sil-demo: product scenario to run")
+    parser.add_argument("--sil-lockstep-us", type=int, default=0,
+                        help="sil-demo: advance this much virtual time per frame instead")
     parser.add_argument("--duration-us", type=int, default=None)
     parser.add_argument("--horizon", choices=["short", "long"], default="short")
     parser.add_argument("--profile-id", default="GENERIC_RESEARCH_MOTOR")
@@ -924,7 +1254,12 @@ def main():
         payload = b""
         if args.message == "setpoint":
             payload = setpoint(args.mode, args.first, args.second)
-        elif args.message == "param-read":
+        elif args.message == "set-mode":
+            payload = set_mode(args.mode)
+        if args.param is not None:
+            args.id = PARAMETERS[args.param]
+            args.type = PARAMETER_TYPES.get(args.id, "f32")
+        if args.message == "param-read":
             payload = parameter_read(args.id)
         elif args.message == "param-write":
             payload = parameter_write(args.id, args.type, args.value)
@@ -951,8 +1286,8 @@ def main():
                 parser.error("request/demo/virtual-demo requires --simulator or --port")
             if args.action == "request" and args.message is None:
                 parser.error("request requires a message")
-            if args.action == "virtual-demo" and not args.simulator:
-                parser.error("virtual-demo requires --simulator")
+            if args.action in {"virtual-demo", "sil-demo"} and not args.simulator:
+                parser.error(f"{args.action} requires --simulator")
             simulator_arguments = (
                 [
                     "--mode",
@@ -994,8 +1329,13 @@ def main():
                     ]
                 if args.virtual_scenario == "fault":
                     simulator_arguments += ["--sensor-fault-us", str(args.sensor_fault_us)]
+            if args.action == "sil-demo":
+                simulator_arguments = (
+                    ["--lockstep-us", str(args.sil_lockstep_us)] if args.sil_lockstep_us > 0
+                    else ["--speed", str(args.sil_speed)]
+                )
             transport = (
-                SimulatorTransport(args.simulator, simulator_arguments)
+                SimulatorTransport(os.path.abspath(args.simulator), simulator_arguments)
                 if args.simulator
                 else SerialTransport(args.port)
             )
@@ -1046,6 +1386,17 @@ def main():
                             }.items() if value is not None
                         },
                     )
+                elif args.action == "sil-demo":
+                    summary = run_sil_demo(
+                        client,
+                        transport,
+                        args.reference,
+                        args.duration_us,
+                        args.json,
+                        args.sil_scenario,
+                    )
+                    if summary["status"] != "SIL_PASS":
+                        return 3
                 elif args.action == "demo":
                     print(json.dumps(describe(hello), allow_nan=False))
                     for name in ("capability", "status", "fault", "telemetry", "arm", "save", "stop"):

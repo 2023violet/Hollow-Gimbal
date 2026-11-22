@@ -54,6 +54,10 @@ enum foc_protocol_message {
     FOC_MSG_STOP = 0x11,
     FOC_MSG_ARM = 0x12,
     FOC_MSG_START = 0x13,
+    /** Select CURRENT, VELOCITY or POSITION while disabled (M1, appended). */
+    FOC_MSG_SET_MODE = 0x14,
+    /** Read the latest ARM/START/SET_MODE result (M1, appended). */
+    FOC_MSG_LIFECYCLE_READ = 0x15,
     FOC_MSG_FAULT_READ = 0x20,
     FOC_MSG_FAULT_CLEAR = 0x21,
     FOC_MSG_PARAM_READ = 0x30,

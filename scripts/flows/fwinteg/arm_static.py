@@ -5,8 +5,9 @@ Each image is compared with the baseline build that used the same options:
 <baseline root>/arm (default, verification), arm-capture (both Capture builds), arm-trace.
 Writes <run>/static/<image>/ for the default, verification, both Capture and the
 trace builds, and exits nonzero on any violated check:
-locked main() prologue differs from baseline, Board output adapter differs beyond one
-literal-pool word, selection is not between clock init and ADC init, a failed selection
+locked main() prologue differs from baseline, the Board output adapter is neither the
+baseline (beyond one literal-pool word) nor the reviewed M0 adapter with its backend
+attach function absent from the image, selection is not between clock init and ADC init, a failed selection
 does not branch to WFI, Flash program/erase symbols exist, or the default image links
 the synthetic verification supply.
 """
@@ -36,6 +37,22 @@ EXPLAINED_REMOVALS = {
         "main() takes the capture profile from the effective boot configuration "
         "(foc_board_boot_capture_profile), so the nominal-only helper is garbage-collected",
 }
+
+# M0 Board1 SIL added an optional output backend to foc_board_output_submit. The ARM
+# images never attach one: foc_board_output_attach, the only writer of the backend
+# field, is unreferenced and garbage-collected, so the adapter always takes the locked
+# path. The reviewed adapter is pinned by the SHA-256 of its normalized disassembly
+# (literal-pool words masked); any further change fails until reviewed again.
+REVIEWED_ADAPTERS = {
+    "ef8862282895dfce01302b8d1e8e86cd56bece8a92063e5e898d7d42ceeac4bc":
+        "M0: backend branch for UPDATE/INHIBIT; locked dispositions unchanged without a backend",
+}
+BACKEND_ATTACH = "foc_board_output_attach"
+
+
+def adapter_digest(text):
+    lines = [re.sub(r"^\.word\s+\S+", ".word LIT", line) for line in normalize(text)]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
 def tool(*args):
@@ -131,9 +148,12 @@ for name, elf in IMAGES.items():
     adapter_diff = [
         (a, b) for a, b in zip(normalize(base_adapter), normalize(function(dis, "foc_board_output_submit"))) if a != b
     ]
-    adapter_ok = len(normalize(base_adapter)) == len(normalize(function(dis, "foc_board_output_submit"))) and all(
-        a.startswith(".word") and b.startswith(".word") for a, b in adapter_diff
-    ) and len(adapter_diff) <= 1
+    adapter_as_baseline = len(normalize(base_adapter)) == len(
+        normalize(function(dis, "foc_board_output_submit"))
+    ) and all(a.startswith(".word") and b.startswith(".word") for a, b in adapter_diff) and len(adapter_diff) <= 1
+    adapter_sha = adapter_digest(function(dis, "foc_board_output_submit"))
+    adapter_reviewed = adapter_sha in REVIEWED_ADAPTERS and BACKEND_ATTACH not in syms
+    adapter_ok = adapter_as_baseline or adapter_reviewed
     flash_ok = not re.search(r"flash_(sector|page|word|halfword|byte|program|erase|unlock)", nm, re.I)
     supply_ok = ("foc_board_verification_supply" in syms) == name.startswith("verification")
     reach_ok = {"foc_board_init_with_calibration", "foc_calibration_admit", "foc_board_boot_select"} <= syms
@@ -141,7 +161,7 @@ for name, elf in IMAGES.items():
         "prologue_identical": prologue_ok,
         "selection_between_clock_and_adc": order_ok,
         "failed_selection_branches_to_wfi": wfi_ok,
-        "adapter_identical_but_literal": adapter_ok,
+        "adapter_baseline_or_reviewed_unattached": adapter_ok,
         "no_flash_write_symbols": flash_ok,
         "verification_supply_only_in_verification": supply_ok,
         "calibration_init_reachable": reach_ok,
@@ -149,7 +169,9 @@ for name, elf in IMAGES.items():
     }
     lines = [f"{key}: {'PASS' if value else 'FAIL'}" for key, value in checks.items()]
     lines.append(f"baseline: {base_folder}")
-    lines.append(f"adapter literal differences: {adapter_diff}")
+    lines.append(f"adapter: {'baseline' if adapter_as_baseline else 'reviewed' if adapter_reviewed else 'UNREVIEWED'}"
+                 f" sha256 {adapter_sha}; {BACKEND_ATTACH} linked: {BACKEND_ATTACH in syms}")
+    lines.append(f"adapter differences from baseline: {len(adapter_diff)} lines")
     lines.append("explained removals: " + "; ".join(f"{sym}: {EXPLAINED_REMOVALS[sym]}" for sym in removed
                                                      if sym in EXPLAINED_REMOVALS))
     lines.append(f"symbols added ({len(added)}): {' '.join(added)}")

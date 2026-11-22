@@ -35,6 +35,29 @@ def records(text):
     return out
 
 
+# Intentional M1 differences of the default demo from the option-matched baseline:
+# capability bits 4/5 (remote mode switch, controller tuning) and the 12 bytes appended
+# to TELEMETRY_READ. Only these are tolerated; anything else still fails the check.
+M1_CAPABILITIES = {"baseline": 15, "current": 63}
+M1_TELEMETRY_KEYS = ("id_target_a", "iq_target_a", "tuning_revision")
+
+
+def explained(record, role):
+    record = dict(record)
+    if record.get("message") in ("hello", "capability") and "capabilities" in record:
+        if record["capabilities"] != M1_CAPABILITIES[role]:
+            return record
+        record["capabilities"] = "M1"
+        record.pop("payload_hex", None)
+    if record.get("message") == "telemetry":
+        if role == "current" and not all(key in record for key in M1_TELEMETRY_KEYS):
+            return record
+        for key in M1_TELEMETRY_KEYS:
+            record.pop(key, None)
+        record.pop("payload_hex", None)
+    return record
+
+
 EXPECTED = {
     "foc-serial-sim": {16: 7, 17: 0.0, 32: 1, 33: 1, 34: 0, 35: 0, 36: 0, 37: 0, 38: 2048.0, 39: 2048.0,
                        40: 2048.0, 41: 65536, 42: 2, 43: 2, 44: 0, 45: 0},
@@ -51,8 +74,9 @@ for sim, expected in EXPECTED.items():
     tag = "default" if sim == "foc-serial-sim" else "verification"
     demo, code = run(sim, "demo")
     (OUT / f"uart-demo-{tag}.jsonl").write_text(demo + f"exit {code}\n")
-    if tag == "default" and records(demo) != records(BASELINE.read_text(encoding="utf-8")):
-        failures.append("default demo differs from baseline")
+    if tag == "default" and [explained(r, "current") for r in records(demo)] != [
+            explained(r, "baseline") for r in records(BASELINE.read_text(encoding="utf-8"))]:
+        failures.append("default demo differs from baseline beyond the explained M1 changes")
     log = []
     for identifier in list(expected) + [46]:
         text, code = run(sim, "request", "param-read", "--id", str(identifier))

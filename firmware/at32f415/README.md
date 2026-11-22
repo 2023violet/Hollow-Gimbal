@@ -189,6 +189,50 @@ contended read without claiming a successful heartbeat. The ARM cost inputs
 remain zero-valued Host budget placeholders. See
 [RT-03 evidence](../../docs/evidence/2026-11-19-next-rt-03.md).
 
+## Board1 SIL (M0)
+
+`falconfoc-board1-sil` is a Host-only build of this firmware's control path
+against a virtual motor. It runs the same `foc_board_boot_select`,
+`foc_board_adc_begin/complete` (H0), `foc_board_encoder_begin/complete` (H1),
+`foc_board_spi_on_time/close_result`, Runtime supervision and `foc_serial_poll`
+calls that the IRQ handlers and foreground loop in `src/main.c` make, in the
+same order and at the same TMR1/TMR5 phases. It links the default build
+supply. Only register access is replaced:
+
+| main.c on AT32 | SIL |
+| --- | --- |
+| ADC1 ranks after the CH4 software trigger | plant currents quantized at the trigger aperture |
+| SPI1 word after CS | plant angle latched at CS |
+| TMR1 compare registers (not written; output locked) | `foc_board_output_attach` backend: UPDATE loads at the next TMR1 update, INHIBIT removes drive at once |
+| TMR2 counter | virtual microsecond clock |
+| USART1 RX/TX IRQs | stdin/stdout bytes |
+
+The plant keeps its own sensor facts (ADC offsets, gains, rotor offset); the
+firmware decodes with its own constants and never reads them. Time runs freely
+(`--speed`, virtual/wall ratio) or in lockstep after each received frame
+(`--lockstep-us`). Without frames the free-running device keeps time, so the
+command timeout stops the drive exactly as on the target.
+
+```powershell
+cmake --build build/sw03-board-host --target falconfoc-board1-sil
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw03-board-host/falconfoc-board1-sil.exe sil-demo
+ctest --test-dir build/sw03-board-host -R '^test-foc-board1-sil$' -V
+```
+
+The ARM image attaches no output backend, so every valid UPDATE remains
+`FOC_BOARD_UPDATE_NOT_APPLIED` there. A SIL pass is software evidence: it does
+not model switching, dead time, ADC aperture error, CSA noise, MCU timing or
+the power stage. The AT32 TMR1 output backend is separate work.
+
+### M1 product control over UART
+
+The same SIL exercises the M1 control surface: COMMAND_SET_MODE and its
+LIFECYCLE_READ receipt, controller tuning through the H0 tuning mailbox
+(`foc_runtime_publish_tuning`, applied only while DISABLED), and fault clear and
+re-run. `sil-demo --sil-scenario current|velocity|position|tuning|recover` runs
+each one; `test-foc-board1-sil` runs all of them in lockstep. The locked ARM
+image accepts SET_MODE and tuning as well, since neither touches output policy.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

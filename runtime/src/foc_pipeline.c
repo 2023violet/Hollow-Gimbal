@@ -99,6 +99,7 @@ static int foc_pipeline_emit_inhibit(struct foc_pipeline *pipeline, enum foc_pip
     pipeline->last_reason = reason;
     pipeline->safety_reasons |= pipeline->safety.latched_faults;
     pipeline->measured_dq_a = (struct foc_vector_dq){0};
+    pipeline->target_dq_a = (struct foc_vector_dq){0};
     /* The mapper always builds canonical INHIBIT, even with invalid mapping settings. */
     (void)foc_device_output_inhibit(&pipeline->pwm_config, &request);
     if (!foc_pipeline_submit(pipeline, &request)) {
@@ -475,6 +476,7 @@ int foc_pipeline_step_guarded(
     /* From here only infallible assignments remain, under the same serial owner. */
     pipeline->current = trial;
     pipeline->measured_dq_a = result.measured_dq_a;
+    pipeline->target_dq_a = target;
     pipeline->last_reason = FOC_PIPELINE_OK;
     return FOC_PIPELINE_OK;
 }

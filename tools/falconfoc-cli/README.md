@@ -21,6 +21,32 @@ python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/foc-seri
 python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/foc-serial-sim.exe request param-read --id 1
 ```
 
+For the Board1 SIL (production Board1 firmware path against a virtual motor):
+
+```powershell
+cmake --build build/sw04-host --target falconfoc-board1-sil
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe sil-demo
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe sil-demo --sil-lockstep-us 500 --json build/sw04-host/sil.json
+```
+
+Scenarios (`--sil-scenario`): `current` (default), `velocity` and `position`
+(SET_MODE then tracking), `tuning` (controller writes while DISABLED, refused
+while RUNNING, readback and revision, then a tuned run) and `recover` (lease
+expiry, FAULT_CLEAR, re-run). Single requests use the same names:
+
+```powershell
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe request set-mode --mode velocity
+python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe request param-read --param current-kp-q
+```
+
+`sil-demo` connects, reads the boot configuration (IDs 32, 33, 45), sends ARM
+and START and waits for each to apply at H0, streams a current target
+(`--reference`, default 0.4 A, `--duration-us` of virtual time), then STOPs. It
+compares the UART-reported Iq with the target and with the plant current at
+the ADC aperture, and checks ADC slots, encoder frames and the drive after
+STOP. It prints `SIL_PASS` or exits with code 3. The device free-runs at
+`--sil-speed` (default 0.02 of wall time) unless `--sil-lockstep-us` is given.
+
 For the Host Virtual product workflow, build the simulation target and run the
 same process through Current, Velocity, Position, load and sensor-fault demos:
 

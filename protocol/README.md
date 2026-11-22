@@ -84,19 +84,41 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 03 | STATUS_READ | Empty | 30-byte status |
 | 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), or mode u8 + reference f32 for velocity/position (5 bytes) | ACCEPTED + Runtime publication u32 (5 bytes) |
 | 11 | COMMAND_STOP | Empty | ACCEPTED, query status for H0 acknowledgement |
-| 12 / 13 | COMMAND_ARM / COMMAND_START | Empty | OUTPUT_LOCKED |
+| 12 / 13 | COMMAND_ARM / COMMAND_START | Empty | OUTPUT_LOCKED on Board1; on Host virtual targets (virtual device, Board1 SIL) ACCEPTED + lifecycle request u32 (5 bytes) |
+| 14 | COMMAND_SET_MODE | mode u8 | ACCEPTED + lifecycle request u32 (5 bytes); BAD_STATE unless DISABLED with INHIBIT confirmed |
+| 15 | LIFECYCLE_READ | Empty | 25-byte receipt of the latest ARM/START/SET_MODE (below) |
 | 20 | FAULT_READ | Empty | 30-byte status including faults and recovery result |
 | 21 | FAULT_CLEAR | Empty | ACCEPTED only for isolated command-timeout recovery |
 | 30 | PARAM_READ | ID u16 | 18-byte typed parameter |
 | 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
 | 32 | PARAM_SAVE | Empty | NOT_SUPPORTED |
-| 40 | TELEMETRY_READ | Empty | 63-byte status and telemetry |
+| 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
 and continuous mechanical rad. Setpoints must match the current Runtime mode.
-The reference firmware starts in CURRENT and exposes no remote mode switch in
-V1. Capability differentiates available algorithms from physical output.
+The reference firmware starts in CURRENT. COMMAND_SET_MODE selects another mode
+while DISABLED; it changes software control state only, so the locked Board1
+image accepts it too. Capability differentiates available algorithms from
+physical output.
+
+ARM, START and SET_MODE are published to H0 and take effect at its next due
+cycle. ACCEPTED means published, not applied. Read the outcome with
+LIFECYCLE_READ and match its request identity:
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | u8 | Result OK |
+| 1 | u8 | Receipt NONE 0, PENDING 1, APPLIED 2, REJECTED 3, CANCELLED 4 |
+| 2 / 3 | u8 / u8 | Action ARM 1, START 2, SET_MODE 4 / requested mode |
+| 4 | u32 | Lifecycle request identity from the ACCEPTED response |
+| 8 / 9 | u8 / u32 | Safety state / fault bits after H0 handled it |
+| 13 / 17 | u32 / i32 | H0 time in µs / Runtime result explaining a rejection |
+| 21 | u32 | Motion session after H0 handled it |
+
+H0 rejects ARM and START until fresh sensing follows boot or STOP, so a Host
+retries a REJECTED ARM after a short wait. A pending STOP or a latched fault
+cancels a request.
 
 A validated setpoint is stamped once with the MCU time at completed validation.
 Runtime publication identities continue across wire sessions. STATUS returns the
@@ -116,8 +138,9 @@ and sample validity cleared.
 Capability response bytes are result, protocol version, three firmware version
 bytes, algorithm mode bitmask, physical mode bitmask, and capability u16.
 Current values are protocol 1, firmware 0.1.0, algorithms 7, physical modes 0,
-and capabilities 15. Capability bits are output lock, RAM policy parameters,
-polling telemetry and UART transport. No persistence or calibration claim is set.
+and capabilities 63. Capability bits are output lock 0, RAM policy parameters 1,
+polling telemetry 2, UART transport 3, remote mode switch 4 and controller
+tuning 5. No persistence or calibration claim is set.
 
 | Status offset | Type | Meaning |
 | --- | --- | --- |
@@ -140,8 +163,8 @@ TELEMETRY appends f32 d current at 30, f32 q current at 34, f32 mechanical
 position at 38, f32 velocity at 42, u32 sensor source time at 46, u32 CRC errors
 at 50, u32 dropped frames at 54, u32 RX overflow/error events at 58, and a validity byte
 at 62. Its bits are physical applied 0, calibrated current valid 1, sensor
-calibrated 2. These three bits are zero in this reference image. Current fields
-are zero and invalid. Position/velocity preserve their H0-consumed source time
+calibrated 2. In the locked Board1 image all three bits and the current fields
+stay zero; see the current-field note under Parameters. Position/velocity preserve their H0-consumed source time
 and are valid only when the fresh-sensor flag is set. Their calibration remains
 unverified.
 
@@ -191,13 +214,50 @@ not matched against any expectation, not signature-verified and not a proof of
 physical provenance.
 
 Accepting calibration parameters does not qualify physical current
-measurement. The TELEMETRY_READ validity bits stay zero.
+measurement.
+
+TELEMETRY_READ bytes 30–37 carry the firmware's own decoded d/q current (A) of
+the latest accepted control cycle, and byte 62 bit 1 is set while that cycle
+was an accepted UPDATE. The response is 75 bytes: bytes 63–70 carry the d/q
+current target (A) that cycle tracked (in VELOCITY and POSITION this is the
+outer loop's demand) and bytes 71–74 the controller tuning revision (u32). Both are zero when no UPDATE is accepted, which is
+always the case in the locked Board1 image. Bit 0 (physical output applied)
+and bit 2 (calibrated current sensing) stay zero; ID 45 alone reports physical
+current-measurement qualification.
 
 Writes require a coherent DISABLED view with software inhibition acknowledged
-and no pending stop. The three writable policies belong to Foreground and take
-effect together with their successful response. Unknown IDs, incorrect types,
-NaN, Inf and range violations are rejected. Controller configurations remain
-read-only. Dirty means RAM changed since boot. A restart restores defaults.
+and no pending stop. The three writable policies (IDs 1–3) belong to Foreground
+and take effect together with their APPLIED response. Unknown IDs, incorrect
+types, NaN, Inf and range violations are rejected. Dirty means RAM changed
+since boot. A restart restores defaults; nothing is persisted.
+
+Controller tuning (IDs 64–74) belongs to H0. A write returns ACCEPTED with the
+requested value once the complete candidate (the live tuning with that one field
+replaced) passed the same checks as Runtime initialization. H0 applies it at
+its next cycle, only while still DISABLED with INHIBIT confirmed, and counts it
+in the revision. ID 61 is the receipt (NONE 0, PENDING 1, APPLIED 2, REJECTED 3,
+CANCELLED 4) for request ID 62; ID 60 and TELEMETRY bytes 71–74 carry the
+revision. A write while another is pending returns BUSY. The current limit may
+be lowered below its boot value but never raised above it; the q-current limit
+stays at or below the current limit.
+
+| ID | Parameter | Type and unit | Range / Board1 initial |
+| --- | --- | --- | --- |
+| 60 / 61 / 62 | Tuning revision / receipt / request identity | u32, read only | 0 / 0 / 0 |
+| 64 / 65 | Current Kp d / q | f32 V/A (unit 6) | 0–20 / 1.08, 1.35 |
+| 66 / 67 | Current Ki d / q | f32 V/(A·s) (unit 7) | 0–20000 / 540 |
+| 68 | Current-vector limit | f32 A | 0.05–boot value / 2.5 |
+| 69 / 70 | Velocity Kp / Ki | f32 A/(rad/s) (unit 8) / A/rad (unit 9) | 0–10 / 0.18; 0–1000 / 1.4 |
+| 71 | Position Kp | f32 1/s (unit 10) | 0–1000 / 4 |
+| 72 | Speed reference limit (also bounds VELOCITY setpoints) | f32 rad/s | 0.1–1000 / 12 |
+| 73 | Outer-loop q-current limit | f32 A | 0.05–current limit / 2.5 |
+| 74 | Command lease | u32 µs (unit 5) | 2500–500000 / 2500 |
+
+The command lease is how long a setpoint, or a lifecycle request, stays valid.
+Without a fresh setpoint within it, H0 latches COMMAND_TIMEOUT and inhibits.
+At 115200 baud one setpoint frame takes about 2.5 ms on the wire, so a Host that
+streams over a real UART needs a longer lease than the 2.5 ms default. A longer
+lease also delays the stop after a Host disappears.
 
 ## UART service bounds
 

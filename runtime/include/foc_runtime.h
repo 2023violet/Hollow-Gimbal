@@ -143,6 +143,46 @@ enum foc_runtime_request_result {
     FOC_RUNTIME_REQUEST_CANCELLED,
 };
 
+/**
+ * Controller settings an initialized instance may change. Values use the units
+ * of the owning Core structures. H0 applies a complete candidate between cycles,
+ * only while DISABLED with INHIBIT confirmed, after the same checks that
+ * foc_runtime_init() applies to these fields.
+ */
+struct foc_runtime_tuning {
+    /** d/q current PI gains in V/A and V/(A s). */
+    struct foc_vector_dq current_kp_v_per_a;
+    struct foc_vector_dq current_ki_v_per_a_s;
+    /** Inner current-vector magnitude limit in A. */
+    float current_limit_a;
+    /** H1 velocity PI gains in A/(rad/s) and A/rad. */
+    float velocity_kp_a_per_rad_s;
+    float velocity_ki_a_per_rad;
+    /** Position P gain in 1/s and the shared speed reference limit in rad/s. */
+    float position_kp_per_s;
+    float velocity_limit_rad_s;
+    /** Outer-loop q current limit in A, at most current_limit_a. */
+    float iq_limit_a;
+    /** Command and lifecycle freshness lease in µs. */
+    uint32_t command_timeout_us;
+};
+
+/** Inclusive bounds of the command lease a tuning candidate may select, in µs. */
+enum foc_runtime_tuning_limits {
+    FOC_RUNTIME_LEASE_MIN_US = 2500,
+    FOC_RUNTIME_LEASE_MAX_US = 500000,
+};
+
+/** Latest tuning request result. revision counts applied candidates since init. */
+struct foc_runtime_tuning_result {
+    enum foc_runtime_request_result result;
+    uint32_t request_sequence;
+    uint32_t revision;
+    uint32_t h0_us;
+    /** FOC_RUNTIME_OK, ERR_CONFIG for a rejected value, ERR_CONTROL for a wrong state. */
+    int status;
+};
+
 /** Foreground command with a source identity shared by all closed-loop modes. */
 struct foc_runtime_command {
     /** Mode to which this command applies. */
@@ -486,6 +526,15 @@ struct foc_runtime_snapshot {
     enum foc_following_state following_state;
     /** Latest H0-observed motion refusal, retained across STOP. */
     enum foc_motion_rejection motion_rejection;
+    /** Decoded d/q current in A of the latest accepted control cycle; zero otherwise. */
+    float measured_id_a;
+    float measured_iq_a;
+    /** d/q current target in A that the latest accepted control cycle tracked; zero otherwise. */
+    float target_id_a;
+    float target_iq_a;
+    /** True when the latest H0 cycle was accepted and measured_*_a belong to it.
+     * This is the firmware's own decode, never a physical sensor qualification. */
+    bool current_valid;
 };
 
 /** Diagnostic counters for one domain. Inspect its non-atomic fields when quiescent. */
@@ -512,7 +561,7 @@ struct foc_runtime_lane {
 
 /** Number of atomic payload words in the fixed telemetry publication. */
 enum {
-    FOC_RUNTIME_TELEMETRY_WORDS = 25
+    FOC_RUNTIME_TELEMETRY_WORDS = 29
 };
 
 /** Caller-owned instance. Internal fields are read-only outside their owners. */
@@ -617,6 +666,16 @@ struct foc_runtime {
     /** Last accepted request sequence and whether it has been initialized. */
     atomic_uint lifecycle_last_sequence;
     atomic_uint lifecycle_sequence_seen;
+    /** Foreground-written tuning candidate, claimed by H0 like a lifecycle request. */
+    struct foc_runtime_tuning tuning_request;
+    uint32_t tuning_request_sequence;
+    /** 0 idle, 1 published, 2 claimed by H0. */
+    atomic_uint tuning_pending;
+    /** H0-written result slots and the published slot index. */
+    struct foc_runtime_tuning_result tuning_results[2];
+    atomic_uint tuning_result_slot;
+    /** H0-owned count of applied candidates. */
+    uint32_t tuning_revision;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -659,6 +718,20 @@ int foc_runtime_publish_lifecycle_request(struct foc_runtime *runtime,
 /** Read the latest coherent lifecycle result or PENDING request identity. */
 int foc_runtime_read_lifecycle_result(struct foc_runtime *runtime,
                                       struct foc_runtime_lifecycle_result *result);
+
+/** Foreground only. Copy the live tuning. Fields may mix revisions while a candidate is
+ * being applied; compare the tuning result revision before and after for a coherent copy. */
+int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtime_tuning *tuning);
+
+/** Foreground only. Validate and publish one complete candidate for the next due H0.
+ * ERR_CONFIG for an invalid value, ERR_BUSY while an earlier candidate is pending. */
+int foc_runtime_publish_tuning(struct foc_runtime *runtime,
+                               const struct foc_runtime_tuning *tuning,
+                               uint32_t request_sequence);
+
+/** Read the latest tuning result, or PENDING with the published request identity. */
+int foc_runtime_read_tuning_result(struct foc_runtime *runtime,
+                                   struct foc_runtime_tuning_result *result);
 
 /** Validate and publish one due H1 sample. Current time and simulated cost are in µs. */
 int foc_runtime_h1_step(struct foc_runtime *runtime,

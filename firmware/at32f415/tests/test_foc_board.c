@@ -336,12 +336,238 @@ static int test_rejected_transaction(void)
     return 0;
 }
 
+struct backend_probe {
+    bool accept;
+    unsigned int calls;
+    enum foc_device_output_action last_action;
+};
+
+static bool backend_record(void *argument, const struct foc_device_pwm_request *request)
+{
+    struct backend_probe *probe = argument;
+    probe->calls++;
+    probe->last_action = request->action;
+    return probe->accept;
+}
+
+static int test_output_backend(void)
+{
+    struct foc_board_output output = {0};
+    struct backend_probe probe = {.accept = true};
+    const struct foc_device_pwm_config pwm = {FOC_BOARD_COMPARE_MAX, FOC_DEVICE_PHASE_ORDER_ABC};
+    const struct foc_output duties = {
+        .output_enable = 1U,
+        .svpwm = {.duty_a = 0.6f, .duty_b = 0.5f, .duty_c = 0.4f},
+    };
+    struct foc_device_pwm_request request;
+    CHECK(foc_device_map_output(&duties, &pwm, &request) == 0);
+    CHECK(!foc_board_output_attach(NULL, backend_record, &probe));
+    CHECK(!foc_board_output_attach(&output, NULL, &probe));
+    CHECK(foc_board_output_attach(&output, backend_record, &probe));
+    CHECK(!foc_board_output_attach(&output, backend_record, &probe));
+
+    /* A validated UPDATE reaches the backend and is applied. */
+    CHECK(foc_board_output_submit(&output, &request));
+    CHECK(output.result == FOC_BOARD_OUTPUT_APPLIED && output.applied_updates == 1U);
+    CHECK(probe.calls == 1U && probe.last_action == FOC_DEVICE_OUTPUT_UPDATE);
+    /* A backend refusal keeps the locked disposition. */
+    probe.accept = false;
+    CHECK(!foc_board_output_submit(&output, &request));
+    CHECK(output.result == FOC_BOARD_UPDATE_NOT_APPLIED && output.declined_updates == 1U);
+    CHECK(probe.calls == 2U);
+    /* An invalid request never reaches the backend. */
+    request.channel1_compare++;
+    CHECK(!foc_board_output_submit(&output, &request) && output.result == FOC_BOARD_OUTPUT_INVALID);
+    CHECK(probe.calls == 2U);
+    /* ZERO_DUTY and ACTIVE_BRAKE stay locked even with a backend. */
+    CHECK(foc_device_output_zero_duty(&pwm, &request) == 0);
+    CHECK(
+        !foc_board_output_submit(&output, &request) && output.result == FOC_BOARD_ZERO_DUTY_LOCKED
+    );
+    CHECK(probe.calls == 2U);
+    /* INHIBIT is always accepted and also removes drive at the backend. */
+    CHECK(foc_device_output_inhibit(&pwm, &request) == 0);
+    CHECK(
+        foc_board_output_submit(&output, &request) && output.result == FOC_BOARD_INHIBIT_SOFTWARE
+    );
+    CHECK(probe.calls == 3U && probe.last_action == FOC_DEVICE_OUTPUT_INHIBIT);
+
+    /* Initialization rewrites the journal: an earlier attachment does not survive. */
+    struct foc_runtime runtime;
+    CHECK(foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK);
+    CHECK(output.backend == NULL && output.applied_updates == 0U);
+    return 0;
+}
+
+/* With a backend that applies UPDATE, the same sequence that test_rejected_transaction
+ * drives into a declined UPDATE runs, and the snapshot carries the decoded current. */
+static int test_applied_transaction(void)
+{
+    struct foc_runtime runtime;
+    struct foc_board_output output;
+    struct foc_board_encoder encoder = {0};
+    struct foc_runtime_foreground_result foreground;
+    struct backend_probe probe = {.accept = true};
+    CHECK(foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK);
+    CHECK(foc_board_output_attach(&output, backend_record, &probe));
+    const struct foc_pipeline_command command = {{0.1f, 0.5f}, 0U, 0U};
+    CHECK(foc_runtime_publish_command(&runtime, &command, 0U) == FOC_RUNTIME_OK);
+    /* Same H1 schedule as test_rejected_transaction: the first frame is too early. */
+    CHECK(foc_board_encoder_begin(&encoder, 0U));
+    CHECK(
+        foc_board_encoder_complete(&runtime, &encoder, 20U, FOC_BOARD_ENCODER_OK, 100U) ==
+        FOC_RUNTIME_ERR_INPUT
+    );
+    struct foc_runtime_snapshot view;
+    for (uint32_t cycle = 0U; cycle < 7U; ++cycle) {
+        const uint32_t time = cycle * FOC_BOARD_H0_US + 80U;
+        if (cycle == 3U || cycle == 5U) {
+            const uint32_t captured = cycle == 3U ? 500U : 1000U;
+            CHECK(foc_board_encoder_begin(&encoder, captured));
+            CHECK(
+                foc_board_encoder_complete(
+                    &runtime,
+                    &encoder,
+                    captured + 70U,
+                    FOC_BOARD_ENCODER_OK,
+                    100U
+                ) == FOC_RUNTIME_OK
+            );
+        }
+        if (cycle == 5U) {
+            CHECK(foc_runtime_read_snapshot(&runtime, &view) == FOC_RUNTIME_OK);
+            CHECK(!view.current_valid && view.measured_iq_a == 0.0f);
+        }
+        /* Phase A carries +0.2 A worth of counts: a nonzero decode. */
+        const struct foc_runtime_fast_input input = {
+            .adc = {1241U, 2172U, 1986U, 1986U, FOC_DEVICE_SAMPLE_ALL_VALID, cycle, time},
+            .now_us = time + 8U,
+            .action = cycle == 4U ? FOC_RUNTIME_ACTION_ARM
+                : cycle == 5U     ? FOC_RUNTIME_ACTION_START
+                                  : FOC_RUNTIME_ACTION_NONE,
+        };
+        const int status = foc_runtime_h0_step(&runtime, &input);
+        if (cycle == 6U) {
+            CHECK(status == FOC_RUNTIME_OK && runtime.pipeline_status == FOC_PIPELINE_OK);
+        }
+        (void)foc_runtime_foreground_poll(&runtime, time + 9U, 0U, 0U, &foreground);
+    }
+    CHECK(output.applied_updates == 1U && output.declined_updates == 0U);
+    /* Disabled cycles submit INHIBIT first; the last request is the applied UPDATE. */
+    CHECK(
+        output.result == FOC_BOARD_OUTPUT_APPLIED && probe.last_action == FOC_DEVICE_OUTPUT_UPDATE
+    );
+    CHECK(foc_runtime_read_snapshot(&runtime, &view) == FOC_RUNTIME_OK);
+    CHECK(view.current_valid && view.output_confirmed);
+    CHECK(view.measured_id_a == runtime.pipeline.measured_dq_a.d);
+    CHECK(view.measured_iq_a == runtime.pipeline.measured_dq_a.q);
+    CHECK(fabsf(view.measured_id_a) + fabsf(view.measured_iq_a) > 0.05f);
+    return 0;
+}
+
+/* One due H0 cycle with a valid zero-current frame, then supervision. */
+static int tuning_cycle(struct foc_runtime *runtime, uint32_t cycle, enum foc_runtime_action action)
+{
+    struct foc_runtime_foreground_result foreground;
+    const uint32_t time = cycle * FOC_BOARD_H0_US + 80U;
+    const struct foc_runtime_fast_input input = {
+        .adc = {1241U, 2048U, 2048U, 2048U, FOC_DEVICE_SAMPLE_ALL_VALID, cycle, time},
+        .now_us = time + 8U,
+        .action = action,
+    };
+    const int status = foc_runtime_h0_step(runtime, &input);
+    (void)foc_runtime_foreground_poll(runtime, time + 9U, 0U, 0U, &foreground);
+    return status;
+}
+
+static int test_tuning_mailbox(void)
+{
+    struct foc_runtime runtime;
+    struct foc_board_output output;
+    struct foc_board_encoder encoder = {0};
+    struct foc_runtime_tuning tuning;
+    struct foc_runtime_tuning_result result;
+    CHECK(foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK);
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(tuning.current_kp_v_per_a.q == 1.35f && tuning.command_timeout_us == 2500U);
+    CHECK(foc_runtime_read_tuning_result(&runtime, &result) == FOC_RUNTIME_OK);
+    CHECK(result.result == FOC_RUNTIME_REQUEST_NONE && result.revision == 0U);
+    (void)tuning_cycle(&runtime, 0U, FOC_RUNTIME_ACTION_NONE);
+
+    /* The same bounds as initialization, checked before publication. */
+    struct foc_runtime_tuning candidate = tuning;
+    candidate.iq_limit_a = candidate.current_limit_a + 0.1f;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 1U) == FOC_RUNTIME_ERR_CONFIG);
+    candidate = tuning;
+    candidate.command_timeout_us = FOC_RUNTIME_LEASE_MIN_US - 1U;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 1U) == FOC_RUNTIME_ERR_CONFIG);
+    candidate = tuning;
+    candidate.current_kp_v_per_a.q = -1.0f;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 1U) == FOC_RUNTIME_ERR_CONFIG);
+    candidate = tuning;
+    candidate.velocity_kp_a_per_rad_s = NAN;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 1U) == FOC_RUNTIME_ERR_CONFIG);
+
+    /* DISABLED with INHIBIT confirmed: H0 applies at its next cycle. */
+    candidate = tuning;
+    candidate.current_kp_v_per_a.q = 2.0f;
+    candidate.velocity_kp_a_per_rad_s = 0.25f;
+    candidate.command_timeout_us = 20000U;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 1U) == FOC_RUNTIME_OK);
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 2U) == FOC_RUNTIME_ERR_BUSY);
+    CHECK(foc_runtime_read_tuning_result(&runtime, &result) == FOC_RUNTIME_OK);
+    CHECK(result.result == FOC_RUNTIME_REQUEST_PENDING && result.request_sequence == 1U);
+    CHECK(runtime.pipeline.current.config.kp_v_per_a.q == 1.35f);
+    (void)tuning_cycle(&runtime, 1U, FOC_RUNTIME_ACTION_NONE);
+    CHECK(foc_runtime_read_tuning_result(&runtime, &result) == FOC_RUNTIME_OK);
+    CHECK(result.result == FOC_RUNTIME_REQUEST_APPLIED && result.revision == 1U);
+    CHECK(result.request_sequence == 1U && result.status == FOC_RUNTIME_OK);
+    CHECK(runtime.pipeline.current.config.kp_v_per_a.q == 2.0f);
+    CHECK(runtime.outer_velocity.config.kp_a_per_rad_s == 0.25f);
+    CHECK(runtime.config.motion.velocity.kp_a_per_rad_s == 0.25f);
+    CHECK(runtime.pipeline.safety.config.command_timeout_us == 20000U);
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(tuning.current_kp_v_per_a.q == 2.0f && tuning.command_timeout_us == 20000U);
+
+    /* A pending STOP cancels the candidate; nothing changes. */
+    candidate = tuning;
+    candidate.current_kp_v_per_a.q = 3.0f;
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 2U) == FOC_RUNTIME_OK);
+    foc_runtime_request_inhibit(&runtime, 0U);
+    (void)tuning_cycle(&runtime, 2U, FOC_RUNTIME_ACTION_NONE);
+    CHECK(foc_runtime_read_tuning_result(&runtime, &result) == FOC_RUNTIME_OK);
+    CHECK(result.result == FOC_RUNTIME_REQUEST_CANCELLED && result.revision == 1U);
+    CHECK(runtime.pipeline.current.config.kp_v_per_a.q == 2.0f);
+
+    /* Outside DISABLED (READY after ARM) H0 rejects it. */
+    CHECK(foc_board_encoder_begin(&encoder, 0U));
+    (void)foc_board_encoder_complete(&runtime, &encoder, 20U, FOC_BOARD_ENCODER_OK, 100U);
+    (void)tuning_cycle(&runtime, 3U, FOC_RUNTIME_ACTION_NONE);
+    CHECK(foc_board_encoder_begin(&encoder, 500U));
+    CHECK(
+        foc_board_encoder_complete(&runtime, &encoder, 570U, FOC_BOARD_ENCODER_OK, 100U) ==
+        FOC_RUNTIME_OK
+    );
+    const struct foc_pipeline_command command = {{0.0f, 0.1f}, 1U, 800U};
+    CHECK(foc_runtime_publish_command(&runtime, &command, 800U) == FOC_RUNTIME_OK);
+    (void)tuning_cycle(&runtime, 4U, FOC_RUNTIME_ACTION_ARM);
+    CHECK(runtime.pipeline.safety.state == FOC_SAFE_STATE_READY);
+    CHECK(foc_runtime_publish_tuning(&runtime, &candidate, 3U) == FOC_RUNTIME_OK);
+    (void)tuning_cycle(&runtime, 5U, FOC_RUNTIME_ACTION_NONE);
+    CHECK(foc_runtime_read_tuning_result(&runtime, &result) == FOC_RUNTIME_OK);
+    CHECK(result.result == FOC_RUNTIME_REQUEST_REJECTED && result.revision == 1U);
+    CHECK(result.status == FOC_RUNTIME_ERR_CONTROL && result.request_sequence == 3U);
+    CHECK(runtime.pipeline.current.config.kp_v_per_a.q == 2.0f);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
 {
     return test_time() || test_adc() || test_encoder() || test_output() ||
-        test_rejected_transaction();
+        test_rejected_transaction() || test_output_backend() || test_applied_transaction() ||
+        test_tuning_mailbox();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

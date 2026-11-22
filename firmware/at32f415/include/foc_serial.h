@@ -129,6 +129,10 @@ struct foc_serial {
     enum foc_serial_target_policy target_policy;
     /** Monotonic lifecycle request identity, separate from wire sequence. */
     uint32_t lifecycle_sequence;
+    /** Monotonic controller-tuning request identity. */
+    uint32_t tuning_sequence;
+    /** Boot current-vector limit in A: remote tuning may lower it, never raise it above. */
+    float current_limit_ceiling_a;
     /** Optional read-only startup readback source and its context. */
     foc_serial_boot_reader boot_reader;
     const void *boot_context;

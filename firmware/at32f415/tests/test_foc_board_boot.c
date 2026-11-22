@@ -1017,7 +1017,14 @@ static int check_locked_uart(struct foc_boot_test *test, bool calibrated)
         foc_boot_test_call(test, FOC_MSG_PARAM_SAVE, NULL, 0U, &response) == FOC_PROTO_NOT_SUPPORTED
     );
     CHECK(foc_boot_test_call(test, FOC_MSG_TELEMETRY_READ, NULL, 0U, &response) == FOC_PROTO_OK);
-    CHECK(response.length == 63U && response.payload[62] == 0U);
+    /* M1 appended target d/q and tuning revision: all zero in the locked image. */
+    CHECK(response.length == 75U && response.payload[62] == 0U);
+    for (unsigned int index = 30U; index < 38U; ++index) {
+        CHECK(response.payload[index] == 0U);
+    }
+    for (unsigned int index = 63U; index < 75U; ++index) {
+        CHECK(response.payload[index] == 0U);
+    }
 
     /* STOP is accepted by Foreground and consumed by H0. */
     CHECK(foc_boot_test_call(test, FOC_MSG_STOP, NULL, 0U, &response) == FOC_PROTO_ACCEPTED);
@@ -1036,6 +1043,32 @@ static int check_locked_uart(struct foc_boot_test *test, bool calibrated)
     );
     CHECK(foc_boot_test_call(test, FOC_MSG_FAULT_READ, NULL, 0U, &response) == FOC_PROTO_OK);
     CHECK(response.payload[1] == FOC_SAFE_STATE_DISABLED && (response.payload[3] & 1U) != 0U);
+
+    /* M1: mode selection is control state only, so the locked image accepts it.
+     * The request waits for H0; its receipt is readable through LIFECYCLE_READ. */
+    /* CURRENT is the active mode: the receipt path is exercised without side effects. */
+    const uint8_t current_mode[] = {FOC_RUNTIME_MODE_CURRENT};
+    const uint8_t bad_mode[] = {FOC_RUNTIME_MODE_POSITION + 1U};
+    CHECK(
+        foc_boot_test_call(test, FOC_MSG_SET_MODE, bad_mode, 1U, &response) ==
+        FOC_PROTO_INVALID_ARGUMENT
+    );
+    CHECK(
+        foc_boot_test_call(test, FOC_MSG_SET_MODE, current_mode, 1U, &response) ==
+        FOC_PROTO_ACCEPTED
+    );
+    CHECK(response.length == 5U && foc_protocol_read_u32(response.payload + 1) != 0U);
+    const uint32_t mode_request = foc_protocol_read_u32(response.payload + 1);
+    CHECK(foc_boot_test_call(test, FOC_MSG_LIFECYCLE_READ, NULL, 0U, &response) == FOC_PROTO_OK);
+    CHECK(response.length == 25U && response.payload[1] == FOC_RUNTIME_REQUEST_PENDING);
+    CHECK(response.payload[2] == FOC_RUNTIME_ACTION_SET_MODE);
+    CHECK(response.payload[3] == FOC_RUNTIME_MODE_CURRENT);
+    CHECK(foc_protocol_read_u32(response.payload + 4) == mode_request);
+    /* Controller tuning reads the live configuration; ID 74 is the command lease. */
+    const uint8_t lease_id[] = {74U, 0U};
+    CHECK(foc_boot_test_call(test, FOC_MSG_PARAM_READ, lease_id, 2U, &response) == FOC_PROTO_OK);
+    CHECK(response.length == 18U && foc_protocol_read_u32(response.payload + 14) == 2500U);
+    CHECK((response.payload[5] & 1U) != 0U);
 
     /* Fault request consumed by H0. The locked image cannot reach RUNNING, so the lone
      * COMMAND_TIMEOUT that qualifies for a clear is latched through the public Safety API;

@@ -34,6 +34,8 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_STOP:
     case FOC_MSG_ARM:
     case FOC_MSG_START:
+    case FOC_MSG_SET_MODE:
+    case FOC_MSG_LIFECYCLE_READ:
     case FOC_MSG_FAULT_READ:
     case FOC_MSG_FAULT_CLEAR:
     case FOC_MSG_PARAM_READ:

@@ -271,4 +271,19 @@ else()
   set_tests_properties(
     test-foc-python PROPERTIES ENVIRONMENT "FOC_SERIAL_SIM=$<TARGET_FILE:foc-serial-sim>"
   )
+  # M0 Board1 SIL: the production Board1 path (default build supply) against a
+  # virtual motor, driven over the V1 wire by the CLI. Host only; never ARM.
+  add_executable(
+    falconfoc-board1-sil sil/foc_board_sil.c "${repo}/simulation/src/foc_virtual_motor.c"
+  )
+  target_include_directories(
+    falconfoc-board1-sil PRIVATE "${repo}/simulation/include" "${repo}/simulation/src"
+  )
+  target_link_libraries(falconfoc-board1-sil PRIVATE falconfoc-board1-supply-none)
+  add_test(NAME test-foc-board1-sil COMMAND "${Python3_EXECUTABLE}" -B
+                                            "${repo}/tools/falconfoc-cli/test_board1_sil.py"
+  )
+  set_tests_properties(
+    test-foc-board1-sil PROPERTIES ENVIRONMENT "FOC_BOARD1_SIL=$<TARGET_FILE:falconfoc-board1-sil>"
+  )
 endif()

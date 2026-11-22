@@ -41,6 +41,22 @@ enum {
     PARAM_SOURCE_DIRECTION = 43,
     PARAM_CALIBRATION_DIRECTION = 44,
     PARAM_MEASUREMENT_QUALIFIED = 45,
+    /* Controller tuning receipt, read only. */
+    PARAM_TUNING_REVISION = 60,
+    PARAM_TUNING_RESULT = 61,
+    PARAM_TUNING_SEQUENCE = 62,
+    /* Controller tuning, writable while DISABLED; applied by H0. */
+    PARAM_CURRENT_KP_D = 64,
+    PARAM_CURRENT_KP_Q = 65,
+    PARAM_CURRENT_KI_D = 66,
+    PARAM_CURRENT_KI_Q = 67,
+    PARAM_CURRENT_VECTOR_LIMIT = 68,
+    PARAM_VELOCITY_KP = 69,
+    PARAM_VELOCITY_KI = 70,
+    PARAM_POSITION_KP = 71,
+    PARAM_VELOCITY_REFERENCE_LIMIT = 72,
+    PARAM_IQ_LIMIT = 73,
+    PARAM_COMMAND_LEASE = 74,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
@@ -48,6 +64,12 @@ enum {
     UNIT_RADIAN = 2,
     UNIT_RAD_S = 3,
     UNIT_COUNT = 4,
+    UNIT_MICROSECOND = 5,
+    UNIT_V_PER_A = 6,
+    UNIT_V_PER_A_S = 7,
+    UNIT_A_PER_RAD_S = 8,
+    UNIT_A_PER_RAD = 9,
+    UNIT_PER_SECOND = 10,
     /* Direction codes on the wire: none, +1 and -1. */
     DIRECTION_NONE = 0,
     DIRECTION_POSITIVE = 1,
@@ -60,6 +82,12 @@ enum {
     FLAG_DIRTY = 32,
     FLAG_FAST_SEEN = 64,
     FLAG_SAMPLE_SEEN = 128,
+    /* TELEMETRY_READ byte 62: bit 1 marks the firmware's decoded current. */
+    TELEMETRY_CURRENT_VALID = 2,
+    /* Capability bits: lock, RAM policy, polling telemetry, UART, mode switch, tuning. */
+    CAPABILITY_BITS = 63,
+    /* Lifecycle result codes on the wire. */
+    LIFECYCLE_WIRE_NONE = 0,
 };
 
 /* Private Types ---------------------------------------------------------------- */
@@ -69,6 +97,8 @@ struct foc_serial_parameter {
     uint8_t type, unit;
     bool writable;
     bool calibration_required;
+    /* Written through the H0 tuning mailbox rather than Foreground RAM. */
+    bool tuning;
 };
 
 /* Private Helpers -------------------------------------------------------------- */
@@ -94,7 +124,7 @@ static float foc_serial_bits_float(uint32_t bits)
 
 static void foc_serial_capability(struct foc_protocol_frame *response)
 {
-    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, 15, 0};
+    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, CAPABILITY_BITS, 0};
     memcpy(response->payload, capability, sizeof capability);
     response->length = sizeof capability;
 }
@@ -130,17 +160,38 @@ static int foc_serial_status(
     foc_protocol_write_u32(body + 26, view.command_seq);
     response->length = 30;
     if (response->type == FOC_MSG_TELEMETRY_READ) {
-        /* Locked Board1 has no calibrated live CSA measurement or applied PWM. */
-        foc_protocol_write_u32(body + 30, 0);
-        foc_protocol_write_u32(body + 34, 0);
+        /* The firmware's own d/q decode of the latest accepted cycle. It is
+         * zero in the locked image, which never accepts an UPDATE, and it
+         * never implies physical qualification (PARAM_READ ID 45). */
+        foc_protocol_write_u32(
+            body + 30,
+            foc_serial_float_bits(view.current_valid ? view.measured_id_a : 0.0f)
+        );
+        foc_protocol_write_u32(
+            body + 34,
+            foc_serial_float_bits(view.current_valid ? view.measured_iq_a : 0.0f)
+        );
         foc_protocol_write_u32(body + 38, foc_serial_float_bits(view.mechanical_rad));
         foc_protocol_write_u32(body + 42, foc_serial_float_bits(view.mechanical_rad_s));
         foc_protocol_write_u32(body + 46, view.sensor_us);
         foc_protocol_write_u32(body + 50, serial->crc_errors);
         foc_protocol_write_u32(body + 54, serial->dropped);
         foc_protocol_write_u32(body + 58, atomic_load(&uart->rx_lost));
-        body[62] = 0; /* Both physical applied and calibrated current validity are false. */
-        response->length = 63;
+        /* Bit 0 physical applied and bit 2 sensor calibrated stay false here. */
+        body[62] = view.current_valid ? TELEMETRY_CURRENT_VALID : 0U;
+        /* M1 append: the d/q target of that cycle and the controller tuning revision. */
+        struct foc_runtime_tuning_result tuning = {0};
+        (void)foc_runtime_read_tuning_result(runtime, &tuning);
+        foc_protocol_write_u32(
+            body + 63,
+            foc_serial_float_bits(view.current_valid ? view.target_id_a : 0.0f)
+        );
+        foc_protocol_write_u32(
+            body + 67,
+            foc_serial_float_bits(view.current_valid ? view.target_iq_a : 0.0f)
+        );
+        foc_protocol_write_u32(body + 71, tuning.revision);
+        response->length = 75;
     }
     return FOC_PROTO_OK;
 }
@@ -215,6 +266,209 @@ static bool foc_serial_boot_parameter(
     return true;
 }
 
+static void foc_serial_tuning_float(
+    struct foc_serial_parameter *parameter,
+    float value,
+    float minimum,
+    float maximum,
+    uint8_t unit
+)
+{
+    *parameter = (struct foc_serial_parameter){
+        .value = foc_serial_float_bits(value),
+        .minimum = foc_serial_float_bits(minimum),
+        .maximum = foc_serial_float_bits(maximum),
+        .type = PARAM_F32,
+        .unit = unit,
+        .writable = true,
+        .tuning = true,
+    };
+}
+
+static uint32_t foc_serial_request_code(enum foc_runtime_request_result result)
+{
+    return (uint32_t)result; /* NONE 0, PENDING 1, APPLIED 2, REJECTED 3, CANCELLED 4 */
+}
+
+/* Controller tuning and its receipt, from the live Runtime. */
+static bool foc_serial_tuning_parameter(
+    const struct foc_serial *serial,
+    const struct foc_runtime *runtime,
+    uint16_t id,
+    struct foc_serial_parameter *parameter
+)
+{
+    struct foc_runtime_tuning tuning;
+    struct foc_runtime_tuning_result receipt;
+    if (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE ||
+        foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
+        foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) != FOC_RUNTIME_OK) {
+        return false;
+    }
+    switch (id) {
+    case PARAM_TUNING_REVISION:
+    case PARAM_TUNING_RESULT:
+    case PARAM_TUNING_SEQUENCE:
+        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
+        parameter->value = id == PARAM_TUNING_REVISION ? receipt.revision
+            : id == PARAM_TUNING_RESULT                ? foc_serial_request_code(receipt.result)
+                                                       : receipt.request_sequence;
+        parameter->minimum = parameter->maximum = parameter->value;
+        return true;
+    case PARAM_CURRENT_KP_D:
+    case PARAM_CURRENT_KP_Q:
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_CURRENT_KP_D ? tuning.current_kp_v_per_a.d : tuning.current_kp_v_per_a.q,
+            0.0f,
+            20.0f,
+            UNIT_V_PER_A
+        );
+        return true;
+    case PARAM_CURRENT_KI_D:
+    case PARAM_CURRENT_KI_Q:
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_CURRENT_KI_D ? tuning.current_ki_v_per_a_s.d
+                                     : tuning.current_ki_v_per_a_s.q,
+            0.0f,
+            20000.0f,
+            UNIT_V_PER_A_S
+        );
+        return true;
+    case PARAM_CURRENT_VECTOR_LIMIT:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.current_limit_a,
+            0.05f,
+            serial->current_limit_ceiling_a,
+            UNIT_AMPERE
+        );
+        return true;
+    case PARAM_VELOCITY_KP:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.velocity_kp_a_per_rad_s,
+            0.0f,
+            10.0f,
+            UNIT_A_PER_RAD_S
+        );
+        return true;
+    case PARAM_VELOCITY_KI:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.velocity_ki_a_per_rad,
+            0.0f,
+            1000.0f,
+            UNIT_A_PER_RAD
+        );
+        return true;
+    case PARAM_POSITION_KP:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.position_kp_per_s,
+            0.0f,
+            1000.0f,
+            UNIT_PER_SECOND
+        );
+        return true;
+    case PARAM_VELOCITY_REFERENCE_LIMIT:
+        foc_serial_tuning_float(parameter, tuning.velocity_limit_rad_s, 0.1f, 1000.0f, UNIT_RAD_S);
+        return true;
+    case PARAM_IQ_LIMIT:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.iq_limit_a,
+            0.05f,
+            tuning.current_limit_a,
+            UNIT_AMPERE
+        );
+        return true;
+    case PARAM_COMMAND_LEASE:
+        *parameter = (struct foc_serial_parameter){
+            .value = tuning.command_timeout_us,
+            .minimum = FOC_RUNTIME_LEASE_MIN_US,
+            .maximum = FOC_RUNTIME_LEASE_MAX_US,
+            .type = PARAM_U32,
+            .unit = UNIT_MICROSECOND,
+            .writable = true,
+            .tuning = true,
+        };
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* Replace one field of the live tuning and publish the whole candidate to H0. */
+static int foc_serial_tuning_write(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    uint16_t id,
+    uint32_t value
+)
+{
+    struct foc_runtime_tuning_result before;
+    struct foc_runtime_tuning_result after;
+    struct foc_runtime_tuning tuning;
+    /* A candidate built from a copy torn by a concurrent apply could revert it. */
+    if (foc_runtime_read_tuning_result(runtime, &before) != FOC_RUNTIME_OK ||
+        before.result == FOC_RUNTIME_REQUEST_PENDING ||
+        foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
+        foc_runtime_read_tuning_result(runtime, &after) != FOC_RUNTIME_OK ||
+        after.result == FOC_RUNTIME_REQUEST_PENDING || after.revision != before.revision) {
+        return FOC_PROTO_BUSY;
+    }
+    const float floating = foc_serial_bits_float(value);
+    switch (id) {
+    case PARAM_CURRENT_KP_D:
+        tuning.current_kp_v_per_a.d = floating;
+        break;
+    case PARAM_CURRENT_KP_Q:
+        tuning.current_kp_v_per_a.q = floating;
+        break;
+    case PARAM_CURRENT_KI_D:
+        tuning.current_ki_v_per_a_s.d = floating;
+        break;
+    case PARAM_CURRENT_KI_Q:
+        tuning.current_ki_v_per_a_s.q = floating;
+        break;
+    case PARAM_CURRENT_VECTOR_LIMIT:
+        tuning.current_limit_a = floating;
+        break;
+    case PARAM_VELOCITY_KP:
+        tuning.velocity_kp_a_per_rad_s = floating;
+        break;
+    case PARAM_VELOCITY_KI:
+        tuning.velocity_ki_a_per_rad = floating;
+        break;
+    case PARAM_POSITION_KP:
+        tuning.position_kp_per_s = floating;
+        break;
+    case PARAM_VELOCITY_REFERENCE_LIMIT:
+        tuning.velocity_limit_rad_s = floating;
+        break;
+    case PARAM_IQ_LIMIT:
+        tuning.iq_limit_a = floating;
+        break;
+    case PARAM_COMMAND_LEASE:
+        tuning.command_timeout_us = value;
+        break;
+    default:
+        return FOC_PROTO_INTERNAL_ERROR;
+    }
+    const uint32_t sequence = serial->tuning_sequence + 1U;
+    const int result = foc_runtime_publish_tuning(runtime, &tuning, sequence);
+    if (result == FOC_RUNTIME_ERR_BUSY) {
+        return FOC_PROTO_BUSY;
+    }
+    if (result != FOC_RUNTIME_OK) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    serial->tuning_sequence = sequence;
+    return FOC_PROTO_ACCEPTED;
+}
+
 static bool foc_serial_parameter_read(
     const struct foc_serial *serial,
     const struct foc_runtime *runtime,
@@ -222,7 +476,8 @@ static bool foc_serial_parameter_read(
     struct foc_serial_parameter *parameter
 )
 {
-    if (foc_serial_boot_parameter(serial, id, parameter)) {
+    if (foc_serial_boot_parameter(serial, id, parameter) ||
+        foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
     *parameter = (struct foc_serial_parameter){.type = PARAM_F32};
@@ -319,6 +574,24 @@ static int foc_serial_parameter(
                 return FOC_PROTO_INVALID_ARGUMENT;
             }
         }
+        if (parameter.tuning) {
+            const int published = foc_serial_tuning_write(serial, runtime, id, value);
+            if (published != FOC_PROTO_ACCEPTED) {
+                return published;
+            }
+            serial->dirty = true;
+            parameter.value = value;
+            foc_protocol_write_u16(response->payload + 1, id);
+            response->payload[3] = parameter.type;
+            response->payload[4] = parameter.unit;
+            /* Writable and calibration bits only: RAM application is reported by ID 61. */
+            response->payload[5] = 1U;
+            foc_protocol_write_u32(response->payload + 6, parameter.minimum);
+            foc_protocol_write_u32(response->payload + 10, parameter.maximum);
+            foc_protocol_write_u32(response->payload + 14, parameter.value);
+            response->length = 18;
+            return FOC_PROTO_ACCEPTED;
+        }
         switch (id) {
         case PARAM_RX_BUDGET:
             serial->rx_budget = value;
@@ -369,8 +642,11 @@ static int foc_serial_setpoint(
     if (!isfinite(first) || !isfinite(second)) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
+    const float inner_limit = runtime->pipeline.current.config.current_limit_a;
+    const float current_cap =
+        serial->current_limit_a < inner_limit ? serial->current_limit_a : inner_limit;
     if ((mode == FOC_RUNTIME_MODE_CURRENT &&
-         first * first + second * second > serial->current_limit_a * serial->current_limit_a) ||
+         first * first + second * second > current_cap * current_cap) ||
         (mode == FOC_RUNTIME_MODE_VELOCITY &&
          fabsf(first) > runtime->config.motion.position.velocity_limit_rad_s) ||
         (mode == FOC_RUNTIME_MODE_POSITION && fabsf(first) > serial->position_limit_rad)) {
@@ -404,6 +680,67 @@ static int foc_serial_setpoint(
     return FOC_PROTO_ACCEPTED;
 }
 
+/* Publish ARM, START or SET_MODE for the next due H0; ACCEPTED carries its identity. */
+static int foc_serial_lifecycle(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    enum foc_runtime_action action,
+    enum foc_runtime_mode requested_mode,
+    uint32_t now_us,
+    struct foc_protocol_frame *response
+)
+{
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    /* H0 rechecks; refusing here gives the Host an immediate answer. */
+    if (action == FOC_RUNTIME_ACTION_SET_MODE &&
+        (view.state != FOC_SAFE_STATE_DISABLED || view.inhibit_pending || !view.output_confirmed ||
+         view.action != FOC_DEVICE_OUTPUT_INHIBIT)) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    const struct foc_runtime_lifecycle_request lifecycle_request = {
+        .action = action,
+        .requested_mode = action == FOC_RUNTIME_ACTION_SET_MODE ? requested_mode : view.mode,
+        .request_sequence = serial->lifecycle_sequence + 1U,
+        .source_session = view.motion_session,
+        .produced_us = now_us,
+    };
+    const int publish = foc_runtime_publish_lifecycle_request(runtime, &lifecycle_request, now_us);
+    if (publish != FOC_RUNTIME_OK) {
+        return publish == FOC_RUNTIME_ERR_BUSY ? FOC_PROTO_BUSY : FOC_PROTO_BAD_STATE;
+    }
+    serial->lifecycle_sequence = lifecycle_request.request_sequence;
+    foc_protocol_write_u32(response->payload + 1, lifecycle_request.request_sequence);
+    response->length = 5;
+    return FOC_PROTO_ACCEPTED;
+}
+
+static int foc_serial_lifecycle_read(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    struct foc_protocol_frame *response
+)
+{
+    struct foc_runtime_lifecycle_result result;
+    if (foc_serial_read_lifecycle_result(serial, runtime, &result) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    uint8_t *body = response->payload;
+    body[1] = (uint8_t)foc_serial_request_code(result.result);
+    body[2] = (uint8_t)result.action;
+    body[3] = (uint8_t)result.requested_mode;
+    foc_protocol_write_u32(body + 4, result.request_sequence);
+    body[8] = (uint8_t)result.state;
+    foc_protocol_write_u32(body + 9, result.faults);
+    foc_protocol_write_u32(body + 13, result.h0_us);
+    foc_protocol_write_u32(body + 17, (uint32_t)(int32_t)result.pipeline_status);
+    foc_protocol_write_u32(body + 21, result.applied_session);
+    response->length = 25;
+    return FOC_PROTO_OK;
+}
+
 static int foc_serial_dispatch(
     struct foc_serial *serial,
     struct foc_uart_buffer *uart,
@@ -424,10 +761,26 @@ static int foc_serial_dispatch(
         }
         return result;
     }
+    if (request->type == FOC_MSG_SET_MODE) {
+        /* Mode selection changes software control state only; output policy is unchanged. */
+        if (request->length != 1U || request->payload[0] > FOC_RUNTIME_MODE_POSITION) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
+        return foc_serial_lifecycle(
+            serial,
+            runtime,
+            FOC_RUNTIME_ACTION_SET_MODE,
+            (enum foc_runtime_mode)request->payload[0],
+            now_us,
+            response
+        );
+    }
     if (request->length != 0U) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
     switch (request->type) {
+    case FOC_MSG_LIFECYCLE_READ:
+        return foc_serial_lifecycle_read(serial, runtime, response);
     case FOC_MSG_CAPABILITY_READ:
         foc_serial_capability(response);
         return FOC_PROTO_OK;
@@ -443,25 +796,14 @@ static int foc_serial_dispatch(
         if (serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY) {
             return FOC_PROTO_OUTPUT_LOCKED;
         }
-        struct foc_runtime_snapshot view;
-        if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
-            return FOC_PROTO_BUSY;
-        }
-        const struct foc_runtime_lifecycle_request lifecycle_request = {
-            .action =
-                request->type == FOC_MSG_ARM ? FOC_RUNTIME_ACTION_ARM : FOC_RUNTIME_ACTION_START,
-            .requested_mode = view.mode,
-            .request_sequence = serial->lifecycle_sequence + 1U,
-            .source_session = view.motion_session,
-            .produced_us = now_us,
-        };
-        const int publish =
-            foc_runtime_publish_lifecycle_request(runtime, &lifecycle_request, now_us);
-        if (publish == FOC_RUNTIME_OK) {
-            serial->lifecycle_sequence = lifecycle_request.request_sequence;
-            return FOC_PROTO_ACCEPTED;
-        }
-        return publish == FOC_RUNTIME_ERR_BUSY ? FOC_PROTO_BUSY : FOC_PROTO_BAD_STATE;
+        return foc_serial_lifecycle(
+            serial,
+            runtime,
+            request->type == FOC_MSG_ARM ? FOC_RUNTIME_ACTION_ARM : FOC_RUNTIME_ACTION_START,
+            FOC_RUNTIME_MODE_CURRENT,
+            now_us,
+            response
+        );
     }
     case FOC_MSG_FAULT_CLEAR: {
         const int result = foc_runtime_request_timeout_clear(runtime, now_us);
@@ -536,6 +878,7 @@ void foc_serial_init_with_policy(
         .current_limit_a = runtime->config.motion.iq_limit_a,
         .position_limit_rad = 100.0f,
         .rx_budget = FOC_SERIAL_RX_DEFAULT,
+        .current_limit_ceiling_a = runtime->pipeline.current.config.current_limit_a,
         .target_policy = policy == FOC_SERIAL_TARGET_VIRTUAL_ONLY ? FOC_SERIAL_TARGET_VIRTUAL_ONLY
                                                                   : FOC_SERIAL_TARGET_LOCKED,
     };

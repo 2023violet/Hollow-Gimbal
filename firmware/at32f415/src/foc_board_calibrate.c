@@ -49,6 +49,18 @@
 #define CAL_SAMPLES_PER_TURN     12U
 #define CAL_SENSOR_AGE_US        2000U
 #define CAL_STOP_TIMEOUT_US      20000U
+/* M3b: H0 slot clock and preload. A command computed in slot k takes effect at the
+ * next update, so an aperture interval sees 80 % of V(k-2) and 20 % of V(k-1). */
+#define CAL_SLOT_US              ((uint32_t)FOC_BOARD_H0_US)
+#define CAL_PRELOAD_NEW          ((float)FOC_BOARD_ADC_COMPARE_US / (float)FOC_BOARD_H0_US)
+#define CAL_RL_LEVEL_SLOTS       24U
+#define CAL_RL_INTERVALS         768U
+#define CAL_RL_STILL_RAD_S       1.0f
+#define CAL_FLUX_SETTLE_US       400000U
+#define CAL_FLUX_WINDOW          32U
+#define CAL_FLUX_WINDOWS         4U
+#define CAL_PI_BANDWIDTH_HZ      150.0f
+#define CAL_TUNE_TIMEOUT_US      50000U
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -74,7 +86,9 @@ static void
 cal_fail(struct foc_board_calibration *cal, enum foc_board_cal_failure failure, uint32_t now_us)
 {
     atomic_store(&cal->adc_active, 0U);
-    if (cal->state >= FOC_BOARD_CAL_DRIVE_MODE && cal->state <= FOC_BOARD_CAL_SWEEP) {
+    atomic_store(&cal->record_active, 0U);
+    if ((cal->state >= FOC_BOARD_CAL_DRIVE_MODE && cal->state <= FOC_BOARD_CAL_SWEEP) ||
+        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX)) {
         foc_runtime_revoke_command(cal->runtime);
     }
     cal->failed_state = cal->state;
@@ -149,16 +163,56 @@ static int cal_lifecycle(
     return 0;
 }
 
-static void cal_drive(struct foc_board_calibration *cal, uint32_t now_us)
+static void cal_drive_dq(
+    struct foc_board_calibration *cal,
+    float vd,
+    float vq,
+    float theta,
+    bool follow_rotor,
+    uint32_t now_us
+)
 {
     const struct foc_runtime_command command = {
         .mode = FOC_RUNTIME_MODE_CALIBRATION,
-        .seq = ++cal->command_sequence,
+        /* One publication sequence with the UART adapter: the Runtime admits only newer
+         * commands, so a private counter would lock out the Host after a run. */
+        .seq = ++cal->serial->publication_seq,
         .produced_us = now_us,
-        .target
-            .calibration = {.voltage_v = {cal->voltage_v, 0.0f}, .theta_elec_rad = cal->theta_rad},
+        .target.calibration =
+            {.voltage_v = {vd, vq}, .theta_elec_rad = theta, .follow_rotor = follow_rotor},
     };
     (void)foc_runtime_publish_calibration_command(cal->runtime, &command, now_us);
+}
+
+static void cal_drive(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    cal_drive_dq(cal, cal->voltage_v, 0.0f, cal->theta_rad, false, now_us);
+}
+
+/* H0, after each Runtime step of a valid frame, while an electrical stage records. */
+static void
+cal_h0_observer(void *argument, const struct foc_runtime *runtime, uint32_t slot_id, int h0_result)
+{
+    struct foc_board_calibration *cal = argument;
+    if (atomic_load_explicit(&cal->record_active, memory_order_acquire) == 0U) {
+        return;
+    }
+    const unsigned int head = atomic_load_explicit(&cal->ring_head, memory_order_relaxed);
+    const unsigned int tail = atomic_load_explicit(&cal->ring_tail, memory_order_acquire);
+    if (head - tail >= FOC_BOARD_CAL_RING) {
+        atomic_store_explicit(&cal->ring_overflow, 1U, memory_order_relaxed);
+        return;
+    }
+    cal->ring[head % FOC_BOARD_CAL_RING] = (struct foc_board_cal_record){
+        .slot = slot_id,
+        .current_a = runtime->pipeline.measured_dq_a,
+        .voltage_v = runtime->pipeline.voltage_dq_v,
+        .mechanical_rad_s = runtime->observed_sensor.mechanical_rad_s,
+        .accepted = h0_result == FOC_RUNTIME_OK &&
+            runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING &&
+            runtime->pipeline.last_reason == FOC_PIPELINE_OK && runtime->observed_sensor.valid,
+    };
+    atomic_store_explicit(&cal->ring_head, head + 1U, memory_order_release);
 }
 
 /* Lifecycle step with retries: H0 rejects ARM/START until fresh sensing arrives. */
@@ -315,7 +369,350 @@ static void cal_apply(struct foc_board_calibration *cal, uint32_t now_us)
     cal->snapshot = snapshot;
     cal->lifecycle_sequence = 0U;
     cal->applied_runs++;
+    if ((cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U) {
+        cal->electrical_phase = true;
+        cal_enter(cal, FOC_BOARD_CAL_DRIVE_MODE, now_us);
+        return;
+    }
     cal_enter(cal, FOC_BOARD_CAL_DONE, now_us);
+}
+
+/* Electrical stages ------------------------------------------------------------- */
+
+static float cal_voltage_limit(const struct foc_board_calibration *cal)
+{
+    return cal->runtime->pipeline.current.config.pwm.voltage_limit_v;
+}
+
+static float cal_mean(float older, float newer)
+{
+    return (1.0f - CAL_PRELOAD_NEW) * older + CAL_PRELOAD_NEW * newer;
+}
+
+/* Begin a capture: clear the recorder history; the ring keeps running. */
+static void cal_capture_begin(struct foc_board_calibration *cal)
+{
+    cal->history_count = 0U;
+    cal->first_pushed = false;
+    cal->pushed = 0U;
+    cal->capturing = true;
+}
+
+static bool cal_rl_begin(struct foc_board_calibration *cal, enum foc_motor_id_axis axis)
+{
+    const float limit = cal_voltage_limit(cal);
+    const struct foc_motor_id_config config = {
+        .axis = axis,
+        .source = FOC_MOTOR_ID_MEASURED,
+        .voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED,
+        .setup_id = 1U,
+        .min_interval_us = CAL_SLOT_US,
+        .max_interval_us = CAL_SLOT_US,
+        .intervals_per_window = 8U,
+        .min_windows = 32U,
+        .max_abs_current_a = cal->runtime->pipeline.current.config.current_limit_a,
+        .max_abs_voltage_v = limit,
+        .min_current_rms_a = 0.05f,
+        .min_slew_rms_a_per_s = 5.0f,
+        .min_voltage_rms_v = 0.05f,
+        .max_residual_rms_v = 0.05f,
+        /* 200 us intervals: interval x max Rs / min L must stay at or below 0.3,
+         * with headroom for float rounding (1.2 Ohm sits exactly on the bound). */
+        .min_rs_ohm = 0.03f,
+        .max_rs_ohm = 1.15f,
+        .min_inductance_h = 0.0008f,
+        .max_inductance_h = 0.05f,
+    };
+    cal_capture_begin(cal);
+    return foc_motor_id_init(&cal->motor_id, &config, ++cal->capture_serial) == FOC_MOTOR_ID_OK;
+}
+
+static bool cal_flux_begin(struct foc_board_calibration *cal)
+{
+    const struct foc_flux_id_config config = {
+        .identity =
+            {
+                .session = 1U,
+                .capture = ++cal->capture_serial,
+                .motor = 1U,
+                .dq_frame = 1U,
+                .current_chain = 1U,
+                .voltage_chain = 1U,
+                .speed_chain = 1U,
+                .clock = 1U,
+                .rl_revision = cal->capture_serial,
+                .poles_revision = cal->applied_runs,
+                .phase_order = 0U,
+                .pole_pairs = cal->runtime->config.motion.rotor.pole_pairs,
+            },
+        .rl = cal->rl_model,
+        .rl_qualified = true,
+        .source = FOC_MOTOR_ID_MEASURED,
+        .voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED,
+        .interval_us = CAL_SLOT_US,
+        .intervals_per_window = CAL_FLUX_WINDOW,
+        .min_windows_per_direction = 2U * CAL_FLUX_WINDOWS,
+        .max_abs_current_a = cal->runtime->pipeline.current.config.current_limit_a,
+        .max_abs_vq_v = cal_voltage_limit(cal),
+        .max_abs_speed_rad_s = 2000.0,
+        .min_abs_window_speed_rad_s = 1.0,
+        .min_speed_span_rad_s = 1.0,
+        .min_speed_rms_rad_s = 5.0,
+        .min_flux_wb = 0.0005,
+        .max_flux_wb = 0.5,
+        .max_residual_rms_v = 0.05,
+        .max_direction_difference_relative = 0.1,
+    };
+    cal->capturing = false;
+    cal->pushed = 0U;
+    cal->level = 0U;
+    return foc_flux_id_init(&cal->flux_id, &config) == FOC_CALIBRATION_FAILURE_NONE;
+}
+
+/* Feed one contiguous record to the stage's estimator. False on a capture failure. */
+static bool cal_record(struct foc_board_calibration *cal, const struct foc_board_cal_record *record)
+{
+    if (!cal->capturing) {
+        return true;
+    }
+    /* A flux level ends exactly on a window boundary: no open partial window. */
+    if (cal->state == FOC_BOARD_CAL_FLUX && cal->pushed >= CAL_FLUX_WINDOW * CAL_FLUX_WINDOWS) {
+        cal->capturing = false;
+        return true;
+    }
+    if (cal->history_count != 0U &&
+        record->slot != cal->history[cal->history_count - 1U].slot + 1U) {
+        return false;
+    }
+    if (cal->history_count < 2U) {
+        cal->history[cal->history_count++] = *record;
+        return true;
+    }
+    const struct foc_board_cal_record *older = &cal->history[0];
+    const struct foc_board_cal_record *begin = &cal->history[1];
+    const bool confirmed = older->accepted && begin->accepted && record->accepted;
+    const float limit = cal_voltage_limit(cal);
+    const float vd = cal_mean(older->voltage_v.d, begin->voltage_v.d);
+    const float vq = cal_mean(older->voltage_v.q, begin->voltage_v.q);
+    const bool saturated = hypotf(begin->voltage_v.d, begin->voltage_v.q) >= 0.98f * limit;
+    bool ok = true;
+    if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
+        const bool d_axis = cal->state == FOC_BOARD_CAL_RL_D;
+        const bool still = fabsf(begin->mechanical_rad_s) < CAL_RL_STILL_RAD_S &&
+            fabsf(record->mechanical_rad_s) < CAL_RL_STILL_RAD_S;
+        struct foc_motor_id_sample sample = {
+            .setup_id = 1U,
+            .capture_id = cal->capture_serial,
+            .source = FOC_MOTOR_ID_MEASURED,
+            .sequence = record->slot,
+            .captured_us = record->slot * CAL_SLOT_US,
+            .voltage_begin_us = begin->slot * CAL_SLOT_US,
+            .voltage_end_us = record->slot * CAL_SLOT_US,
+            .voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED,
+            .current_a = d_axis ? record->current_a.d : record->current_a.q,
+            .mean_voltage_v = d_axis ? vd : vq,
+            .omega_e_rad_s = 0.0f,
+            .current_valid = true,
+            .voltage_valid = true,
+            .output_confirmed = confirmed,
+            /* follow_rotor keeps the frame on the calibrated rotor angle. */
+            .frame_confirmed = true,
+            .stationary_confirmed = still,
+            .saturated = saturated,
+        };
+        if (!cal->first_pushed) {
+            struct foc_motor_id_sample first = sample;
+            first.sequence = begin->slot;
+            first.captured_us = begin->slot * CAL_SLOT_US;
+            first.current_a = d_axis ? begin->current_a.d : begin->current_a.q;
+            ok = foc_motor_id_push(&cal->motor_id, &first) == FOC_MOTOR_ID_OK;
+            cal->first_pushed = true;
+        }
+        ok = ok && foc_motor_id_push(&cal->motor_id, &sample) == FOC_MOTOR_ID_OK;
+    } else if (cal->state == FOC_BOARD_CAL_FLUX) {
+        const float pole_pairs = (float)cal->runtime->config.motion.rotor.pole_pairs;
+        const struct foc_flux_id_interval interval = {
+            .identity = cal->flux_id.config.identity,
+            .source = FOC_MOTOR_ID_MEASURED,
+            .voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED,
+            .sequence = record->slot,
+            .begin_us = begin->slot * CAL_SLOT_US,
+            .end_us = record->slot * CAL_SLOT_US,
+            .voltage_begin_us = begin->slot * CAL_SLOT_US,
+            .voltage_end_us = record->slot * CAL_SLOT_US,
+            .speed_begin_us = begin->slot * CAL_SLOT_US,
+            .speed_end_us = record->slot * CAL_SLOT_US,
+            .id_begin_a = begin->current_a.d,
+            .iq_begin_a = begin->current_a.q,
+            .id_end_a = record->current_a.d,
+            .iq_end_a = record->current_a.q,
+            .mean_omega_e_rad_s =
+                0.5 * pole_pairs * (begin->mechanical_rad_s + record->mechanical_rad_s),
+            .mean_vq_v = vq,
+            .current_valid = true,
+            .voltage_valid = true,
+            .speed_valid = true,
+            .frame_confirmed = true,
+            .output_confirmed = confirmed,
+            .terminal_voltage_witnessed = false,
+            .saturated = saturated,
+        };
+        ok = foc_flux_id_push(&cal->flux_id, &interval) == FOC_CALIBRATION_FAILURE_NONE;
+    }
+    cal->history[0] = cal->history[1];
+    cal->history[1] = *record;
+    cal->pushed++;
+    return ok;
+}
+
+static bool cal_drain(struct foc_board_calibration *cal)
+{
+    if (atomic_load_explicit(&cal->ring_overflow, memory_order_relaxed) != 0U) {
+        return false;
+    }
+    unsigned int tail = atomic_load_explicit(&cal->ring_tail, memory_order_relaxed);
+    const unsigned int head = atomic_load_explicit(&cal->ring_head, memory_order_acquire);
+    bool ok = true;
+    while (tail != head && ok) {
+        ok = cal_record(cal, &cal->ring[tail % FOC_BOARD_CAL_RING]);
+        ++tail;
+    }
+    atomic_store_explicit(&cal->ring_tail, tail, memory_order_release);
+    return ok;
+}
+
+/* CAL-3/CAL-4 drive and capture, one state per call. */
+static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (!cal_drain(cal)) {
+        /* Detail byte: the estimator's own failure reason. */
+        cal->admission_failure = (enum foc_calibration_admission_failure)(
+            cal->state == FOC_BOARD_CAL_FLUX ? cal->flux_id.result.failure
+                                             : cal->motor_id.result.failure
+        );
+        cal_fail(
+            cal,
+            atomic_load(&cal->ring_overflow) != 0U ? FOC_BOARD_CAL_FAILURE_CAPTURE
+                : cal->state == FOC_BOARD_CAL_FLUX ? FOC_BOARD_CAL_FAILURE_FLUX
+                                                   : FOC_BOARD_CAL_FAILURE_RL,
+            now_us
+        );
+        return;
+    }
+    const uint32_t elapsed = now_us - cal->state_us;
+    if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
+        /* d: a varied pulse train (no torque on the d axis). q: a zero-mean train, so the
+         * free shaft only dithers and the back-EMF stays negligible. */
+        static const float d_levels[8] = {1.0f, 1.0f, -0.75f, -0.75f, 0.33f, -1.0f, 0.65f, -0.26f};
+        static const float q_levels[8] = {1.0f, -1.0f, -1.0f, 1.0f, 0.5f, -0.5f, -0.5f, 0.5f};
+        const uint32_t level = (elapsed / (CAL_RL_LEVEL_SLOTS * CAL_SLOT_US)) % 8U;
+        const float amplitude =
+            fminf(fmaxf(1.6f * cal->align_voltage_v, 0.1f), 0.5f * cal_voltage_limit(cal));
+        const bool d_axis = cal->state == FOC_BOARD_CAL_RL_D;
+        const float voltage = amplitude * (d_axis ? d_levels[level] : q_levels[level]);
+        cal_drive_dq(cal, d_axis ? voltage : 0.0f, d_axis ? 0.0f : voltage, 0.0f, true, now_us);
+        if (cal->pushed >= CAL_RL_INTERVALS) {
+            struct foc_motor_id_result *result = d_axis ? &cal->rl_d : &cal->rl_q;
+            if (foc_motor_id_finish(&cal->motor_id, result) != FOC_MOTOR_ID_OK || !result->usable) {
+                cal->admission_failure = (enum foc_calibration_admission_failure)result->failure;
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
+            } else if (d_axis) {
+                if (cal_rl_begin(cal, FOC_MOTOR_ID_Q)) {
+                    cal_enter(cal, FOC_BOARD_CAL_RL_Q, now_us);
+                } else {
+                    cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
+                }
+            } else if (
+                foc_motor_id_make_model(&cal->rl_d, &cal->rl_q, 0.25f, &cal->rl_model) !=
+                    FOC_MOTOR_ID_OK ||
+                !cal_flux_begin(cal)
+            ) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
+            } else {
+                cal_enter(cal, FOC_BOARD_CAL_FLUX, now_us);
+            }
+        }
+        return;
+    }
+    /* CAL-4: four speed levels, two in each direction, voltage-mode FOC on the rotor angle.
+     * Each level settles first; only its steady part is captured, as one segment. */
+    const float limit = cal_voltage_limit(cal);
+    const float levels[4] = {0.15f * limit, 0.3f * limit, -0.15f * limit, -0.3f * limit};
+    cal_drive_dq(cal, 0.0f, levels[cal->level], 0.0f, true, now_us);
+    if (!cal->capturing && cal->pushed >= CAL_FLUX_WINDOW * CAL_FLUX_WINDOWS) {
+        /* Level complete: move on, or finish after the fourth. */
+        cal->pushed = 0U;
+        if (++cal->level < 4U) {
+            cal->state_us = now_us;
+            return;
+        }
+        if (foc_flux_id_finish(&cal->flux_id, &cal->flux_result) != FOC_CALIBRATION_FAILURE_NONE ||
+            cal->flux_result.state != FOC_CALIBRATION_STATE_VALID) {
+            cal->admission_failure =
+                (enum foc_calibration_admission_failure)cal->flux_result.failure;
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_FLUX, now_us);
+            return;
+        }
+        atomic_store(&cal->record_active, 0U);
+        foc_runtime_revoke_command(cal->runtime);
+        cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
+    } else if (!cal->capturing && elapsed >= CAL_FLUX_SETTLE_US) {
+        if (cal->level != 0U) {
+            foc_flux_id_break(&cal->flux_id);
+        }
+        cal_capture_begin(cal);
+    }
+}
+
+/* CAL-5: design the current PI from the identified model and apply it through H0. */
+static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    struct foc_runtime_tuning_result result;
+    if (cal->tuning_sequence != 0U) {
+        if (foc_runtime_read_tuning_result(cal->runtime, &result) != FOC_RUNTIME_OK ||
+            result.request_sequence != cal->tuning_sequence ||
+            result.result == FOC_RUNTIME_REQUEST_PENDING) {
+            if (now_us - cal->state_us > CAL_TUNE_TIMEOUT_US) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+            }
+            return;
+        }
+        if (result.result != FOC_RUNTIME_REQUEST_APPLIED) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+            return;
+        }
+        if (foc_runtime_read_tuning(cal->runtime, &cal->tuning) != FOC_RUNTIME_OK) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+            return;
+        }
+        cal->tuning_sequence = 0U;
+        cal_enter(cal, FOC_BOARD_CAL_RESTORE, now_us);
+        return;
+    }
+    const struct foc_motor_pi_request request = {
+        .bandwidth_hz = CAL_PI_BANDWIDTH_HZ,
+        .sample_period_s = (float)CAL_SLOT_US * 1.0e-6f,
+        .update_delay_s = (float)(CAL_SLOT_US - FOC_BOARD_ADC_COMPARE_US) * 1.0e-6f,
+        .initial_error_a = 0.5f,
+        .available_voltage_v = cal_voltage_limit(cal),
+    };
+    struct foc_runtime_tuning tuning;
+    if (foc_motor_pi_design(&cal->rl_model, &request, &cal->pi) != FOC_MOTOR_ID_OK ||
+        foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+        return;
+    }
+    tuning.current_kp_v_per_a = (struct foc_vector_dq){cal->pi.kp_d_v_per_a, cal->pi.kp_q_v_per_a};
+    tuning.current_ki_v_per_a_s =
+        (struct foc_vector_dq){cal->pi.ki_v_per_a_s, cal->pi.ki_v_per_a_s};
+    const uint32_t sequence = cal->serial->tuning_sequence + 1U;
+    if (foc_runtime_publish_tuning(cal->runtime, &tuning, sequence) != FOC_RUNTIME_OK) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+        return;
+    }
+    cal->serial->tuning_sequence = sequence;
+    cal->tuning_sequence = sequence;
+    cal->state_us = now_us;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -342,8 +739,14 @@ void foc_board_calibration_bind(
     };
     atomic_init(&calibration->adc_active, 0U);
     atomic_init(&calibration->adc_samples, 0U);
+    atomic_init(&calibration->record_active, 0U);
+    atomic_init(&calibration->ring_head, 0U);
+    atomic_init(&calibration->ring_tail, 0U);
+    atomic_init(&calibration->ring_overflow, 0U);
     adc->tap_argument = calibration;
     adc->tap = cal_adc_tap;
+    adc->observer_argument = calibration;
+    adc->observer = cal_h0_observer;
 }
 
 bool foc_board_calibration_busy(const struct foc_board_calibration *calibration)
@@ -352,8 +755,15 @@ bool foc_board_calibration_busy(const struct foc_board_calibration *calibration)
         calibration->state != FOC_BOARD_CAL_FAILED;
 }
 
-int foc_board_calibration_start(struct foc_board_calibration *cal, uint32_t now_us)
+int foc_board_calibration_start(
+    struct foc_board_calibration *cal,
+    uint32_t now_us,
+    unsigned int stages
+)
 {
+    if (stages < FOC_BOARD_CAL_STAGE_ROTOR || stages > FOC_BOARD_CAL_STAGE_ALL) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
     if (cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
         cal->output->backend == NULL) {
         return FOC_PROTO_OUTPUT_LOCKED; /* CAL-2 must drive the motor. */
@@ -410,6 +820,25 @@ int foc_board_calibration_start(struct foc_board_calibration *cal, uint32_t now_
     cal->theta_rad = 0.0f;
     cal->sweep_rad = 0.0f;
     cal->last_us = now_us;
+    cal->stages = stages;
+    cal->tuning_sequence = 0U;
+    cal->rl_d = (struct foc_motor_id_result){0};
+    cal->rl_q = (struct foc_motor_id_result){0};
+    cal->rl_model = (struct foc_motor_rl_model){0};
+    cal->flux_result = (struct foc_flux_id_result){0};
+    cal->pi = (struct foc_motor_pi_candidate){0};
+    atomic_store(&cal->ring_overflow, 0U);
+    atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
+    if ((stages & FOC_BOARD_CAL_STAGE_ROTOR) == 0U) {
+        /* The electrical stages commutate with the rotor mapping applied in this boot. */
+        if (!cal->snapshot.accepted || !(cal->align_voltage_v > 0.0f)) {
+            return FOC_PROTO_BAD_STATE;
+        }
+        cal->electrical_phase = true;
+        cal_enter(cal, FOC_BOARD_CAL_DRIVE_MODE, now_us);
+        return FOC_PROTO_ACCEPTED;
+    }
+    cal->electrical_phase = false;
     atomic_store(&cal->adc_samples, 0U);
     cal_enter(cal, FOC_BOARD_CAL_ADC_ZERO, now_us);
     atomic_store_explicit(&cal->adc_active, 1U, memory_order_release);
@@ -438,7 +867,8 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_ABORTED, now_us);
         return;
     }
-    const bool driving = cal->state >= FOC_BOARD_CAL_ALIGN && cal->state <= FOC_BOARD_CAL_SWEEP;
+    const bool driving = (cal->state >= FOC_BOARD_CAL_ALIGN && cal->state <= FOC_BOARD_CAL_SWEEP) ||
+        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX);
     if (driving && view.state != FOC_SAFE_STATE_RUNNING) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_DRIVE, now_us);
         return;
@@ -471,7 +901,11 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         );
         break;
     case FOC_BOARD_CAL_DRIVE_ARM:
-        cal_drive(cal, now_us);
+        if (cal->electrical_phase) {
+            cal_drive_dq(cal, 0.0f, 0.0f, 0.0f, true, now_us);
+        } else {
+            cal_drive(cal, now_us);
+        }
         cal_step_lifecycle(
             cal,
             FOC_RUNTIME_ACTION_ARM,
@@ -481,14 +915,26 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         );
         break;
     case FOC_BOARD_CAL_DRIVE_START:
-        cal_drive(cal, now_us);
+        if (!cal->electrical_phase) {
+            cal_drive(cal, now_us);
+        }
+        if (cal->electrical_phase) {
+            cal_drive_dq(cal, 0.0f, 0.0f, 0.0f, true, now_us);
+        }
         cal_step_lifecycle(
             cal,
             FOC_RUNTIME_ACTION_START,
             FOC_RUNTIME_MODE_CALIBRATION,
-            FOC_BOARD_CAL_ALIGN,
+            cal->electrical_phase ? FOC_BOARD_CAL_RL_D : FOC_BOARD_CAL_ALIGN,
             now_us
         );
+        if (cal->state == FOC_BOARD_CAL_RL_D) {
+            atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
+            atomic_store(&cal->record_active, 1U);
+            if (!cal_rl_begin(cal, FOC_MOTOR_ID_D)) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_RL, now_us);
+            }
+        }
         break;
     case FOC_BOARD_CAL_ALIGN: {
         const float current = view.current_valid
@@ -505,6 +951,7 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_CURRENT, now_us);
             break;
         } else if (now_us - cal->state_us >= CAL_SETTLE_US) {
+            cal->align_voltage_v = cal->voltage_v;
             cal_sample(cal, &view, now_us);
             cal->sweep_rad = 0.0f;
             cal_enter(cal, FOC_BOARD_CAL_SWEEP, now_us);
@@ -534,13 +981,34 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     }
     case FOC_BOARD_CAL_DRIVE_STOP:
         if (cal_quiet(&view)) {
-            cal_enter(cal, FOC_BOARD_CAL_APPLY, now_us);
+            cal_enter(
+                cal,
+                cal->electrical_phase ? FOC_BOARD_CAL_TUNE : FOC_BOARD_CAL_APPLY,
+                now_us
+            );
         } else if (now_us - cal->state_us > CAL_STOP_TIMEOUT_US) {
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
         }
         break;
     case FOC_BOARD_CAL_APPLY:
         cal_apply(cal, now_us);
+        break;
+    case FOC_BOARD_CAL_RL_D:
+    case FOC_BOARD_CAL_RL_Q:
+    case FOC_BOARD_CAL_FLUX:
+        cal_electrical(cal, now_us);
+        break;
+    case FOC_BOARD_CAL_TUNE:
+        cal_tune(cal, now_us);
+        break;
+    case FOC_BOARD_CAL_RESTORE:
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_SET_MODE,
+            FOC_RUNTIME_MODE_CURRENT,
+            FOC_BOARD_CAL_DONE,
+            now_us
+        );
         break;
     default:
         break;
@@ -549,9 +1017,9 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
 
 /* UART adapter callbacks -------------------------------------------------------- */
 
-static int cal_serial_start(void *context, uint32_t now_us)
+static int cal_serial_start(void *context, uint32_t now_us, unsigned int stages)
 {
-    return foc_board_calibration_start(context, now_us);
+    return foc_board_calibration_start(context, now_us, stages);
 }
 
 static void cal_serial_abort(void *context)
@@ -587,6 +1055,14 @@ static bool cal_serial_read(const void *context, struct foc_serial_calibration_v
              cal->adc_result.offset_c_counts},
         .adc_noise_rms_count = noise,
         .applied_runs = cal->applied_runs,
+        .rs_ohm = cal->rl_model.rs_ohm,
+        .ld_h = cal->rl_model.ld_h,
+        .lq_h = cal->rl_model.lq_h,
+        .flux_wb = cal->flux_result.flux_wb,
+        .kt_nm_per_a = cal->flux_result.kt_nm_per_peak_q_amp,
+        .kp_d_v_per_a = cal->pi.kp_d_v_per_a,
+        .kp_q_v_per_a = cal->pi.kp_q_v_per_a,
+        .ki_v_per_a_s = cal->pi.ki_v_per_a_s,
     };
     return true;
 }

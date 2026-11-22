@@ -34,6 +34,8 @@
 
 #include "foc_board.h"
 #include "foc_calibration.h"
+#include "foc_flux_id.h"
+#include "foc_motor_id.h"
 #include "foc_serial.h"
 
 #include <stdatomic.h>
@@ -53,6 +55,22 @@ enum foc_board_cal_state {
     FOC_BOARD_CAL_APPLY = 8,
     FOC_BOARD_CAL_DONE = 9,
     FOC_BOARD_CAL_FAILED = 10,
+    /* M3b electrical stages (appended). */
+    FOC_BOARD_CAL_RL_D = 11,
+    FOC_BOARD_CAL_RL_Q = 12,
+    FOC_BOARD_CAL_FLUX = 13,
+    FOC_BOARD_CAL_TUNE = 14,
+    /** Hand the Runtime back in CURRENT mode after the electrical stages. */
+    FOC_BOARD_CAL_RESTORE = 15,
+};
+
+/** CALIBRATE_START stage mask. */
+enum foc_board_cal_stages {
+    /** CAL-1 ADC zero and CAL-2 rotor mapping, applied by re-initialization. */
+    FOC_BOARD_CAL_STAGE_ROTOR = 1,
+    /** CAL-3 R/L, CAL-4 flux/Kt and CAL-5 current PI design. Needs an applied rotor result. */
+    FOC_BOARD_CAL_STAGE_ELECTRICAL = 2,
+    FOC_BOARD_CAL_STAGE_ALL = 3,
 };
 
 /** Wire values of CALIBRATE_READ byte 2. */
@@ -82,7 +100,26 @@ enum foc_board_cal_failure {
     FOC_BOARD_CAL_FAILURE_ABORTED = 11,
     /** A stage exceeded its time budget. */
     FOC_BOARD_CAL_FAILURE_TIMEOUT = 12,
+    /** CAL-3 R/L fit failed or the d/q models disagree (appended). */
+    FOC_BOARD_CAL_FAILURE_RL = 13,
+    /** CAL-4 flux fit failed. */
+    FOC_BOARD_CAL_FAILURE_FLUX = 14,
+    /** CAL-5 PI design was refused or its tuning was not applied. */
+    FOC_BOARD_CAL_FAILURE_TUNE = 15,
+    /** H0 records were lost or not contiguous. */
+    FOC_BOARD_CAL_FAILURE_CAPTURE = 16,
 };
+
+/** One H0 cycle as seen by the electrical stages (logical slot clock). */
+struct foc_board_cal_record {
+    uint32_t slot;
+    struct foc_vector_dq current_a;
+    struct foc_vector_dq voltage_v;
+    float mechanical_rad_s;
+    bool accepted;
+};
+
+#define FOC_BOARD_CAL_RING          64U
 
 /** Raw sweep samples: forward and backward points of CAL-2. */
 #define FOC_BOARD_CAL_SWEEP_SAMPLES 64U
@@ -107,7 +144,6 @@ struct foc_board_calibration {
     uint32_t state_us;
     uint32_t last_us;
     uint32_t lifecycle_sequence;
-    uint32_t command_sequence;
     uint32_t attempts;
     uint32_t retry_us;
     uint32_t sample_index;
@@ -130,6 +166,30 @@ struct foc_board_calibration {
     struct foc_calibration_offset_result offset_result;
     struct foc_calibration_snapshot snapshot;
     uint32_t applied_runs;
+    /* M3b. */
+    unsigned int stages;
+    bool electrical_phase;
+    float align_voltage_v;
+    atomic_uint record_active;
+    atomic_uint ring_head;
+    atomic_uint ring_tail;
+    atomic_uint ring_overflow;
+    struct foc_board_cal_record ring[FOC_BOARD_CAL_RING];
+    struct foc_board_cal_record history[2];
+    uint32_t history_count;
+    bool first_pushed;
+    bool capturing;
+    uint32_t pushed;
+    uint32_t level;
+    uint32_t capture_serial;
+    uint32_t tuning_sequence;
+    struct foc_motor_id_context motor_id;
+    struct foc_flux_id flux_id;
+    struct foc_motor_id_result rl_d;
+    struct foc_motor_id_result rl_q;
+    struct foc_motor_rl_model rl_model;
+    struct foc_flux_id_result flux_result;
+    struct foc_motor_pi_candidate pi;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -144,8 +204,11 @@ void foc_board_calibration_bind(struct foc_board_calibration *calibration,
                                 foc_board_cal_quiesce quiesce,
                                 void *quiesce_argument);
 
-/** Start CAL-1 and CAL-2. Requires DISABLED, INHIBIT confirmed and a still shaft. */
-int foc_board_calibration_start(struct foc_board_calibration *calibration, uint32_t now_us);
+/** Start the stages in the mask (FOC_BOARD_CAL_STAGE_*). Requires DISABLED, INHIBIT
+ * confirmed and a still shaft; the electrical stages alone need an applied rotor result. */
+int foc_board_calibration_start(struct foc_board_calibration *calibration,
+                                uint32_t now_us,
+                                unsigned int stages);
 
 /** Advance the state machine. Foreground only, every pass. */
 void foc_board_calibration_poll(struct foc_board_calibration *calibration, uint32_t now_us);

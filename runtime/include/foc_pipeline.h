@@ -241,6 +241,8 @@ struct foc_pipeline {
     struct foc_vector_dq measured_dq_a;
     /** Current target in A of the latest accepted cycle, cleared on rejection. */
     struct foc_vector_dq target_dq_a;
+    /** Ideal d/q voltage in V of the latest accepted cycle (from its final duties and bus). */
+    struct foc_vector_dq voltage_dq_v;
     /** Safety causes for the last step or explicit stop. */
     uint32_t safety_reasons;
     /** Step or stop cause prior to any fallback INHIBIT submission failure. */

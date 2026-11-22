@@ -837,7 +837,20 @@ foc_serial_calibrate_read(const struct foc_serial *serial, struct foc_protocol_f
     foc_protocol_write_u32(body + 27, foc_serial_float_bits(view.adc_offset_count[2]));
     foc_protocol_write_u32(body + 31, foc_serial_float_bits(view.adc_noise_rms_count));
     foc_protocol_write_u32(body + 35, view.applied_runs);
-    response->length = 39;
+    const float electrical[] = {
+        view.rs_ohm,
+        view.ld_h,
+        view.lq_h,
+        view.flux_wb,
+        view.kt_nm_per_a,
+        view.kp_d_v_per_a,
+        view.kp_q_v_per_a,
+        view.ki_v_per_a_s
+    };
+    for (unsigned int index = 0U; index < sizeof electrical / sizeof electrical[0]; ++index) {
+        foc_protocol_write_u32(body + 39 + 4U * index, foc_serial_float_bits(electrical[index]));
+    }
+    response->length = 71;
     return FOC_PROTO_OK;
 }
 
@@ -878,6 +891,16 @@ static int foc_serial_dispatch(
             response
         );
     }
+    if (request->type == FOC_MSG_CALIBRATE_START) {
+        /* Optional stage mask: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5); empty means both. */
+        const unsigned int stages = request->length == 0U ? 3U : request->payload[0];
+        if (request->length > 1U || stages < 1U || stages > 3U) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
+        return serial->calibration.start == NULL
+            ? FOC_PROTO_NOT_SUPPORTED
+            : serial->calibration.start(serial->calibration.context, now_us, stages);
+    }
     if (request->length != 0U) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
@@ -897,10 +920,6 @@ static int foc_serial_dispatch(
         }
         foc_runtime_revoke_command(runtime);
         return FOC_PROTO_ACCEPTED;
-    case FOC_MSG_CALIBRATE_START:
-        return serial->calibration.start == NULL
-            ? FOC_PROTO_NOT_SUPPORTED
-            : serial->calibration.start(serial->calibration.context, now_us);
     case FOC_MSG_CALIBRATE_READ:
         return foc_serial_calibrate_read(serial, response);
     case FOC_MSG_CALIBRATE_ABORT:

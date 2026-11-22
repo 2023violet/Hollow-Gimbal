@@ -424,11 +424,27 @@ static int test_pi(void)
 
 /* Test Entry ----------------------------------------------------------------- */
 
+/* Firmware-commanded voltage is a measured-origin category, never a virtual one. */
+static int test_commanded_voltage_policy(void)
+{
+    struct foc_motor_id_context context;
+    struct foc_motor_id_config commanded = config;
+    commanded.source = FOC_MOTOR_ID_MEASURED;
+    commanded.voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED;
+    CHECK(foc_motor_id_init(&context, &commanded, 1U) == FOC_MOTOR_ID_OK);
+    commanded.source = FOC_MOTOR_ID_VIRTUAL;
+    CHECK(foc_motor_id_init(&context, &commanded, 2U) == FOC_MOTOR_ID_ERR_CONFIG);
+    commanded.source = FOC_MOTOR_ID_MEASURED;
+    commanded.voltage_source = FOC_MOTOR_ID_VOLTAGE_UNVERIFIED;
+    CHECK(foc_motor_id_init(&context, &commanded, 3U) == FOC_MOTOR_ID_ERR_CONFIG);
+    return 0;
+}
+
 int main(void)
 {
     return test_observation_contract() || test_voltage_policy() || test_fit() ||
         test_acquisition_resolution() || test_invalid_samples() || test_fit_rejection() ||
-        test_pi();
+        test_pi() || test_commanded_voltage_policy();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

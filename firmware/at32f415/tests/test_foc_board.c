@@ -666,6 +666,9 @@ static int test_calibration_drive(void)
     CHECK(bench.output.applied_updates == applied + 1U);
     CHECK(bench.probe.last_action == FOC_DEVICE_OUTPUT_UPDATE);
     CHECK(runtime->pipeline.target_dq_a.d == 0.5f && runtime->pipeline.target_dq_a.q == 0.0f);
+    /* The applied voltage of the accepted cycle is kept for the electrical stages. */
+    CHECK(fabsf(runtime->pipeline.voltage_dq_v.d - 0.5f) < 1.0e-3f);
+    CHECK(fabsf(runtime->pipeline.voltage_dq_v.q) < 1.0e-3f);
     CHECK(
         runtime->pipeline.current.integral_v.d == 0.0f &&
         runtime->pipeline.current.integral_v.q == 0.0f
@@ -679,6 +682,7 @@ static int test_calibration_drive(void)
     CHECK(runtime->pipeline.safety.state != FOC_SAFE_STATE_RUNNING);
     CHECK(runtime->pipeline_status == FOC_PIPELINE_ERR_CORE);
     CHECK(bench.probe.last_action == FOC_DEVICE_OUTPUT_INHIBIT);
+    CHECK(runtime->pipeline.voltage_dq_v.d == 0.0f && runtime->pipeline.voltage_dq_v.q == 0.0f);
     return 0;
 }
 

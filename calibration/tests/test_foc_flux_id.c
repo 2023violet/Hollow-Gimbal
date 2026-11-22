@@ -664,11 +664,70 @@ static int test_accumulator_overflow(void)
 
 /* Test Entry ------------------------------------------------------------------- */
 
+/* A physical capture: each speed level is a separate contiguous segment, with gaps
+ * (reversal, settling) between them, and the voltage declared COMMANDED. */
+static int test_segments_and_commanded_voltage(void)
+{
+    struct foc_flux_id_config config = clean_config;
+    config.source = FOC_MOTOR_ID_MEASURED;
+    config.voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED;
+    const double flux = 0.031;
+    const struct observation_error none = {0};
+    struct foc_flux_id context = {0};
+    CHECK(foc_flux_id_init(&context, &config) == FOC_CALIBRATION_FAILURE_NONE);
+    for (uint32_t i = 0U; i < INTERVAL_COUNT; ++i) {
+        if (i % INTERVALS_PER_WINDOW == 0U && i != 0U) {
+            foc_flux_id_break(&context);
+        }
+        /* Each segment starts later than the previous one ended: a gap of 37 intervals. */
+        const uint32_t gap = (i / INTERVALS_PER_WINDOW) * 37U;
+        struct foc_flux_id_interval interval = analytic_interval(
+            &config,
+            &config.rl,
+            flux,
+            signed_speeds[i / INTERVALS_PER_WINDOW],
+            i + gap,
+            &none
+        );
+        interval.terminal_voltage_witnessed = false;
+        CHECK(foc_flux_id_push(&context, &interval) == FOC_CALIBRATION_FAILURE_NONE);
+    }
+    struct foc_flux_id_result result;
+    CHECK(foc_flux_id_finish(&context, &result) == FOC_CALIBRATION_FAILURE_NONE);
+    CHECK(result.state == FOC_CALIBRATION_STATE_VALID && fabs(result.flux_wb - flux) < 1e-4);
+    CHECK(result.voltage_source == FOC_MOTOR_ID_VOLTAGE_COMMANDED);
+
+    /* Without a break the same gap is a time-order failure. */
+    CHECK(foc_flux_id_init(&context, &config) == FOC_CALIBRATION_FAILURE_NONE);
+    struct foc_flux_id_interval first =
+        analytic_interval(&config, &config.rl, flux, 16.0, 0U, &none);
+    first.terminal_voltage_witnessed = false;
+    CHECK(foc_flux_id_push(&context, &first) == FOC_CALIBRATION_FAILURE_NONE);
+    struct foc_flux_id_interval later =
+        analytic_interval(&config, &config.rl, flux, 16.0, 9U, &none);
+    later.terminal_voltage_witnessed = false;
+    CHECK(foc_flux_id_push(&context, &later) == FOC_CALIBRATION_FAILURE_TIME_ORDER);
+
+    /* An unwitnessed voltage is still refused for a terminal-voltage capture. */
+    config.voltage_source = FOC_MOTOR_ID_VOLTAGE_MEASURED_TERMINAL;
+    CHECK(foc_flux_id_init(&context, &config) == FOC_CALIBRATION_FAILURE_NONE);
+    struct foc_flux_id_interval unwitnessed =
+        analytic_interval(&config, &config.rl, flux, 16.0, 0U, &none);
+    unwitnessed.terminal_voltage_witnessed = false;
+    CHECK(foc_flux_id_push(&context, &unwitnessed) == FOC_CALIBRATION_FAILURE_PRECONDITION);
+    /* COMMANDED is a measured-origin category only. */
+    config.source = FOC_MOTOR_ID_VIRTUAL;
+    config.voltage_source = FOC_MOTOR_ID_VOLTAGE_COMMANDED;
+    CHECK(foc_flux_id_init(&context, &config) != FOC_CALIBRATION_FAILURE_NONE);
+    return 0;
+}
+
 int main(void)
 {
     return test_analytic_and_provenance() || test_refused_configurations() ||
         test_refused_observations() || test_unidentifiable_and_cancelled() || test_sensitivity() ||
-        test_direction_disagreement() || test_accumulator_overflow();
+        test_direction_disagreement() || test_accumulator_overflow() ||
+        test_segments_and_commanded_voltage();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

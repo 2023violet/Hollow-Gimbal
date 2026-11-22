@@ -45,7 +45,8 @@ static bool foc_motor_id_voltage_source_valid(
             voltage_source == FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL) ||
         (source == FOC_MOTOR_ID_MEASURED &&
          (voltage_source == FOC_MOTOR_ID_VOLTAGE_MEASURED_TERMINAL ||
-          voltage_source == FOC_MOTOR_ID_VOLTAGE_CALIBRATED_TERMINAL));
+          voltage_source == FOC_MOTOR_ID_VOLTAGE_CALIBRATED_TERMINAL ||
+          voltage_source == FOC_MOTOR_ID_VOLTAGE_COMMANDED));
 }
 
 static bool foc_motor_id_config_valid(const struct foc_motor_id_config *config)

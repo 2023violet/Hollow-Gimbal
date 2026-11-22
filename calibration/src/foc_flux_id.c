@@ -49,7 +49,8 @@ static bool config_valid(const struct foc_flux_id_config *c)
         ? c->voltage_source == FOC_MOTOR_ID_VOLTAGE_VIRTUAL_TERMINAL
         : c->source == FOC_MOTOR_ID_MEASURED &&
             (c->voltage_source == FOC_MOTOR_ID_VOLTAGE_MEASURED_TERMINAL ||
-             c->voltage_source == FOC_MOTOR_ID_VOLTAGE_CALIBRATED_TERMINAL);
+             c->voltage_source == FOC_MOTOR_ID_VOLTAGE_CALIBRATED_TERMINAL ||
+             c->voltage_source == FOC_MOTOR_ID_VOLTAGE_COMMANDED);
     return voltage && identity_valid(&c->identity) && c->rl_qualified && positive(c->rl.rs_ohm) &&
         positive(c->rl.ld_h) && positive(c->rl.lq_h) && c->interval_us != 0U &&
         c->intervals_per_window >= 2U &&
@@ -91,7 +92,7 @@ check_interval(const struct foc_flux_id *ctx, const struct foc_flux_id_interval 
         s->voltage_end_us != s->end_us || s->speed_begin_us != s->begin_us ||
         s->speed_end_us != s->end_us ||
         ((uint64_t)ctx->result.intervals + 1U) * c->interval_us >= UINT32_C(0x80000000) ||
-        (ctx->result.intervals != 0U &&
+        (ctx->result.intervals != 0U && !ctx->segment_break &&
          (s->begin_us != ctx->result.last_us || s->sequence != ctx->last_sequence + UINT32_C(1)))) {
         return FOC_CALIBRATION_FAILURE_TIME_ORDER;
     }
@@ -104,11 +105,13 @@ check_interval(const struct foc_flux_id *ctx, const struct foc_flux_id_interval 
         fabs(s->mean_omega_e_rad_s) > c->max_abs_speed_rad_s) {
         return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
     }
-    if (!s->frame_confirmed || !s->output_confirmed || !s->terminal_voltage_witnessed ||
+    /* A COMMANDED capture declares its voltage unwitnessed; others must witness it. */
+    if (!s->frame_confirmed || !s->output_confirmed ||
+        (!s->terminal_voltage_witnessed && s->voltage_source != FOC_MOTOR_ID_VOLTAGE_COMMANDED) ||
         s->saturated) {
         return FOC_CALIBRATION_FAILURE_PRECONDITION;
     }
-    if (ctx->result.intervals != 0U &&
+    if (ctx->result.intervals != 0U && !ctx->segment_break &&
         (s->id_begin_a != ctx->previous_id_a || s->iq_begin_a != ctx->previous_iq_a)) {
         return FOC_CALIBRATION_FAILURE_INPUT_CHANGED;
     }
@@ -282,11 +285,23 @@ foc_flux_id_push(struct foc_flux_id *context, const struct foc_flux_id_interval 
     context->previous_iq_a = sample->iq_end_a;
     context->result.last_us = sample->end_us;
     context->last_sequence = sample->sequence;
+    context->segment_break = false;
     ++context->result.intervals;
     ++context->window_intervals;
     return context->window_intervals == context->config.intervals_per_window
         ? close_window(context)
         : FOC_CALIBRATION_FAILURE_NONE;
+}
+
+void foc_flux_id_break(struct foc_flux_id *context)
+{
+    if (context == NULL || context->result.state != FOC_CALIBRATION_STATE_COLLECTING) {
+        return;
+    }
+    context->window_intervals = 0U;
+    context->voltage_sum = 0.0;
+    context->speed_sum = 0.0;
+    context->segment_break = true;
 }
 
 enum foc_calibration_failure

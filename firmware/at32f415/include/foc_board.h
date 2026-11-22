@@ -232,6 +232,12 @@ typedef void (*foc_board_adc_tap)(void *argument,
                                   uint32_t generation,
                                   uint32_t sample_us);
 
+/** Optional observer called in H0 right after each Runtime H0 step of a valid frame. */
+typedef void (*foc_board_h0_observer)(void *argument,
+                                      const struct foc_runtime *runtime,
+                                      uint32_t slot_id,
+                                      int h0_result);
+
 /** Two non-preempting IRQs own the clock, token and live diagnostics.
  * A single foreground reader requests a coherent copy through snapshot_state. */
 struct foc_board_adc {
@@ -248,6 +254,9 @@ struct foc_board_adc {
     /** Optional observer, set before producers start; never set in the locked image path. */
     foc_board_adc_tap tap;
     void *tap_argument;
+    /** Optional post-H0 observer, set before producers start. */
+    foc_board_h0_observer observer;
+    void *observer_argument;
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
     foc_board_trace_clock trace_cycles;
 #endif

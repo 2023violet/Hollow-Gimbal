@@ -57,7 +57,11 @@ capture ID. The same instance can be reset for another capture.
    an independently calibrated terminal-voltage reconstruction. A PI request,
    modulation limiter result, duty register, or PWM submit acknowledgment by
    itself has unverified terminal voltage. The first endpoint has no preceding
-   voltage interval.
+   voltage interval. A controlling firmware may instead declare
+   `FOC_MOTOR_ID_VOLTAGE_COMMANDED` (measured origin only): the interval voltage
+   reconstructed from its own applied duties and measured bus voltage, without
+   independent terminal validation. The class travels with the result; on
+   hardware it carries dead-time and switch-drop error (Board1 on-MCU CAL-3).
 4. `foc_motor_id_finish()` requires complete non-overlapping windows, with
    at least two intervals per window, at least three windows, and at most
    65,535 endpoints. Each row is mean(v) = Rs * mean(i) + L * delta(i)/T.
@@ -129,7 +133,14 @@ sensed terminal voltage for measured data and independently validated
 terminal reconstruction for measured data. The latter needs a calibration
 and uncertainty basis for the same interval. Qualification flags and chain
 IDs identify the caller's evidence. Physical accuracy still depends on that
-evidence.
+evidence. A measured `FOC_MOTOR_ID_VOLTAGE_COMMANDED` capture declares its
+voltage unwitnessed (firmware duty and bus reconstruction) and keeps that class
+in the result.
+
+`foc_flux_id_break()` ends the current contiguous segment: the open partial
+window is discarded and the next interval may start at any later time and
+sequence. A physical motor that reverses or changes speed captures each settled
+level as its own segment instead of a fixture's instant speed steps.
 
 For each same-sign window, the estimator averages Vq − Rs·Iq − ωe·Ld·Id
 and subtracts Lq·ΔIq/T using the paired current endpoints. It fits the

@@ -204,7 +204,10 @@ struct foc_runtime_command {
         /** d/q voltage in V at an electrical angle in rad for CALIBRATION. */
         struct {
             struct foc_vector_dq voltage_v;
+            /** Absolute angle, or an offset added to the sensor angle with follow_rotor. */
             float theta_elec_rad;
+            /** Commutate with the calibrated sensor angle (voltage-mode FOC). */
+            bool follow_rotor;
         } calibration;
     } target;
 };

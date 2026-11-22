@@ -95,8 +95,8 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 33 | CONFIG_ERASE | Empty | APPLIED; the next boot uses the boot configuration. NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
-| 50 | CALIBRATE_START | Empty | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still; OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
-| 51 | CALIBRATE_READ | Empty | 39-byte calibration progress and results (below) |
+| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
+| 51 | CALIBRATE_READ | Empty | 71-byte calibration progress and results (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
@@ -261,11 +261,27 @@ CALIBRATE_START runs CAL-1 and CAL-2 in the firmware:
    electrical offset.
 3. The existing admission builds one snapshot; the instance is re-initialized
    with it and the controller tuning re-applied. All results apply, or none.
+4. CAL-3 Rs, Ld, Lq: voltage-mode FOC commutated by the calibrated sensor angle
+   applies d-axis pulses (no torque) and a zero-mean q-axis pulse train (the free
+   shaft only dithers), 768 H0 intervals each, fitted by `foc_motor_id`.
+5. CAL-4 flux and Kt: q-axis voltage at ±15 % and ±30 % of the voltage limit;
+   each level settles for 400 ms and its steady part (4 windows of 32
+   intervals) is one segment for `foc_flux_id`. Kt = 1.5 x pole pairs x flux.
+6. CAL-5: `foc_motor_pi_design` (150 Hz, 200 µs period, 160 µs update delay)
+   designs the current PI; H0 applies it through the tuning mailbox and the
+   Runtime returns to CURRENT mode.
+
+The electrical stages run at the H0 rate on the logical slot clock. The
+interval voltage is reconstructed from the applied duties and bus voltage
+(0.8 V(k-2) + 0.2 V(k-1) for the TMR1 preload) and declared `COMMANDED`: on
+hardware it includes dead-time and switch-drop error, which biases Rs. With
+200 µs intervals the R/L fit accepts Rs up to 1.15 Ω for L down to 0.8 mH.
 
 While a run is active, SETPOINT, ARM, START, SET_MODE, PARAM_WRITE, PARAM_SAVE,
 CONFIG_ERASE, FAULT_CLEAR and CALIBRATE_START return BUSY. STOP or
 CALIBRATE_ABORT ends the run and keeps the previous configuration. The result
-is not stored; PARAM_SAVE does not yet carry calibration (planned).
+is not stored; PARAM_SAVE does not yet carry the rotor calibration (planned),
+while the CAL-5 PI is part of the tuning PARAM_SAVE stores.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
@@ -277,12 +293,17 @@ is not stored; PARAM_SAVE does not yet carry calibration (planned).
 | 11 / 15 | f32 / f32 | Electrical offset rad / rotor fit rms residual rad |
 | 19 / 23 / 27 | f32 | ADC zero A / B / C in counts |
 | 31 / 35 | f32 / u32 | Largest ADC noise rms in counts / applied runs |
+| 39 / 43 / 47 | f32 | Rs Ω / Ld H / Lq H |
+| 51 / 55 | f32 | Flux Wb / Kt N·m per peak q ampere |
+| 59 / 63 / 67 | f32 | Designed current Kp d / Kp q V/A / Ki V/(A·s) |
 
 States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
-SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10. Failures: none 0, state 1,
-ADC 2, lifecycle 3, drive 4, current 5, sensor 6, rotor 7, offset 8,
-admission 9, apply 10, aborted 11, timeout 12. After DONE, IDs 16, 17 and 38–42
-read the applied values.
+SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10, RL_D 11, RL_Q 12, FLUX 13,
+TUNE 14, RESTORE 15. Failures: none 0, state 1, ADC 2, lifecycle 3, drive 4,
+current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted 11,
+timeout 12, R/L 13, flux 14, tune 15, capture 16. Byte 4 carries the admission
+failure, or for R/L and flux failures the estimator's `foc_calibration_failure`.
+After DONE, IDs 16, 17, 38–42 and 64–67 read the applied values.
 
 ### Persistent settings
 

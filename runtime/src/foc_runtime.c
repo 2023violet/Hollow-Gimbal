@@ -686,7 +686,10 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     const struct foc_pipeline_input step = {
         .adc = *adc,
         /* Without a drive command (e.g. after STOP) the cycle observes like CURRENT does. */
-        .theta_elec_rad = drive != NULL ? drive->target.calibration.theta_elec_rad : aligned,
+        .theta_elec_rad = drive == NULL ? aligned
+            : drive->target.calibration.follow_rotor
+            ? aligned + drive->target.calibration.theta_elec_rad
+            : drive->target.calibration.theta_elec_rad,
         .voltage_drive = calibration,
         .angle_sample_us = adc->sample_tick,
         .now_us = now_us,

@@ -94,12 +94,21 @@ struct foc_serial_calibration_view {
     float adc_offset_count[3];
     float adc_noise_rms_count;
     uint32_t applied_runs;
+    /* M3b electrical results; zero until available. */
+    float rs_ohm;
+    float ld_h;
+    float lq_h;
+    float flux_wb;
+    float kt_nm_per_a;
+    float kp_d_v_per_a;
+    float kp_q_v_per_a;
+    float ki_v_per_a_s;
 };
 
 /** Optional on-MCU calibration owner. start returns a FOC_PROTO_* result code. */
 struct foc_serial_calibration {
     void *context;
-    int (*start)(void *context, uint32_t now_us);
+    int (*start)(void *context, uint32_t now_us, unsigned int stages);
     void (*abort)(void *context);
     bool (*busy)(const void *context);
     bool (*read)(const void *context, struct foc_serial_calibration_view *view);

@@ -47,9 +47,11 @@ PARAMETERS = {
 }
 PARAMETER_TYPES = {74: "u32", 1: "u32"}
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
-              "DRIVE_STOP", "APPLY", "DONE", "FAILED"]
+              "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
-                "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT"]
+                "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
+                "CAPTURE"]
+CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2}
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
@@ -261,7 +263,7 @@ def describe(frame):
             raise ValueError("BAD_RESPONSE")
         result["publication_sequence"] = struct.unpack_from("<I", body, 1)[0]
     elif frame.type == 0x51 and body[0] == 0:
-        if len(body) != 39:
+        if len(body) not in (39, 71):
             raise ValueError("BAD_RESPONSE")
         name = lambda table, index: table[index] if index < len(table) else index
         result.update(
@@ -278,6 +280,10 @@ def describe(frame):
             adc_noise_rms_count=struct.unpack_from("<f", body, 31)[0],
             applied_runs=struct.unpack_from("<I", body, 35)[0],
         )
+        if len(body) == 71:
+            result.update(dict(zip(
+                ("rs_ohm", "ld_h", "lq_h", "flux_wb", "kt_nm_per_a", "kp_d_v_per_a",
+                 "kp_q_v_per_a", "ki_v_per_a_s"), struct.unpack_from("<8f", body, 39))))
     elif frame.type == 0x32 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -1178,12 +1184,21 @@ def run_sil_persist(simulator, base_arguments, flash_path, json_path=None):
 # A motor that differs from the Board1 nominal configuration (7 pole pairs, zero
 # offset, 2048-count ADC zero). Only the plant knows these values; the firmware
 # is never told them. The checks below compare its findings against them.
-SIL_CALIBRATE_PLANT = {"pole_pairs": 11, "offset_rad": 1.1, "adc_offset": (2078, 2030, 2060)}
+SIL_CALIBRATE_PLANT = {"pole_pairs": 11, "offset_rad": 1.1, "adc_offset": (2078, 2030, 2060),
+                       "rs_ohm": 0.45, "ld_h": 0.0009, "lq_h": 0.0013, "flux_wb": 0.008}
 SIL_CALIBRATE_ARGUMENTS = [
     "--motor-pole-pairs", str(SIL_CALIBRATE_PLANT["pole_pairs"]),
     "--motor-offset-rad", str(SIL_CALIBRATE_PLANT["offset_rad"]),
     "--adc-offset", ",".join(map(str, SIL_CALIBRATE_PLANT["adc_offset"])),
+    "--motor-rs-ohm", str(SIL_CALIBRATE_PLANT["rs_ohm"]),
+    "--motor-ld-h", str(SIL_CALIBRATE_PLANT["ld_h"]),
+    "--motor-lq-h", str(SIL_CALIBRATE_PLANT["lq_h"]),
+    "--motor-psi-f-wb", str(SIL_CALIBRATE_PLANT["flux_wb"]),
 ]
+
+
+def _relative_error(found, true):
+    return abs(found - true) / abs(true)
 
 
 def _calibrate_wait(session, stop_at=None, limit=40000):
@@ -1263,7 +1278,9 @@ def run_sil_calibrate(client, transport, json_path=None):
     metrics["calibration"] = {key: view[key] for key in (
         "calibration_state", "calibration_failure", "failed_state", "admission_failure", "samples",
         "pole_pairs", "calibration_direction", "runtime_direction", "electrical_offset_rad",
-        "rotor_residual_rad", "adc_offset_count", "adc_noise_rms_count", "applied_runs")}
+        "rotor_residual_rad", "adc_offset_count", "adc_noise_rms_count", "applied_runs",
+        "rs_ohm", "ld_h", "lq_h", "flux_wb", "kt_nm_per_a", "kp_d_v_per_a", "kp_q_v_per_a",
+        "ki_v_per_a_s")}
     offset_error = abs((view["electrical_offset_rad"] - plant["offset_rad"] + math.pi)
                        % (2 * math.pi) - math.pi)
     adc_error = max(abs(found - true) for found, true in zip(view["adc_offset_count"],
@@ -1274,6 +1291,25 @@ def run_sil_calibrate(client, transport, json_path=None):
     checks["electrical_offset_found"] = offset_error < 0.05
     checks["adc_zero_found"] = adc_error <= 2.0
     checks["tuning_survives_calibration"] = session.read("command-lease-us") == 50000
+    # CAL-3/4/5: electrical model and the current PI designed from it.
+    kt_true = 1.5 * plant["pole_pairs"] * plant["flux_wb"]
+    errors = {
+        "rs": _relative_error(view["rs_ohm"], plant["rs_ohm"]),
+        "ld": _relative_error(view["ld_h"], plant["ld_h"]),
+        "lq": _relative_error(view["lq_h"], plant["lq_h"]),
+        "flux": _relative_error(view["flux_wb"], plant["flux_wb"]),
+        "kt": _relative_error(view["kt_nm_per_a"], kt_true),
+    }
+    metrics["electrical_relative_error"] = errors
+    checks["rs_found"] = errors["rs"] < 0.05
+    checks["ld_found"] = errors["ld"] < 0.10
+    checks["lq_found"] = errors["lq"] < 0.10
+    checks["flux_found"] = errors["flux"] < 0.05
+    checks["kt_found"] = errors["kt"] < 0.05
+    checks["pi_applied_to_live_firmware"] = (
+        view["kp_q_v_per_a"] > 0.0
+        and abs(session.read("current-kp-q") - view["kp_q_v_per_a"]) < 1e-6
+        and abs(session.read("current-ki-q") - view["ki_v_per_a_s"]) < 1e-3)
     checks["applied_to_live_firmware"] = (session.read("pole-pairs") == plant["pole_pairs"]
                                           and abs(session.read("phase-a-offset")
                                                   - view["adc_offset_count"][0]) < 1e-3)
@@ -1293,6 +1329,22 @@ def run_sil_calibrate(client, transport, json_path=None):
     current_metrics, current_checks = _tracking(session, "current", 0.4, 20000, samples, steps)
     metrics["current"] = current_metrics
     checks.update({f"calibrated_current_{k}": v for k, v in current_checks.items()})
+    session.stop()
+
+    # 5. The electrical stages alone, on the rotor mapping applied above.
+    _wait_still(session)
+    rerun = session.call("calibrate", bytes([CAL_STAGES["electrical"]]))
+    view, seen = _calibrate_wait(session)
+    stages["electrical_only"] = seen
+    checks["mode_restored_to_current"] = session.status()["mode"] == MODES["current"]
+    checks["electrical_only_rerun_done"] = (rerun["result"] == "ACCEPTED"
+                                            and view["calibration_state"] == "DONE"
+                                            and "ADC_ZERO" not in seen and "SWEEP" not in seen)
+    metrics["electrical_only_flux_wb"] = view["flux_wb"]
+    session.metadata.clear()
+    steps, samples = session.run("current", 0.4, 20000)
+    _, rerun_checks = _tracking(session, "current", 0.4, 20000, samples, steps)
+    checks["current_after_electrical_rerun"] = rerun_checks["tracks_reference"]
     _finish(session, checks, metrics)
 
     passed = all(checks.values())

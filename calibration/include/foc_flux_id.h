@@ -157,6 +157,8 @@ struct foc_flux_id {
     double previous_iq_a;
     uint32_t last_sequence;
     uint32_t window_intervals;
+    /** Set by foc_flux_id_break(): the next interval starts a new contiguous segment. */
+    bool segment_break;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -168,6 +170,12 @@ enum foc_calibration_failure foc_flux_id_push(struct foc_flux_id *context,
 enum foc_calibration_failure foc_flux_id_finish(struct foc_flux_id *context,
                                                 struct foc_flux_id_result *result);
 void foc_flux_id_cancel(struct foc_flux_id *context);
+/**
+ * End the current contiguous segment. The open partial window is discarded and
+ * the next interval may begin at any later time and sequence, for example after
+ * a physical reversal or speed change settles. Completed windows are kept.
+ */
+void foc_flux_id_break(struct foc_flux_id *context);
 
 /* ---------------------------------------- end of file ----------------------------------------- */
 

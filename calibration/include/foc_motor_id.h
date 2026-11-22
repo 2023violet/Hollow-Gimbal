@@ -54,6 +54,12 @@ enum foc_motor_id_voltage_source {
     FOC_MOTOR_ID_VOLTAGE_MEASURED_TERMINAL,
     /** Interval voltage reconstructed with independently validated calibration. */
     FOC_MOTOR_ID_VOLTAGE_CALIBRATED_TERMINAL,
+    /**
+     * Interval voltage reconstructed by the controlling firmware from its commanded
+     * duties and measured bus voltage, without independent terminal validation.
+     * On hardware it carries dead-time and switch-drop error. Appended value.
+     */
+    FOC_MOTOR_ID_VOLTAGE_COMMANDED,
 };
 
 /** Operation status. Fit diagnostics use the shared calibration failure enum. */

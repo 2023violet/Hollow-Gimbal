@@ -273,6 +273,20 @@ image answers CALIBRATE_START with OUTPUT_LOCKED, and the quiesce hook masks the
 four producer IRQs around reconfiguration. The SIL models an inhibited bridge
 as open windings (no current) rather than shorted terminals.
 
+### M3b electrical calibration
+
+The same manager continues with CAL-3 (Rs, Ld, Lq through `foc_motor_id`),
+CAL-4 (flux and Kt through `foc_flux_id`) and CAL-5 (current PI through
+`foc_motor_pi_design`, applied by the H0 tuning mailbox). A post-H0 Board
+observer streams each cycle's d/q current, applied d/q voltage and speed on the
+slot clock into a 64-entry ring that the Foreground drains. Excitation runs in
+voltage-mode FOC on the calibrated rotor angle (`follow_rotor` drive commands),
+so no fixture is needed. The voltage is declared `COMMANDED` (appended to
+`foc_motor_id_voltage_source`), and `foc_flux_id_break()` lets each settled speed
+level be its own segment. The manager shares the UART adapter's publication and
+lifecycle sequences, so the Host keeps control after a run. `sil-demo --sil-scenario
+calibrate` uses a plant whose Rs, L and flux also differ from the Board1 defaults.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

@@ -86,8 +86,9 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(summary["metrics"]["fault_bits"], 1)
 
     def test_on_mcu_calibration_of_an_unknown_motor(self):
-        """CAL-1/CAL-2 on the MCU find the plant's hidden ADC zero, pole pairs and offset;
-        before, velocity control fails on that motor, after, it tracks. STOP aborts."""
+        """CAL-1..5 on the MCU find the plant's hidden ADC zero, pole pairs, offset, Rs,
+        Ld/Lq and flux and design the current PI; before, velocity control fails on that
+        motor, after, it tracks. STOP aborts. The electrical stages rerun alone."""
         with cli.SimulatorTransport(SIL, ["--lockstep-us", "500"] + cli.SIL_CALIBRATE_ARGUMENTS)                 as transport, contextlib.redirect_stdout(io.StringIO()):
             client = cli.Client(transport, sequence=1)
             client.hello()
@@ -97,6 +98,12 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(calibration["pole_pairs"], 11)
         self.assertLess(summary["metrics"]["offset_error_rad"], 0.05)
         self.assertGreater(summary["metrics"]["uncalibrated_velocity_tail_error"], 1.0)
+        # CAL-3/4/5 on the MCU: Rs, Ld/Lq, flux and Kt of the hidden plant, PI applied.
+        errors = summary["metrics"]["electrical_relative_error"]
+        self.assertLess(errors["rs"], 0.05)
+        self.assertLess(errors["flux"], 0.05)
+        self.assertTrue(summary["checks"]["pi_applied_to_live_firmware"])
+        self.assertTrue(summary["checks"]["electrical_only_rerun_done"])
 
     def test_persistence_across_power_cycles(self):
         """Save -> new process on the same flash (power cycle) -> restored; damaged -> refused;

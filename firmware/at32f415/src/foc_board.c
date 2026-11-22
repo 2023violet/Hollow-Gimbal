@@ -639,6 +639,9 @@ int foc_board_adc_complete(
 #endif
     token->h0_called = true;
     token->h0_result = result;
+    if (valid && adc->observer != NULL) {
+        adc->observer(adc->observer_argument, runtime, token->slot_id, result);
+    }
     token->h0_consumed = valid && !already_observed && runtime->adc.seen &&
         runtime->adc.seq == token->generation && runtime->adc.produced_us == token->requested_us;
     token->update_accepted = runtime->pipeline.mock.updates != updates;

@@ -41,6 +41,10 @@ enum {
     PARAM_SOURCE_DIRECTION = 43,
     PARAM_CALIBRATION_DIRECTION = 44,
     PARAM_MEASUREMENT_QUALIFIED = 45,
+    /* Persistent storage readback (M2). */
+    PARAM_STORE_STATE = 48,
+    PARAM_STORE_LOADED_SEQUENCE = 49,
+    PARAM_STORE_STORED_SEQUENCE = 50,
     /* Controller tuning receipt, read only. */
     PARAM_TUNING_REVISION = 60,
     PARAM_TUNING_RESULT = 61,
@@ -84,8 +88,10 @@ enum {
     FLAG_SAMPLE_SEEN = 128,
     /* TELEMETRY_READ byte 62: bit 1 marks the firmware's decoded current. */
     TELEMETRY_CURRENT_VALID = 2,
-    /* Capability bits: lock, RAM policy, polling telemetry, UART, mode switch, tuning. */
+    /* Capability bits: lock, RAM policy, polling telemetry, UART, mode switch, tuning;
+     * bit 6 persistent settings is added when storage is attached. */
     CAPABILITY_BITS = 63,
+    CAPABILITY_PERSISTENCE = 64,
     /* Lifecycle result codes on the wire. */
     LIFECYCLE_WIRE_NONE = 0,
 };
@@ -122,9 +128,12 @@ static float foc_serial_bits_float(uint32_t bits)
     return value;
 }
 
-static void foc_serial_capability(struct foc_protocol_frame *response)
+static void
+foc_serial_capability(const struct foc_serial *serial, struct foc_protocol_frame *response)
 {
-    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, CAPABILITY_BITS, 0};
+    const uint8_t bits = (uint8_t)(CAPABILITY_BITS |
+                                   (serial->persistence.save != NULL ? CAPABILITY_PERSISTENCE : 0));
+    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, bits, 0};
     memcpy(response->payload, capability, sizeof capability);
     response->length = sizeof capability;
 }
@@ -480,6 +489,18 @@ static bool foc_serial_parameter_read(
         foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
+    if (id >= PARAM_STORE_STATE && id <= PARAM_STORE_STORED_SEQUENCE) {
+        struct foc_serial_persistence_view view = {0};
+        if (serial->persistence.read != NULL) {
+            (void)serial->persistence.read(serial->persistence.context, &view);
+        }
+        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
+        parameter->value = id == PARAM_STORE_STATE ? view.state
+            : id == PARAM_STORE_LOADED_SEQUENCE    ? view.loaded_sequence
+                                                   : view.stored_sequence;
+        parameter->minimum = parameter->maximum = parameter->value;
+        return true;
+    }
     *parameter = (struct foc_serial_parameter){.type = PARAM_F32};
     switch (id) {
     case PARAM_RX_BUDGET:
@@ -741,6 +762,39 @@ static int foc_serial_lifecycle_read(
     return FOC_PROTO_OK;
 }
 
+/* Save the live settings, or erase storage, only while DISABLED with INHIBIT confirmed. */
+static int foc_serial_store(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    uint8_t type,
+    struct foc_protocol_frame *response
+)
+{
+    if (serial->persistence.save == NULL || serial->persistence.erase == NULL) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    if (view.state != FOC_SAFE_STATE_DISABLED || view.inhibit_pending || !view.output_confirmed ||
+        view.action != FOC_DEVICE_OUTPUT_INHIBIT) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    if (type == FOC_MSG_CONFIG_ERASE) {
+        return serial->persistence.erase(serial->persistence.context);
+    }
+    uint32_t sequence = 0U;
+    const int result =
+        serial->persistence.save(serial->persistence.context, serial, runtime, &sequence);
+    if (result == FOC_PROTO_APPLIED) {
+        foc_protocol_write_u32(response->payload + 1, sequence);
+        response->length = 5;
+        serial->dirty = false;
+    }
+    return result;
+}
+
 static int foc_serial_dispatch(
     struct foc_serial *serial,
     struct foc_uart_buffer *uart,
@@ -782,7 +836,7 @@ static int foc_serial_dispatch(
     case FOC_MSG_LIFECYCLE_READ:
         return foc_serial_lifecycle_read(serial, runtime, response);
     case FOC_MSG_CAPABILITY_READ:
-        foc_serial_capability(response);
+        foc_serial_capability(serial, response);
         return FOC_PROTO_OK;
     case FOC_MSG_STATUS_READ:
     case FOC_MSG_FAULT_READ:
@@ -812,6 +866,8 @@ static int foc_serial_dispatch(
                                              : FOC_PROTO_BAD_STATE;
     }
     case FOC_MSG_PARAM_SAVE:
+    case FOC_MSG_CONFIG_ERASE:
+        return foc_serial_store(serial, runtime, request->type, response);
     case FOC_MSG_TELEMETRY_STREAM:
         return FOC_PROTO_NOT_SUPPORTED;
     default:
@@ -845,7 +901,7 @@ static int foc_serial_request(
             serial->request_seen = false;
         }
         response->session = serial->session;
-        foc_serial_capability(response);
+        foc_serial_capability(serial, response);
         return FOC_PROTO_OK;
     }
     if (serial->session == 0U || request->session != serial->session) {
@@ -903,6 +959,17 @@ void foc_serial_attach_boot(
     if (serial != NULL) {
         serial->boot_reader = reader;
         serial->boot_context = context;
+    }
+}
+
+void foc_serial_attach_persistence(
+    struct foc_serial *serial,
+    const struct foc_serial_persistence *persistence
+)
+{
+    if (serial != NULL) {
+        serial->persistence =
+            persistence != NULL ? *persistence : (struct foc_serial_persistence){0};
     }
 }
 

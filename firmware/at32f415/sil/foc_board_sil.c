@@ -30,6 +30,7 @@
 
 #include "foc_board.h"
 #include "foc_board_boot.h"
+#include "foc_board_store.h"
 #include "foc_board_timing.h"
 #include "foc_serial.h"
 #include "foc_virtual_motor.h"
@@ -95,6 +96,15 @@ struct sil_plant {
     uint32_t inhibits;
 };
 
+/* Two flash slots of erased 0xFF bytes; optionally mirrored to a file so that
+ * restarting the process with the same file behaves as a power cycle. */
+struct sil_flash {
+    uint8_t slots[2][FOC_BOARD_STORE_SLOT_BYTES];
+    const char *path;
+    uint32_t erases;
+    uint32_t programs;
+};
+
 struct sil_device {
     /* Production instances, as the static objects in main.c. */
     struct foc_runtime runtime;
@@ -104,7 +114,9 @@ struct sil_device {
     struct foc_board_boot boot;
     struct foc_uart_buffer uart;
     struct foc_serial serial;
+    struct foc_board_persistence persistence;
     /* Virtual peripherals. */
+    struct sil_flash flash;
     struct sil_plant plant;
     uint32_t now_us;
     uint32_t last_read_us;
@@ -599,11 +611,88 @@ static void sil_usage(const char *name)
     fprintf(
         stderr,
         "usage: %s [--speed factor | --lockstep-us us] [--duration-us us] [--trace-us us]\n"
-        "          [--adc-offset a,b,c] [--vbus-v v] [--motor-rs-ohm r] [--motor-ld-h l]\n"
+        "          [--flash file] [--adc-offset a,b,c] [--vbus-v v] [--motor-rs-ohm r] "
+        "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n",
         name
     );
+}
+
+/* Flash device ------------------------------------------------------------------ */
+
+static int sil_flash_sync(const struct sil_flash *flash)
+{
+    if (flash->path == NULL) {
+        return 0;
+    }
+    FILE *file = fopen(flash->path, "wb");
+    if (file == NULL) {
+        return -1;
+    }
+    const size_t written = fwrite(flash->slots, 1U, sizeof flash->slots, file);
+    return fclose(file) == 0 && written == sizeof flash->slots ? 0 : -1;
+}
+
+static void sil_flash_open(struct sil_flash *flash, const char *path)
+{
+    memset(flash->slots, 0xFF, sizeof flash->slots);
+    flash->path = path;
+    if (path == NULL) {
+        return;
+    }
+    FILE *file = fopen(path, "rb");
+    if (file != NULL) {
+        uint8_t image[sizeof flash->slots];
+        if (fread(image, 1U, sizeof image, file) == sizeof image) {
+            memcpy(flash->slots, image, sizeof image);
+        }
+        (void)fclose(file);
+    }
+}
+
+static int
+sil_flash_read(void *context, unsigned int slot, size_t offset, uint8_t *bytes, size_t size)
+{
+    const struct sil_flash *flash = context;
+    if (slot > 1U || offset > sizeof flash->slots[0] || size > sizeof flash->slots[0] - offset) {
+        return -1;
+    }
+    memcpy(bytes, &flash->slots[slot][offset], size);
+    return 0;
+}
+
+static int sil_flash_erase(void *context, unsigned int slot)
+{
+    struct sil_flash *flash = context;
+    if (slot > 1U) {
+        return -1;
+    }
+    memset(flash->slots[slot], 0xFF, sizeof flash->slots[slot]);
+    flash->erases++;
+    return sil_flash_sync(flash);
+}
+
+/* NOR semantics: aligned words, bits only cleared. */
+static int sil_flash_program(
+    void *context,
+    unsigned int slot,
+    size_t offset,
+    const uint8_t *bytes,
+    size_t size
+)
+{
+    struct sil_flash *flash = context;
+    if (slot > 1U || offset % FOC_BOARD_STORE_PROGRAM_BYTES != 0U ||
+        size % FOC_BOARD_STORE_PROGRAM_BYTES != 0U || offset > sizeof flash->slots[0] ||
+        size > sizeof flash->slots[0] - offset) {
+        return -1;
+    }
+    for (size_t index = 0U; index < size; ++index) {
+        flash->slots[slot][offset + index] &= bytes[index];
+    }
+    flash->programs++;
+    return sil_flash_sync(flash);
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -620,6 +709,7 @@ int main(int argc, char **argv)
     uint32_t duration_us = 0U;
     float offsets[3] = {2048.0f, 2048.0f, 2048.0f};
     float vbus_v = 12.0f;
+    const char *flash_path = NULL;
     struct foc_virtual_motor_params motor = sil_default_motor();
     device.trace_us = 500U;
 
@@ -644,6 +734,8 @@ int main(int argc, char **argv)
                 sil_usage(argv[0]);
                 return 2;
             }
+        } else if (strcmp(option, "--flash") == 0) {
+            flash_path = value;
         } else if (strcmp(option, "--vbus-v") == 0) {
             vbus_v = (float)strtod(value, NULL);
         } else if (strcmp(option, "--motor-rs-ohm") == 0) {
@@ -718,6 +810,23 @@ int main(int argc, char **argv)
     }
     foc_serial_init_with_policy(&device.serial, &device.runtime, FOC_SERIAL_TARGET_VIRTUAL_ONLY);
     foc_serial_attach_boot(&device.serial, foc_board_boot_serial_readback, &device.boot);
+    /* Boot restore before any producer, as an image with storage does on the target. */
+    sil_flash_open(&device.flash, flash_path);
+    device.persistence.driver = (struct foc_board_store_driver){
+        .context = &device.flash,
+        .read = sil_flash_read,
+        .erase = sil_flash_erase,
+        .program = sil_flash_program,
+    };
+    foc_board_persistence_restore(
+        &device.persistence,
+        &device.boot,
+        &device.runtime,
+        &device.serial
+    );
+    const struct foc_serial_persistence persistence =
+        foc_board_persistence_serial(&device.persistence);
+    foc_serial_attach_persistence(&device.serial, &persistence);
     if (!foc_board_adc_init_timing(&device.adc, 0U, 0U, 0U)) {
         fprintf(stderr, "FALCONF0C_META {\"kind\":\"error\",\"reason\":\"adc timing\"}\n");
         return 1;
@@ -726,7 +835,8 @@ int main(int argc, char **argv)
         stderr,
         "FALCONF0C_META {\"kind\":\"sil_boot\",\"simulated\":true,\"physical_applied\":false,"
         "\"mode\":\"%s\",\"speed\":%.6g,\"lockstep_us\":%u,\"plant_pole_pairs\":%u,"
-        "\"plant_offset_rad\":%.9g,\"plant_adc_offset\":[%.6g,%.6g,%.6g]}\n",
+        "\"plant_offset_rad\":%.9g,\"plant_adc_offset\":[%.6g,%.6g,%.6g],"
+        "\"store_state\":%u,\"store_loaded_sequence\":%u,\"flash_file\":%s}\n",
         lockstep_us != 0U ? "lockstep" : "free-run",
         speed,
         lockstep_us,
@@ -734,7 +844,10 @@ int main(int argc, char **argv)
         motor.electrical_offset_rad,
         offsets[0],
         offsets[1],
-        offsets[2]
+        offsets[2],
+        (unsigned int)device.persistence.state,
+        device.persistence.loaded_sequence,
+        flash_path != NULL ? "true" : "false"
     );
 
     if (lockstep_us != 0U) {

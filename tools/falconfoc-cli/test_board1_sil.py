@@ -85,6 +85,17 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(summary["status"], "SIL_PASS", summary)
         self.assertEqual(summary["metrics"]["fault_bits"], 1)
 
+    def test_persistence_across_power_cycles(self):
+        """Save -> new process on the same flash (power cycle) -> restored; damaged -> refused;
+        erase -> boot configuration."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_persist(SIL, ["--lockstep-us", "500"],
+                                          Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+        self.assertEqual([boot["store_state"] for boot in summary["boots"]],
+                         ["EMPTY", "LOADED", "INVALID_RECORD", "EMPTY"])
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

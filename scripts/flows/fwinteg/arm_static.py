@@ -36,6 +36,9 @@ EXPLAINED_REMOVALS = {
     "foc_board_capture_default_profile":
         "main() takes the capture profile from the effective boot configuration "
         "(foc_board_boot_capture_profile), so the nominal-only helper is garbage-collected",
+    "foc_serial_capability":
+        "M2: it now reads the adapter's persistence binding (capability bit 6) and the "
+        "compiler inlines it into its two callers, HELLO and CAPABILITY_READ",
 }
 
 # M0 Board1 SIL added an optional output backend to foc_board_output_submit. The ARM

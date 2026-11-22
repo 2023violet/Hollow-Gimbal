@@ -1325,6 +1325,26 @@ static int foc_runtime_tuning_check(
     return FOC_RUNTIME_OK;
 }
 
+/* Commit a checked candidate. Callers own the instance: H0, or boot before any IRQ. */
+static void foc_runtime_tuning_commit(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_tuning *tuning,
+    const struct foc_current_context *current,
+    const struct foc_velocity_context *velocity
+)
+{
+    runtime->pipeline.current = *current;
+    runtime->pipeline.safety.config.command_timeout_us = tuning->command_timeout_us;
+    if (runtime->config.motion.enabled) {
+        runtime->outer_velocity = *velocity;
+        runtime->config.motion.velocity = velocity->config;
+        runtime->config.motion.position.kp_per_s = tuning->position_kp_per_s;
+        runtime->config.motion.position.velocity_limit_rad_s = tuning->velocity_limit_rad_s;
+        runtime->config.motion.iq_limit_a = tuning->iq_limit_a;
+    }
+    runtime->tuning_revision++;
+}
+
 static void foc_runtime_tuning_write_result(
     struct foc_runtime *runtime,
     enum foc_runtime_request_result result,
@@ -1373,16 +1393,7 @@ static void foc_runtime_tuning_service(struct foc_runtime *runtime, uint32_t now
     ) {
         status = foc_runtime_tuning_check(runtime, &tuning, &current, &velocity);
         if (status == FOC_RUNTIME_OK) {
-            runtime->pipeline.current = current;
-            runtime->pipeline.safety.config.command_timeout_us = tuning.command_timeout_us;
-            if (runtime->config.motion.enabled) {
-                runtime->outer_velocity = velocity;
-                runtime->config.motion.velocity = velocity.config;
-                runtime->config.motion.position.kp_per_s = tuning.position_kp_per_s;
-                runtime->config.motion.position.velocity_limit_rad_s = tuning.velocity_limit_rad_s;
-                runtime->config.motion.iq_limit_a = tuning.iq_limit_a;
-            }
-            runtime->tuning_revision++;
+            foc_runtime_tuning_commit(runtime, &tuning, &current, &velocity);
             result = FOC_RUNTIME_REQUEST_APPLIED;
         }
     }
@@ -1410,6 +1421,29 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .iq_limit_a = motion->iq_limit_a,
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
     };
+    return FOC_RUNTIME_OK;
+}
+
+int foc_runtime_apply_tuning(struct foc_runtime *runtime, const struct foc_runtime_tuning *tuning)
+{
+    if (runtime == NULL || !runtime->initialized || tuning == NULL ||
+        atomic_load_explicit(&runtime->tuning_pending, memory_order_acquire) !=
+            FOC_RUNTIME_REQUEST_IDLE) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    struct foc_current_context current;
+    struct foc_velocity_context velocity;
+    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity) != FOC_RUNTIME_OK) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    foc_runtime_tuning_commit(runtime, tuning, &current, &velocity);
+    runtime->tuning_request_sequence = 0U;
+    foc_runtime_tuning_write_result(
+        runtime,
+        FOC_RUNTIME_REQUEST_APPLIED,
+        runtime->boot_us,
+        FOC_RUNTIME_OK
+    );
     return FOC_RUNTIME_OK;
 }
 

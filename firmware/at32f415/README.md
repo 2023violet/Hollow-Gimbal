@@ -233,6 +233,25 @@ re-run. `sil-demo --sil-scenario current|velocity|position|tuning|recover` runs
 each one; `test-foc-board1-sil` runs all of them in lockstep. The locked ARM
 image accepts SET_MODE and tuning as well, since neither touches output policy.
 
+### M2 persistent settings
+
+`src/foc_board_store.c` implements the Board1 settings record ("FBP1", 108
+bytes, layout in the file header): controller tuning and UART RAM policies,
+bound to the effective motor configuration, in two slots with the
+configuration-store transaction (erase inactive slot, program and verify body,
+program and verify the commit word). `foc_board_persistence_restore()` applies
+a matching, valid record at boot before any producer; the UART adapter gains
+PARAM_SAVE, CONFIG_ERASE and readback IDs 48–50.
+
+The SIL backs the slots with `--flash <file>`; restarting it on the same file is
+a power cycle (`sil-demo --sil-scenario persist`). On the AT32 the slots are the
+top two 2 KiB regions (0x0801F000, 0x0801F800); `store-reserve.ld` keeps every
+image below them. The Flash driver `src/foc_at32_store.c` is linked only with
+`-DFALCONFOC_BOARD_PERSISTENCE=ON`, so the default image still contains no
+Flash erase or program code. Target facts still to confirm before enabling it:
+the sector size, the instruction-fetch stall during erase while H0/H1 IRQs are
+enabled (a save from DISABLED may then miss H0 deadlines), and endurance.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

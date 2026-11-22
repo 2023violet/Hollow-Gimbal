@@ -16,6 +16,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(FALCONFOC_RT02_TIMING_TRACE "Capture local Board1 execution and ADC/H0 timing" OFF)
 option(FALCONFOC_BOARD_CAPTURE "Enable the locked Board1 SRAM capture recorder" OFF)
+option(FALCONFOC_BOARD_PERSISTENCE "Link the AT32 Flash settings store (save, boot restore)" OFF)
 set(FALCONFOC_BOARD_CAPTURE_BUILD_TAG
     "0"
     CACHE STRING "Declared recorder build tag (uint32)"
@@ -67,6 +68,7 @@ add_library(
   falconfoc-board1 STATIC
   src/foc_board.c
   src/foc_board_boot.c
+  src/foc_board_store.c
   src/foc_board_timing.c
   src/foc_board_capture.c
   src/foc_serial.c
@@ -160,6 +162,7 @@ if(CMAKE_CROSSCOMPILING)
   endif()
   set(linker "${startup}/linker/AT32F415xB_FLASH.ld")
   set(stack "${CMAKE_CURRENT_LIST_DIR}/stack-budget.ld")
+  set(store_reserve "${CMAKE_CURRENT_LIST_DIR}/store-reserve.ld")
   add_executable(
     ${image}
     src/main.c
@@ -173,7 +176,14 @@ if(CMAKE_CROSSCOMPILING)
     "${vendor}/drivers/src/at32f415_tmr.c"
     "${vendor}/drivers/src/at32f415_usart.c"
   )
-  set_target_properties(${image} PROPERTIES SUFFIX ".elf" LINK_DEPENDS "${linker};${stack}")
+  set_target_properties(
+    ${image} PROPERTIES SUFFIX ".elf" LINK_DEPENDS "${linker};${stack};${store_reserve}"
+  )
+  if(FALCONFOC_BOARD_PERSISTENCE)
+    # Opt-in: the default image keeps no Flash erase/program code.
+    target_sources(${image} PRIVATE src/foc_at32_store.c)
+    target_compile_definitions(${image} PRIVATE FALCONFOC_BOARD_PERSISTENCE=1)
+  endif()
   target_compile_definitions(${image} PRIVATE AT32F415KBU7_4 USE_STDPERIPH_DRIVER)
   target_include_directories(
     ${image} PRIVATE "${cmsis}/core_support" "${cmsis}/device_support" "${vendor}/drivers/inc"
@@ -187,6 +197,7 @@ if(CMAKE_CROSSCOMPILING)
     PRIVATE
     "-T${linker}"
     "-T${stack}"
+    "-T${store_reserve}"
     "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/${image}.map"
     -Wl,--print-memory-usage
   )
@@ -221,6 +232,9 @@ else()
   add_executable(test-foc-board-boot-default tests/test_foc_board_boot_default.c)
   target_link_libraries(test-foc-board-boot-default PRIVATE falconfoc-board1-supply-none)
   add_test(NAME test-foc-board-boot-default COMMAND test-foc-board-boot-default)
+  add_executable(test-foc-board-store tests/test_foc_board_store.c)
+  target_link_libraries(test-foc-board-store PRIVATE falconfoc-board1-supply-none)
+  add_test(NAME test-foc-board-store COMMAND test-foc-board-store)
   add_executable(test-foc-serial tests/test_foc_serial.c)
   target_link_libraries(test-foc-serial PRIVATE falconfoc-board1)
   add_test(NAME test-foc-serial COMMAND test-foc-serial)

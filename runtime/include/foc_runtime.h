@@ -729,6 +729,14 @@ int foc_runtime_publish_tuning(struct foc_runtime *runtime,
                                const struct foc_runtime_tuning *tuning,
                                uint32_t request_sequence);
 
+/**
+ * Apply a complete tuning to an initialized instance before any producer or
+ * IRQ uses it (boot restore). Same checks as foc_runtime_publish_tuning();
+ * on success the revision advances and the result reads APPLIED with
+ * request identity zero. ERR_CONFIG leaves the instance unchanged.
+ */
+int foc_runtime_apply_tuning(struct foc_runtime *runtime, const struct foc_runtime_tuning *tuning);
+
 /** Read the latest tuning result, or PENDING with the published request identity. */
 int foc_runtime_read_tuning_result(struct foc_runtime *runtime,
                                    struct foc_runtime_tuning_result *result);

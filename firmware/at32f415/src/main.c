@@ -19,6 +19,11 @@
 #include "foc_board_capture.h"
 #endif
 #include "foc_serial.h"
+#if defined(FALCONFOC_BOARD_PERSISTENCE)
+#include "foc_board_store.h"
+
+struct foc_board_store_driver foc_at32_store_driver(void);
+#endif
 
 /* Private Macros --------------------------------------------------------------- */
 
@@ -69,6 +74,9 @@ static uint16_t spi_word;
 static uint32_t spi_rx_us;
 static struct foc_uart_buffer uart;
 static struct foc_serial serial;
+#if defined(FALCONFOC_BOARD_PERSISTENCE)
+static struct foc_board_persistence persistence;
+#endif
 
 #if defined(FALCONFOC_BOARD_CAPTURE)
 /* These are the only SWD capture control words. No UART view or control
@@ -611,6 +619,13 @@ int main(void)
         foc_at32_timers_init();
         foc_serial_init(&serial, &runtime);
         foc_serial_attach_boot(&serial, foc_board_boot_serial_readback, &boot);
+#if defined(FALCONFOC_BOARD_PERSISTENCE)
+        /* Restore saved settings before any producer or IRQ starts. */
+        persistence.driver = foc_at32_store_driver();
+        foc_board_persistence_restore(&persistence, &boot, &runtime, &serial);
+        const struct foc_serial_persistence store = foc_board_persistence_serial(&persistence);
+        foc_serial_attach_persistence(&serial, &store);
+#endif
         foc_at32_uart_init();
         foc_at32_irq_enable();
 #if defined(FALCONFOC_RT02_TIMING_TRACE)

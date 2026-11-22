@@ -63,6 +63,8 @@ enum foc_protocol_message {
     FOC_MSG_PARAM_READ = 0x30,
     FOC_MSG_PARAM_WRITE = 0x31,
     FOC_MSG_PARAM_SAVE = 0x32,
+    /** Erase stored settings; the next boot uses the boot configuration (M2, appended). */
+    FOC_MSG_CONFIG_ERASE = 0x33,
     FOC_MSG_TELEMETRY_READ = 0x40,
     FOC_MSG_TELEMETRY_STREAM = 0x41,
 };

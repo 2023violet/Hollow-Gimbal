@@ -31,8 +31,10 @@ python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfo
 
 Scenarios (`--sil-scenario`): `current` (default), `velocity` and `position`
 (SET_MODE then tracking), `tuning` (controller writes while DISABLED, refused
-while RUNNING, readback and revision, then a tuned run) and `recover` (lease
-expiry, FAULT_CLEAR, re-run). Single requests use the same names:
+while RUNNING, readback and revision, then a tuned run), `recover` (lease
+expiry, FAULT_CLEAR, re-run) and `persist` (tune, `save`, power cycle on the same
+`--sil-flash` file, restored values and a tuned run, a damaged record refused,
+`erase-config`). Single requests use the same names:
 
 ```powershell
 python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw04-host/falconfoc-board1-sil.exe request set-mode --mode velocity

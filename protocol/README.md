@@ -91,7 +91,8 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 21 | FAULT_CLEAR | Empty | ACCEPTED only for isolated command-timeout recovery |
 | 30 | PARAM_READ | ID u16 | 18-byte typed parameter |
 | 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
-| 32 | PARAM_SAVE | Empty | NOT_SUPPORTED |
+| 32 | PARAM_SAVE | Empty | APPLIED + stored record sequence u32 (5 bytes); NOT_SUPPORTED on images without storage |
+| 33 | CONFIG_ERASE | Empty | APPLIED; the next boot uses the boot configuration. NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
 
@@ -138,9 +139,10 @@ and sample validity cleared.
 Capability response bytes are result, protocol version, three firmware version
 bytes, algorithm mode bitmask, physical mode bitmask, and capability u16.
 Current values are protocol 1, firmware 0.1.0, algorithms 7, physical modes 0,
-and capabilities 63. Capability bits are output lock 0, RAM policy parameters 1,
-polling telemetry 2, UART transport 3, remote mode switch 4 and controller
-tuning 5. No persistence or calibration claim is set.
+and capabilities 63, or 127 when the image has persistent storage. Capability
+bits are output lock 0, RAM policy parameters 1, polling telemetry 2, UART
+transport 3, remote mode switch 4, controller tuning 5 and persistent settings
+6. No calibration claim is set.
 
 | Status offset | Type | Meaning |
 | --- | --- | --- |
@@ -229,7 +231,7 @@ Writes require a coherent DISABLED view with software inhibition acknowledged
 and no pending stop. The three writable policies (IDs 1–3) belong to Foreground
 and take effect together with their APPLIED response. Unknown IDs, incorrect
 types, NaN, Inf and range violations are rejected. Dirty means RAM changed
-since boot. A restart restores defaults; nothing is persisted.
+since the last boot or save. Without PARAM_SAVE a restart restores the boot or stored values.
 
 Controller tuning (IDs 64–74) belongs to H0. A write returns ACCEPTED with the
 requested value once the complete candidate (the live tuning with that one field
@@ -240,6 +242,25 @@ CANCELLED 4) for request ID 62; ID 60 and TELEMETRY bytes 71–74 carry the
 revision. A write while another is pending returns BUSY. The current limit may
 be lowered below its boot value but never raised above it; the q-current limit
 stays at or below the current limit.
+
+### Persistent settings
+
+PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
+pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74) and the
+RAM policies (IDs 1–3) in one record bound to the effective motor configuration
+(IDs 32, 16, 17, 38–42). At boot, before any interrupt, a stored record is
+applied only when that configuration is identical and every value passes the
+same checks as a UART write; otherwise the boot configuration stays in use.
+Two slots and a separately programmed commit word keep the previous record
+when a save is interrupted. A successful save clears the dirty flag.
+
+| ID | Readback | Values |
+| --- | --- | --- |
+| 48 | Boot outcome | 0 unavailable (no storage), 1 empty, 2 loaded, 3 invalid record, 4 identity mismatch, 5 value rejected, 6 I/O error |
+| 49 | Applied record sequence | 0 when none was applied |
+| 50 | Newest stored record sequence | 0 when storage is erased |
+
+### Controller tuning
 
 | ID | Parameter | Type and unit | Range / Board1 initial |
 | --- | --- | --- | --- |

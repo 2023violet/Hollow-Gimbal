@@ -2,7 +2,8 @@
 # suite<TAB>test. Derived from the NEXT-FW-INTEG-01 final run (122 per toolchain)
 # plus test-foc-capture-boot-import (01R item A) and test-foc-adc-candidate (FW-ADC-01
 # Capture -> ADC candidate -> isolated Runtime) and test-foc-board1-sil (M0 Board1 SIL:
-# production Board1 path against a virtual motor over UART). Any change must be explained here.
+# production Board1 path against a virtual motor over UART) and test-foc-board-store (M2
+# persistent settings record, torn saves, boot restore). Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
 calibration	test-foc-calibration
@@ -53,6 +54,7 @@ firmware-at32f415	test-foc-board-boot
 firmware-at32f415	test-foc-board-boot-default
 firmware-at32f415	test-foc-board-capture
 firmware-at32f415	test-foc-board-config
+firmware-at32f415	test-foc-board-store
 firmware-at32f415	test-foc-board1
 firmware-at32f415	test-foc-board1-sil
 firmware-at32f415	test-foc-capture-boot-import

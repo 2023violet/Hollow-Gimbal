@@ -55,6 +55,30 @@ struct foc_serial_boot_readback {
 typedef bool (*foc_serial_boot_reader)(const void *context,
                                        struct foc_serial_boot_readback *readback);
 
+struct foc_serial;
+
+/** Persistent-storage outcome exposed through read-only PARAM_READ IDs 48–50. */
+struct foc_serial_persistence_view {
+    /** Boot outcome: 0 unavailable, 1 empty, 2 loaded, 3 invalid record,
+     * 4 identity mismatch, 5 value rejected, 6 I/O error. */
+    uint32_t state;
+    /** Sequence of the record applied at boot, zero when none. */
+    uint32_t loaded_sequence;
+    /** Sequence of the newest committed record, zero when storage is erased. */
+    uint32_t stored_sequence;
+};
+
+/** Optional storage owner. save and erase return a FOC_PROTO_* result code. */
+struct foc_serial_persistence {
+    void *context;
+    int (*save)(void *context,
+                struct foc_serial *serial,
+                struct foc_runtime *runtime,
+                uint32_t *sequence);
+    int (*erase)(void *context);
+    bool (*read)(const void *context, struct foc_serial_persistence_view *view);
+};
+
 /** Fixed UART queue depth and default number of bytes examined per poll. */
 enum foc_serial_limits {
     FOC_UART_RX_CAPACITY = 256,
@@ -136,6 +160,8 @@ struct foc_serial {
     /** Optional read-only startup readback source and its context. */
     foc_serial_boot_reader boot_reader;
     const void *boot_context;
+    /** Optional persistent storage; PARAM_SAVE and CONFIG_ERASE are NOT_SUPPORTED without it. */
+    struct foc_serial_persistence persistence;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -167,6 +193,10 @@ void foc_serial_init_with_policy(struct foc_serial *serial,
 void foc_serial_attach_boot(struct foc_serial *serial,
                             foc_serial_boot_reader reader,
                             const void *context);
+
+/** Attach persistent storage before receiving bytes. */
+void foc_serial_attach_persistence(struct foc_serial *serial,
+                                   const struct foc_serial_persistence *persistence);
 
 /** Read the Runtime lifecycle result associated with the latest Host request. */
 int foc_serial_read_lifecycle_result(const struct foc_serial *serial,

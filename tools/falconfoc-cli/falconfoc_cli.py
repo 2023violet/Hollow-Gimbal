@@ -22,7 +22,7 @@ MESSAGES = {
     "stop": 0x11, "arm": 0x12, "start": 0x13, "set-mode": 0x14, "lifecycle": 0x15,
     "fault": 0x20,
     "clear": 0x21, "param-read": 0x30, "param-write": 0x31,
-    "save": 0x32, "telemetry": 0x40, "stream": 0x41,
+    "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
@@ -38,12 +38,15 @@ PARAMETERS = {
     "pole-pairs": 16, "electrical-offset": 17, "velocity-limit-ro": 18,
     "boot-configuration": 32, "calibration-input": 33, "phase-a-offset": 38,
     "phase-b-offset": 39, "phase-c-offset": 40, "measurement-qualified": 45,
+    "store-state": 48, "store-loaded-sequence": 49, "store-stored-sequence": 50,
     "tuning-revision": 60, "tuning-result": 61, "tuning-sequence": 62,
     "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
     "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
     "velocity-limit": 72, "iq-limit": 73, "command-lease-us": 74,
 }
 PARAMETER_TYPES = {74: "u32", 1: "u32"}
+STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
+                "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
 HEADER = struct.Struct("<2sBBBBIIH")
 
@@ -252,6 +255,10 @@ def describe(frame):
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
         result["publication_sequence"] = struct.unpack_from("<I", body, 1)[0]
+    elif frame.type == 0x32 and body[0] == 2:
+        if len(body) != 5:
+            raise ValueError("BAD_RESPONSE")
+        result["stored_sequence"] = struct.unpack_from("<I", body, 1)[0]
     elif frame.type in (0x12, 0x13, 0x14) and body[0] == 1:
         # Earlier virtual targets answered ARM/START with the result byte only.
         if len(body) == 1 and frame.type != 0x14:
@@ -786,7 +793,7 @@ def run_virtual_demo(
 
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
-SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover")
+SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1057,6 +1064,94 @@ def run_sil_demo(client, transport, reference=None, duration_us=None, json_path=
     return summary
 
 
+def run_sil_persist(simulator, base_arguments, flash_path, json_path=None):
+    """Board1 SIL persistence over the V1 wire across simulated power cycles: each boot is
+    a new device process on the same flash file. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    if flash_path.exists():
+        flash_path.unlink()
+    checks, boots = {}, []
+
+    def boot(note):
+        transport = SimulatorTransport(simulator, list(base_arguments) + ["--flash", str(flash_path)])
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        record = {"boot": note, "store_state": STORE_STATES[session.read("store-state")],
+                  "loaded_sequence": session.read("store-loaded-sequence"),
+                  "stored_sequence": session.read("store-stored-sequence"),
+                  "current_kp_q": session.read("current-kp-q"),
+                  "command_lease_us": session.read("command-lease-us"),
+                  "rx_budget": session.read("rx-budget"),
+                  "capabilities": session.call("capability", quiet=True)["capabilities"]}
+        boots.append(record)
+        print(json.dumps(record, allow_nan=False))
+        return transport, session, record
+
+    transport, session, first = boot("fresh")
+    checks["fresh_storage_empty"] = first["store_state"] == "EMPTY" and first["stored_sequence"] == 0
+    checks["persistence_capability"] = bool(first["capabilities"] & 64)
+    checks["tuning_applied"] = (session.tune("current-kp-q", 2.2) == "APPLIED"
+                                and session.tune("command-lease-us", 30000) == "APPLIED")
+    rx = session.call("param-write", parameter_write(PARAMETERS["rx-budget"], "u32", 16))
+    checks["ram_policy_applied"] = rx["result"] == "APPLIED"
+    saved = session.call("save")
+    checks["save_applied"] = saved["result"] == "APPLIED" and saved.get("stored_sequence") == 1
+    payload = setpoint("current", 0.0, 0.4)
+    session.lifecycle("arm", SIL_STATE_ARMED, payload)
+    session.lifecycle("start", SIL_STATE_RUNNING, payload)
+    checks["save_refused_while_running"] = session.call("save")["result"] == "BAD_STATE"
+    checks["erase_refused_while_running"] = session.call("erase-config")["result"] == "BAD_STATE"
+    session.stop()
+    transport.__exit__()
+
+    transport, session, second = boot("after-save")
+    checks["restored_after_power_cycle"] = (
+        second["store_state"] == "LOADED" and second["loaded_sequence"] == 1
+        and abs(second["current_kp_q"] - 2.2) < 1e-6 and second["command_lease_us"] == 30000
+        and second["rx_budget"] == 16)
+    steps, samples = session.run("current", 0.4, 20000)
+    metrics, tracking = _tracking(session, "current", 0.4, 20000, samples, steps)
+    checks.update({f"restored_{key}": value for key, value in tracking.items()})
+    session.stop()
+    saved = session.call("save")
+    checks["second_save_advances_sequence"] = (saved["result"] == "APPLIED"
+                                               and saved.get("stored_sequence") == 2)
+    transport.__exit__()
+
+    # Damage both slots: the device must refuse them and keep the boot configuration.
+    image = bytearray(flash_path.read_bytes())
+    slot_bytes = len(image) // 2
+    for slot in (0, 1):
+        image[slot * slot_bytes + 60] ^= 0x01
+    flash_path.write_bytes(bytes(image))
+    transport, session, third = boot("damaged")
+    checks["damaged_record_refused"] = (third["store_state"] == "INVALID_RECORD"
+                                        and abs(third["current_kp_q"] - 1.35) < 1e-6
+                                        and third["command_lease_us"] == 2500)
+    checks["erase_applied"] = session.call("erase-config")["result"] == "APPLIED"
+    transport.__exit__()
+
+    transport, session, fourth = boot("after-erase")
+    checks["erased_storage_empty"] = (fourth["store_state"] == "EMPTY"
+                                      and fourth["stored_sequence"] == 0
+                                      and abs(fourth["current_kp_q"] - 1.35) < 1e-6)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-persist",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "boots": boots, "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -1186,6 +1281,8 @@ def main():
                         help="sil-demo: virtual/wall time ratio of the free-running device")
     parser.add_argument("--sil-scenario", choices=SIL_SCENARIOS, default="current",
                         help="sil-demo: product scenario to run")
+    parser.add_argument("--sil-flash", default=None,
+                        help="sil-demo persist: flash image file (recreated)")
     parser.add_argument("--sil-lockstep-us", type=int, default=0,
                         help="sil-demo: advance this much virtual time per frame instead")
     parser.add_argument("--duration-us", type=int, default=None)
@@ -1334,6 +1431,12 @@ def main():
                     ["--lockstep-us", str(args.sil_lockstep_us)] if args.sil_lockstep_us > 0
                     else ["--speed", str(args.sil_speed)]
                 )
+            if args.action == "sil-demo" and args.sil_scenario == "persist":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-persist-flash.bin"))
+                summary = run_sil_persist(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             transport = (
                 SimulatorTransport(os.path.abspath(args.simulator), simulator_arguments)
                 if args.simulator

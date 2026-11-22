@@ -41,6 +41,7 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_PARAM_READ:
     case FOC_MSG_PARAM_WRITE:
     case FOC_MSG_PARAM_SAVE:
+    case FOC_MSG_CONFIG_ERASE:
     case FOC_MSG_TELEMETRY_READ:
     case FOC_MSG_TELEMETRY_STREAM:
         return true;

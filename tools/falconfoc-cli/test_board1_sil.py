@@ -181,6 +181,16 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_frame(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_trajectory_acceleration_limits_and_load_hold(self):
+        """Acceleration and deceleration shape velocity and position references, a position
+        move is a trapezoid on the planned reference, a constant load is held without a
+        position integrator, and the limits survive a power cycle and reset on erase."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_trajectory(SIL, ["--lockstep-us", "500"],
+                                             Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

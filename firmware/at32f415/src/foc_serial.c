@@ -90,6 +90,9 @@ enum {
     PARAM_PROFILE_MAX_SPEED = 98,
     PARAM_PROFILE_GEAR_RATIO = 99,
     PARAM_CURRENT_BANDWIDTH = 104,
+    /* Trajectory acceleration and deceleration (contract 3.4), rotor-side, 0 unlimited. */
+    PARAM_ACCEL = 106,
+    PARAM_DECEL = 107,
     /* Motor-protection thresholds, writable while DISABLED; applied by H0. */
     PARAM_TRIP_OVERCURRENT = 112,
     PARAM_TRIP_OVERVOLTAGE = 113,
@@ -122,6 +125,7 @@ enum {
     UNIT_HERTZ = 17,
     UNIT_VOLT = 18,
     UNIT_MILLISECOND = 20,
+    UNIT_RAD_S2 = 21,
     /* Direction codes on the wire: none, +1 and -1. */
     DIRECTION_NONE = 0,
     DIRECTION_POSITIVE = 1,
@@ -379,8 +383,9 @@ static bool foc_serial_tuning_parameter(
     const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
         (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
         id == PARAM_CURRENT_BANDWIDTH;
+    const bool ramp = id == PARAM_ACCEL || id == PARAM_DECEL;
     if ((trip ? !runtime->config.trip_enabled
-              : !profile && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
+              : !profile && !ramp && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
         foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
         foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) != FOC_RUNTIME_OK) {
         return false;
@@ -454,6 +459,17 @@ static bool foc_serial_tuning_parameter(
         return true;
     case PARAM_VELOCITY_REFERENCE_LIMIT:
         foc_serial_tuning_float(parameter, tuning.velocity_limit_rad_s, 0.1f, 1000.0f, UNIT_RAD_S);
+        return true;
+    case PARAM_ACCEL:
+    case PARAM_DECEL:
+        /* 0 is unlimited; H0 refuses values between 0 and FOC_RUNTIME_RAMP_MIN_RAD_S2. */
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_ACCEL ? tuning.accel_rad_s2 : tuning.decel_rad_s2,
+            0.0f,
+            FOC_RUNTIME_RAMP_MAX_RAD_S2,
+            UNIT_RAD_S2
+        );
         return true;
     case PARAM_IQ_LIMIT:
         foc_serial_tuning_float(
@@ -640,6 +656,12 @@ static int foc_serial_tuning_write(
         break;
     case PARAM_POSITION_KP:
         tuning.position_kp_per_s = floating;
+        break;
+    case PARAM_ACCEL:
+        tuning.accel_rad_s2 = floating;
+        break;
+    case PARAM_DECEL:
+        tuning.decel_rad_s2 = floating;
         break;
     case PARAM_VELOCITY_REFERENCE_LIMIT:
         tuning.velocity_limit_rad_s = floating;

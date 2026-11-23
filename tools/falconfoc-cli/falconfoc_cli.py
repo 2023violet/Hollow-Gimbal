@@ -54,6 +54,7 @@ PARAMETERS = {
     "model-rs": 80, "model-ld": 81, "model-lq": 82, "model-flux": 83, "model-kt": 84,
     "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
     "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
+    "accel": 106, "decel": 107,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
@@ -909,7 +910,8 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame")
+                 "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
+                 "trajectory")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2006,6 +2008,167 @@ def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad
     return summary
 
 
+def run_sil_trajectory(simulator, base_arguments, flash_path, json_path=None):
+    """Trajectory shaping (parameter contract 3.4, P1 step B): acceleration (ID 106) and
+    deceleration (ID 107) shape velocity references; in position mode the planner runs a
+    trapezoid on its own reference and the position loop tracks it; under a constant
+    load the cascade holds position without a position integrator (ID 105 dropped);
+    values outside the contract are refused; the limits survive a power cycle and return
+    to 0 (unlimited) on CONFIG_ERASE. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    accel, decel = 20.0, 40.0
+    # Velocity PI for the SIL plant (J 0.002 kg*m^2, Kt 0.105 N*m/A) at 60 rad/s, as
+    # step C derives from J: Kp = J*w/Kt, Ki = Kp*w/4. The Board1 defaults (0.18, 1.4)
+    # give about 9 rad/s, too slow to follow a 40 rad/s^2 plan without visible lag.
+    velocity_gains = (("velocity-kp", 1.14), ("velocity-ki", 17.0))
+
+    def boot(extra=()):
+        transport = SimulatorTransport(simulator, list(base_arguments) + ["--flash", str(flash_path)]
+                                       + list(extra))
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def profile(session, mode, segments):
+        """ARM, START, then stream each (target, duration) segment; telemetry samples."""
+        first = setpoint(mode, segments[0][0])
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode=mode)
+        steps = {"arm": session.lifecycle("arm", SIL_STATE_ARMED, first)}
+        steps["start"] = (session.lifecycle("start", SIL_STATE_RUNNING, first)
+                          if steps["arm"] == "APPLIED" else "SKIPPED")
+        samples, started = [], None
+        for index, (target, duration_us) in enumerate(segments):
+            payload, began = setpoint(mode, target), None
+            while steps["start"] == "APPLIED":
+                session.call("setpoint", payload, quiet=True)
+                telemetry = session.call("telemetry", quiet=True)
+                now = telemetry["uptime_us_mod32"]
+                started = now if started is None else started
+                began = now if began is None else began
+                samples.append({"t": ((now - started) & 0xFFFFFFFF) * 1e-6, "segment": index,
+                                "position": telemetry["position_rad"],
+                                "velocity": telemetry["velocity_rad_s"], "iq": telemetry["iq_a"],
+                                "state": telemetry["state"], "faults": telemetry["faults"]})
+                if ((now - began) & 0xFFFFFFFF) >= duration_us or telemetry["state"] != SIL_STATE_RUNNING:
+                    break
+        status = session.status()
+        session.stop()
+        _wait_still(session)
+        return steps, samples, status
+
+    def first_time(samples, segment, predicate):
+        rows = [s for s in samples if s["segment"] == segment]
+        start = rows[0]["t"] if rows else 0.0
+        return next((s["t"] - start for s in rows if predicate(s)), None)
+
+    def ok(steps, status):
+        return steps == {"arm": "APPLIED", "start": "APPLIED"} and not status["fault_names"]
+
+    if flash_path.exists():
+        flash_path.unlink()
+    transport, session = boot()
+    checks["commissioned"] = commission(session.client) == "APPLIED"
+    checks["unlimited_by_default"] = session.read("accel") == 0.0 and session.read("decel") == 0.0
+    checks["gains_written"] = all(session.tune(name, value) == "APPLIED"
+                                  for name, value in velocity_gains)
+
+    # 1. Velocity without limits, then with them: 0 -> 10 rad/s -> 0.
+    segments = [(10.0, 800000), (0.0, 600000)]
+    steps, direct, status = profile(session, "velocity", segments)
+    metrics["direct_t50_s"] = first_time(direct, 0, lambda s: s["velocity"] >= 5.0)
+    checks["direct_runs"] = ok(steps, status)
+    checks["ramp_written"] = (session.tune("accel", accel) == "APPLIED"
+                              and session.tune("decel", decel) == "APPLIED")
+    steps, ramped, status = profile(session, "velocity", segments)
+    metrics["accel_t50_s"] = first_time(ramped, 0, lambda s: s["velocity"] >= 5.0)
+    metrics["decel_t50_s"] = first_time(ramped, 1, lambda s: s["velocity"] <= 5.0)
+    metrics["decel_t10_s"] = first_time(ramped, 1, lambda s: s["velocity"] <= 1.0)
+    # Planned: 5 rad/s at 20 rad/s² after 0.25 s; 10 -> 5 rad/s at 40 rad/s² in 0.125 s
+    # and 10 -> 1 rad/s in 0.225 s. The velocity loop adds a few ms of lag.
+    checks["velocity_accel_limited"] = (
+        ok(steps, status) and metrics["direct_t50_s"] is not None and metrics["direct_t50_s"] < 0.1
+        and metrics["accel_t50_s"] is not None and 0.2 < metrics["accel_t50_s"] < 0.32)
+    checks["velocity_decel_limited"] = (
+        metrics["decel_t50_s"] is not None and 0.1 < metrics["decel_t50_s"] < 0.17
+        and metrics["decel_t10_s"] is not None and 0.2 < metrics["decel_t10_s"] < 0.27)
+
+    # 2. Position: a 6 rad move is a trapezoid of 0.95 s (0.6 s up, 0.05 s at 12 rad/s,
+    # 0.3 s down). Without acceleration feedforward (step C, from J) the loop lags the plan
+    # and passes the target by a few hundredths of a radian before settling.
+    start = session.call("telemetry", quiet=True)["position_rad"]
+    target = start + 6.0
+    steps, moved, status = profile(session, "position", [(target, 2000000)])
+    reached = first_time(moved, 0, lambda s: abs(target - s["position"]) < 0.01)
+    half_speed = first_time(moved, 0, lambda s: s["velocity"] >= 6.0)
+    tail = moved[-len(moved) // 10:] if moved else []
+    metrics["position_move"] = {
+        "reached_s": reached, "half_speed_s": half_speed,
+        "peak_velocity": max((s["velocity"] for s in moved), default=None),
+        "overshoot_rad": max((s["position"] - target for s in moved), default=None),
+        "final_error_rad": (sum(abs(target - s["position"]) for s in tail) / len(tail)
+                            if tail else None)}
+    move = metrics["position_move"]
+    checks["position_trapezoid"] = (
+        ok(steps, status) and half_speed is not None and 0.2 < half_speed < 0.4
+        and reached is not None and 0.8 < reached < 1.2 and move["peak_velocity"] < 12.6
+        and move["overshoot_rad"] < 0.05 and move["final_error_rad"] < 0.002)
+
+    # 3. Refusals: inside (0, 0.1) and above the contract range.
+    checks["below_minimum_refused"] = session.tune("accel", 0.05) == "INVALID_ARGUMENT"
+    checks["above_maximum_refused"] = session.tune("decel", 200000.0) == "INVALID_ARGUMENT"
+    checks["refusal_keeps_values"] = (session.read("accel") == accel
+                                      and session.read("decel") == decel)
+    checks["saved"] = session.call("save")["result"] == "APPLIED"
+    transport.__exit__()
+
+    # 4. Power cycle: the limits restore; CONFIG_ERASE returns them to unlimited.
+    transport, session = boot()
+    checks["ramp_restored"] = session.read("accel") == accel and session.read("decel") == decel
+    erased = "BUSY"
+    for _ in range(4000):
+        erased = session.call("erase-config", quiet=True)["result"]
+        if erased != "BUSY":
+            break
+        session.status()
+    checks["erase_resets_ramp"] = (erased == "APPLIED" and session.read("accel") == 0.0
+                                   and session.read("decel") == 0.0)
+    transport.__exit__()
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 5. A constant 0.04 N*m load from 3 s: position P + velocity PI holds without error.
+    transport, session = boot(["--load-torque-nm", "0.04,3000000"])
+    commission(session.client)
+    hold = session.call("telemetry", quiet=True)["position_rad"]
+    steps, held, status = profile(session, "position", [(hold, 5000000)])
+    tail = held[-len(held) // 10:] if held else []
+    metrics["load_hold"] = {
+        "tail_error_rad": (sum(hold - s["position"] for s in tail) / len(tail) if tail else None),
+        "tail_iq_a": (sum(s["iq"] for s in tail) / len(tail) if tail else None),
+        "max_deflection_rad": max((abs(hold - s["position"]) for s in held), default=None)}
+    load = metrics["load_hold"]
+    checks["load_hold_without_position_integrator"] = (
+        ok(steps, status) and load["tail_iq_a"] is not None and load["tail_iq_a"] > 0.2
+        and abs(load["tail_error_rad"]) < 0.001)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-trajectory",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_frame(simulator, base_arguments, flash_path, json_path=None):
     """Output frame (parameter contract 3.7, P1 step A): host positions and speeds are
     output-side through the gear ratio (ID 99) and relative to the zero offset (ID 124);
@@ -2562,6 +2725,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "trajectory":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-trajectory-flash.bin"))
+                summary = run_sil_trajectory(os.path.abspath(args.simulator), simulator_arguments,
+                                             flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "frame":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-frame-flash.bin"))

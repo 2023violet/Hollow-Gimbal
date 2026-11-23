@@ -214,6 +214,10 @@ struct foc_runtime_tuning {
     float velocity_limit_rad_s;
     /** Outer-loop q current limit in A, at most current_limit_a. */
     float iq_limit_a;
+    /** Planned acceleration and deceleration in rotor rad/s²: 0 unlimited, otherwise
+     * FOC_RUNTIME_RAMP_MIN/MAX. Either nonzero shapes velocity and position references. */
+    float accel_rad_s2;
+    float decel_rad_s2;
     /** Command and lifecycle freshness lease in µs. */
     uint32_t command_timeout_us;
     /** Protection thresholds, checked only when the instance enables protection. */
@@ -221,6 +225,12 @@ struct foc_runtime_tuning {
     /** Motor profile; all zero preserves an instance without one. */
     struct foc_runtime_profile profile;
 };
+
+/** Tuning acceleration/deceleration bounds (IDs 106/107) in rotor rad/s². 0 selects
+ * UNLIMITED, which lies above any value a tuning may select. */
+#define FOC_RUNTIME_RAMP_MIN_RAD_S2       0.1f
+#define FOC_RUNTIME_RAMP_MAX_RAD_S2       100000.0f
+#define FOC_RUNTIME_RAMP_UNLIMITED_RAD_S2 1.0e6f
 
 /** Inclusive bounds of the command lease a tuning candidate may select, in µs. */
 enum foc_runtime_tuning_limits {
@@ -415,6 +425,11 @@ struct foc_runtime_motion_config {
     float iq_limit_a;
     /** Optional velocity/position trajectory shaping, disabled by default. */
     struct foc_trajectory_config trajectory;
+    /** Tuning acceleration/deceleration limits in rotor rad/s², 0 unlimited. Either one
+     * nonzero derives the trajectory policy (speed limit from the position policy);
+     * both zero leave an explicit trajectory policy as configured. */
+    float accel_rad_s2;
+    float decel_rad_s2;
     /** Optional impedance policy. Zero initialization keeps the mode disabled. */
     struct foc_runtime_impedance_config impedance;
     /** Optional software position boundaries. The frame also identifies following feedback. */

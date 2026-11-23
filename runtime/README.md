@@ -65,10 +65,16 @@ delay, acceleration-model error, or hardware ISR timing.
 
 `foc_trajectory` is an optional H1 reference shaper placed before the existing
 velocity PI. In VELOCITY mode it clamps the command and limits each reference
-change by `max_accel_rad_s2 * dt_s`. In POSITION mode it uses continuous
-mechanical position and a braking-speed bound `sqrt(2 * a_max * abs(error))`,
-then applies the same acceleration limiter. It does not create another PI or
-replace the existing position P and velocity PI when disabled.
+change by the acceleration (speeding up) or deceleration (slowing down). In
+POSITION mode it runs `foc_trajectory_track_step` on the planned reference and
+the speed reference is the planned velocity plus the position P on the planned
+position minus the measurement, clamped to the speed limit. It does not create
+another PI or replace the existing position P and velocity PI when disabled.
+
+Tuning IDs 106/107 (`accel_rad_s2`, `decel_rad_s2`, rotor-side, 0 unlimited)
+derive the policy: either nonzero enables it with the position speed limit, both
+zero disable it; a configuration that sets none keeps an explicit `trajectory`
+policy as given.
 
 The planner context is copied for each H1 trial. Its committed state follows
 the same `accepted_outer_seq` and `motion_session` boundary as the velocity PI:

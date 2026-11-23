@@ -416,11 +416,12 @@ pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
 motor profile (IDs 80–83, 85, 86, 96–99, 104), the protection thresholds (IDs
 112–118), the RAM policies (IDs 1–3), the output zero (ID 124) and, when one is
 applied, the on-MCU calibration result (ADC zero, direction, pole pairs,
-electrical offset) in one record (format 4, 216 bytes: the format-2 bytes 0–135,
-then the profile at 136–179, the thresholds at 180–207, the output zero at 208
-and the CRC at 212). Format-3 (212 bytes, no output zero), format-2 (140 bytes)
-and format-1 records still load; formats 1 and 2 keep the boot profile and
-thresholds. The
+electrical offset) in one record (format 5, 224 bytes: the format-2 bytes 0–135,
+then the profile at 136–179, the thresholds at 180–207, the output zero at 208,
+acceleration and deceleration (IDs 106/107) at 212/216 and the CRC at 220).
+Format-4 (216 bytes, no acceleration limits), format-3 (212 bytes, no output
+zero), format-2 (140 bytes) and format-1 records still load; formats 1 and 2 keep
+the boot profile and thresholds. The
 record is bound to the image's boot motor configuration. A restore applies the
 stored PI as saved; it does not re-derive it from the model. At boot, before any interrupt, a stored
 record is applied only when that boot configuration is identical and every
@@ -474,6 +475,16 @@ identifies 1–30 pole pairs; COMMUTATION_WRITE accepts 1–64.
 | 98 | Maximum mechanical speed | f32 rad/s | 0 unset, or 0.1–1000 / 0 |
 | 99 | Gear ratio (rotor turns per output turn): the output frame below | f32 | 1–1000 / 1 |
 | 104 | Current-loop bandwidth | f32 Hz (unit 17) | 10–235 / 150 |
+| 106 / 107 | Acceleration / deceleration, rotor-side, 0 unlimited | f32 rad/s² (unit 21) | 0, or 0.1–100000 / 0 |
+
+IDs 106/107 shape the outer references: speeding up is limited by the
+acceleration, slowing down and reversing by the deceleration, and either nonzero
+enables the planner (both 0, the boot value, leave references unshaped). In
+POSITION mode the planner runs a trapezoid on its own planned position and
+velocity, and the speed reference is the planned velocity plus ID 71 times the
+planned position minus the measurement. A value between 0 and 0.1 is
+INVALID_ARGUMENT. There is no position integrator: the velocity integral (ID 70)
+already removes the steady position error under a constant load.
 
 The profile travels with the tuning: a write publishes one complete candidate that
 H0 applies like IDs 64–74 (ID 61 is the receipt). Writing a profile field runs the

@@ -39,6 +39,10 @@ EXPLAINED_REMOVALS = {
     "foc_serial_capability":
         "M2: it now reads the adapter's persistence binding (capability bit 6) and the "
         "compiler inlines it into its two callers, HELLO and CAPABILITY_READ",
+    "foc_trajectory_position_step":
+        "P1 step B: Runtime POSITION mode tracks the planned reference "
+        "(foc_trajectory_track_step); the measured-position planner stays for Host "
+        "callers and is garbage-collected from the ARM images",
 }
 
 # M0 Board1 SIL added an optional output backend to foc_board_output_submit. The ARM

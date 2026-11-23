@@ -58,10 +58,16 @@ and the same large-input precision limitations.
 
 `include/foc_trajectory.h` provides a small Float32 reference generator for
 the existing velocity PI loop. It can limit a velocity target by
-`max_accel_rad_s2 * dt_s` and `max_velocity_rad_s`, or generate a point-to-point
-velocity target from continuous mechanical position using
-`sqrt(2 * max_accel * abs(target - measured))`. It never wraps multi-turn
-mechanical position and it does not own sensors, clocks, Safety, or output.
+`max_velocity_rad_s`, the acceleration when speeding up and the deceleration
+(`max_decel_rad_s2`, 0 uses the acceleration) when slowing down or reversing, or
+generate a point-to-point velocity target from continuous mechanical position
+using `sqrt(2 * max_accel * abs(target - measured))`. `foc_trajectory_track_step`
+instead plans on its own reference: seeded once from the measurement, it
+integrates a planned position and velocity toward the target (a trapezoid, or a
+triangle for short moves) with the discrete braking bound
+`v*dt + v²/(2*decel) = distance`, and returns both so the caller closes the
+position loop around them. It never wraps multi-turn mechanical position and it
+does not own sensors, clocks, Safety, or output.
 
 The context is caller-owned and copyable for a trial. Runtime commits the trial
 only after the corresponding downstream UPDATE is accepted. Invalid input

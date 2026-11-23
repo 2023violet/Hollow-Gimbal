@@ -194,10 +194,103 @@ static int test_disabled_compatibility(void)
 
 /* Public Functions ------------------------------------------------------------- */
 
+/* Speeding up follows the acceleration; slowing down and reversing the deceleration. */
+static int test_asymmetric_velocity(void)
+{
+    struct foc_trajectory_config settings = config();
+    settings.max_accel_rad_s2 = 2.0f;
+    settings.max_decel_rad_s2 = 8.0f;
+    struct foc_trajectory_context context;
+    struct foc_trajectory_output output;
+    TEST_ASSERT(foc_trajectory_init(&context, &settings) == FOC_TRAJECTORY_STATUS_OK);
+    TEST_ASSERT(foc_trajectory_reset(&context, 0.0f) == FOC_TRAJECTORY_STATUS_OK);
+    TEST_ASSERT(foc_trajectory_velocity_step(&context, 4.0f, 0.25f, &output) == 0);
+    TEST_ASSERT(fabsf(output.velocity_ref_rad_s - 0.5f) < 1e-6f);
+    for (int i = 0; i < 10; ++i) {
+        TEST_ASSERT(foc_trajectory_velocity_step(&context, 4.0f, 0.25f, &output) == 0);
+    }
+    TEST_ASSERT(fabsf(output.velocity_ref_rad_s - 4.0f) < 1e-6f);
+    TEST_ASSERT(foc_trajectory_velocity_step(&context, 0.0f, 0.25f, &output) == 0);
+    TEST_ASSERT(fabsf(output.velocity_ref_rad_s - 2.0f) < 1e-6f);
+    TEST_ASSERT(foc_trajectory_velocity_step(&context, -4.0f, 0.25f, &output) == 0);
+    TEST_ASSERT(fabsf(output.velocity_ref_rad_s) < 1e-6f);
+    /* From standstill the reverse direction speeds up again at the acceleration. */
+    TEST_ASSERT(foc_trajectory_velocity_step(&context, -4.0f, 0.25f, &output) == 0);
+    TEST_ASSERT(fabsf(output.velocity_ref_rad_s + 0.5f) < 1e-6f);
+    settings.max_decel_rad_s2 = -1.0f;
+    TEST_ASSERT(foc_trajectory_init(&context, &settings) == FOC_TRAJECTORY_STATUS_ERR_CONFIG);
+    return 0;
+}
+
+/* The tracking planner runs a trapezoid on its own reference and stops at the target. */
+static int test_tracking_profile(void)
+{
+    struct foc_trajectory_config settings = config();
+    settings.max_velocity_rad_s = 2.0f;
+    settings.max_accel_rad_s2 = 4.0f;
+    settings.max_decel_rad_s2 = 8.0f;
+    settings.max_dt_s = 0.002f;
+    struct foc_trajectory_context context;
+    struct foc_trajectory_output output;
+    TEST_ASSERT(foc_trajectory_init(&context, &settings) == FOC_TRAJECTORY_STATUS_OK);
+    TEST_ASSERT(foc_trajectory_reset(&context, 0.0f) == FOC_TRAJECTORY_STATUS_OK);
+    /* The first step seeds from the measurement; later measurements are ignored. */
+    TEST_ASSERT(foc_trajectory_track_step(&context, 10.0f, 7.0f, 0.001f, &output) == 0);
+    TEST_ASSERT(output.position_valid && fabsf(output.position_ref_rad - 7.0f) < 1e-5f);
+    float previous = output.velocity_ref_rad_s;
+    float peak = 0.0f;
+    float max_rise = 0.0f;
+    float max_fall = 0.0f;
+    float last_position = output.position_ref_rad;
+    int steps = 0;
+    while (steps < 10000) {
+        TEST_ASSERT(foc_trajectory_track_step(&context, 10.0f, -100.0f, 0.001f, &output) == 0);
+        const float change = (output.velocity_ref_rad_s - previous) / 0.001f;
+        max_rise = fmaxf(max_rise, change);
+        max_fall = fmaxf(max_fall, -change);
+        peak = fmaxf(peak, output.velocity_ref_rad_s);
+        TEST_ASSERT(output.position_ref_rad <= 10.0f + 1e-4f);
+        TEST_ASSERT(output.position_ref_rad >= last_position - 1e-4f);
+        last_position = output.position_ref_rad;
+        previous = output.velocity_ref_rad_s;
+        ++steps;
+        if (output.position_ref_rad == 10.0f && output.velocity_ref_rad_s == 0.0f) {
+            break;
+        }
+    }
+    TEST_ASSERT(output.position_ref_rad == 10.0f && output.velocity_ref_rad_s == 0.0f);
+    TEST_ASSERT(fabsf(peak - 2.0f) < 1e-4f);
+    TEST_ASSERT(max_rise <= 4.0f + 1e-2f && max_fall <= 8.0f + 1e-2f);
+    /* Trapezoid time: 0.5 s up, 0.25 s down, (3 - 0.5 - 0.25) / 2 = 1.125 s cruise. */
+    TEST_ASSERT(steps > 1850 && steps < 1900);
+    /* A target change mid-move reverses through the deceleration. */
+    TEST_ASSERT(foc_trajectory_reset(&context, 0.0f) == FOC_TRAJECTORY_STATUS_OK);
+    for (int i = 0; i < 600; ++i) {
+        TEST_ASSERT(foc_trajectory_track_step(&context, 5.0f, 0.0f, 0.001f, &output) == 0);
+    }
+    TEST_ASSERT(output.velocity_ref_rad_s > 1.9f);
+    previous = output.velocity_ref_rad_s;
+    for (int i = 0; i < 4000; ++i) {
+        TEST_ASSERT(foc_trajectory_track_step(&context, -1.0f, 0.0f, 0.001f, &output) == 0);
+        TEST_ASSERT(fabsf(output.velocity_ref_rad_s - previous) <= 8.0f * 0.001f + 1e-5f);
+        previous = output.velocity_ref_rad_s;
+    }
+    TEST_ASSERT(output.position_ref_rad == -1.0f && output.velocity_ref_rad_s == 0.0f);
+    /* A disabled planner refuses tracking. */
+    settings.enabled = false;
+    TEST_ASSERT(foc_trajectory_init(&context, &settings) == FOC_TRAJECTORY_STATUS_OK);
+    TEST_ASSERT(
+        foc_trajectory_track_step(&context, 1.0f, 0.0f, 0.001f, &output) ==
+        FOC_TRAJECTORY_STATUS_ERR_CONFIG
+    );
+    return 0;
+}
+
 int main(void)
 {
     return test_velocity_limits() || test_position_braking_and_multiturn() ||
-        test_invalid_and_lifecycle() || test_disabled_compatibility();
+        test_invalid_and_lifecycle() || test_disabled_compatibility() ||
+        test_asymmetric_velocity() || test_tracking_profile();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

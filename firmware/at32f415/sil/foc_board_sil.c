@@ -96,6 +96,10 @@ struct sil_plant {
     bool pending_valid;
     uint32_t applied_updates;
     uint32_t inhibits;
+    /* Constant external load torque from plant time load_on_us (0 never). */
+    double load_torque_nm;
+    uint32_t load_on_us;
+    bool load_applied;
 };
 
 /* Two flash slots of erased 0xFF bytes; optionally mirrored to a file so that
@@ -163,6 +167,13 @@ static uint32_t sil_slot_index(uint32_t now_us)
 static int sil_plant_advance(struct sil_plant *plant, uint32_t now_us)
 {
     while (plant->time_us < now_us) {
+        if (!plant->load_applied && plant->load_torque_nm != 0.0 &&
+            plant->time_us >= plant->load_on_us) {
+            if (foc_virtual_motor_set_load(&plant->motor, plant->load_torque_nm) != 0) {
+                return -1;
+            }
+            plant->load_applied = true;
+        }
         uint32_t step = now_us - plant->time_us;
         if (step > SIL_PLANT_STEP_US) {
             step = SIL_PLANT_STEP_US;
@@ -658,7 +669,8 @@ static void sil_usage(const char *name)
         "          [--motor-rs-ohm r] "
         "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
-        "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n",
+        "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
+        "          [--load-torque-nm t[,on_us]]\n",
         name
     );
 }
@@ -753,6 +765,8 @@ int main(int argc, char **argv)
     uint32_t duration_us = 0U;
     float offsets[3] = {2048.0f, 2048.0f, 2048.0f};
     float vbus_v = 12.0f;
+    double load_torque_nm = 0.0;
+    uint32_t load_on_us = 0U;
     const char *flash_path = NULL;
     struct foc_virtual_motor_params motor = sil_default_motor();
     device.trace_us = 500U;
@@ -805,6 +819,12 @@ int main(int argc, char **argv)
             motor.inertia_kg_m2 = strtod(value, NULL);
         } else if (strcmp(option, "--motor-damping") == 0) {
             motor.damping_nm_s = strtod(value, NULL);
+        } else if (strcmp(option, "--load-torque-nm") == 0) {
+            /* Constant external load torque at the rotor, opposing positive motor torque,
+             * applied from plant time on_us (default 0). */
+            char *rest = NULL;
+            load_torque_nm = strtod(value, &rest);
+            load_on_us = rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, NULL, 0) : 0U;
         } else {
             sil_usage(argv[0]);
             return 2;
@@ -839,7 +859,9 @@ int main(int argc, char **argv)
         .tracker_beta = 0.2f,
     };
     const struct foc_virtual_motor_state initial = {0};
-    if (foc_virtual_motor_init(&plant->motor, &motor, &initial) != 0) {
+    plant->load_torque_nm = load_torque_nm;
+    plant->load_on_us = load_on_us;
+    if (foc_virtual_motor_init(&plant->motor, &motor, &initial) != 0 || !isfinite(load_torque_nm)) {
         fprintf(stderr, "FALCONF0C_META {\"kind\":\"error\",\"reason\":\"plant parameters\"}\n");
         return 2;
     }

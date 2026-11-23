@@ -1295,7 +1295,7 @@ static void foc_runtime_prepare_outer(
             struct foc_trajectory_output trajectory_output;
             struct foc_trajectory_context trajectory_trial = runtime->trajectory;
             const int trajectory_status = command->mode == FOC_RUNTIME_MODE_POSITION
-                ? foc_trajectory_position_step(
+                ? foc_trajectory_track_step(
                       &trajectory_trial,
                       command->target.motion_ref,
                       candidate->sample.mechanical_rad,
@@ -1313,6 +1313,12 @@ static void foc_runtime_prepare_outer(
             }
             runtime->trajectory_trial = trajectory_trial;
             speed = trajectory_output.velocity_ref_rad_s;
+            if (trajectory_output.position_valid) {
+                /* Position tracks the planned reference with its velocity as feedforward. */
+                speed += policy->position.kp_per_s *
+                    (trajectory_output.position_ref_rad - candidate->sample.mechanical_rad);
+                speed = fmaxf(-speed_limit, fminf(speed, speed_limit));
+            }
         } else if (command->mode == FOC_RUNTIME_MODE_POSITION) {
             struct foc_position_output output;
             if (foc_position_step(
@@ -1482,6 +1488,38 @@ static bool foc_runtime_protection_valid(const struct foc_runtime_motion_config 
 
 /* Tuning ---------------------------------------------------------------------- */
 
+static bool foc_runtime_ramp_value_valid(float value)
+{
+    return isfinite(value) &&
+        (value == 0.0f ||
+         (value >= FOC_RUNTIME_RAMP_MIN_RAD_S2 && value <= FOC_RUNTIME_RAMP_MAX_RAD_S2));
+}
+
+/* The trajectory policy IDs 106/107 select: 0 is unlimited, both 0 disable shaping. */
+static bool foc_runtime_ramp_trajectory(
+    float accel_rad_s2,
+    float decel_rad_s2,
+    float velocity_limit_rad_s,
+    float max_dt_s,
+    struct foc_trajectory_config *trajectory
+)
+{
+    if (!foc_runtime_ramp_value_valid(accel_rad_s2) ||
+        !foc_runtime_ramp_value_valid(decel_rad_s2)) {
+        return false;
+    }
+    *trajectory = (struct foc_trajectory_config){
+        .enabled = accel_rad_s2 > 0.0f || decel_rad_s2 > 0.0f,
+        .max_velocity_rad_s = velocity_limit_rad_s,
+        .max_accel_rad_s2 = accel_rad_s2 > 0.0f ? accel_rad_s2 : FOC_RUNTIME_RAMP_UNLIMITED_RAD_S2,
+        .max_decel_rad_s2 = decel_rad_s2 > 0.0f ? decel_rad_s2 : FOC_RUNTIME_RAMP_UNLIMITED_RAD_S2,
+        .max_dt_s = max_dt_s,
+    };
+    struct foc_trajectory_context check;
+    return !trajectory->enabled ||
+        foc_trajectory_init(&check, trajectory) == FOC_TRAJECTORY_STATUS_OK;
+}
+
 /* The same checks foc_runtime_init() applies, on candidate copies only. */
 static int foc_runtime_tuning_check(
     const struct foc_runtime *runtime,
@@ -1510,6 +1548,8 @@ static int foc_runtime_tuning_check(
     }
     if (tuning == NULL || runtime->pipeline.feedforward.enabled ||
         runtime->config.motion.impedance.enabled || !isfinite(tuning->current_limit_a) ||
+        (!runtime->config.motion.enabled &&
+         (tuning->accel_rad_s2 != 0.0f || tuning->decel_rad_s2 != 0.0f)) ||
         tuning->command_timeout_us < FOC_RUNTIME_LEASE_MIN_US ||
         tuning->command_timeout_us > FOC_RUNTIME_LEASE_MAX_US ||
         tuning->command_timeout_us < runtime->pipeline.safety.config.sample_timeout_us) {
@@ -1534,10 +1574,18 @@ static int foc_runtime_tuning_check(
         .velocity_limit_rad_s = tuning->velocity_limit_rad_s,
     };
     struct foc_position_output check;
+    struct foc_trajectory_config ramp;
     if (!isfinite(tuning->iq_limit_a) || tuning->iq_limit_a <= 0.0f ||
         tuning->iq_limit_a > tuning->current_limit_a ||
         foc_position_step(&position, 0.0f, 0.0f, &check) != FOC_STATUS_OK ||
-        foc_velocity_init(velocity, &outer) != FOC_STATUS_OK) {
+        foc_velocity_init(velocity, &outer) != FOC_STATUS_OK ||
+        !foc_runtime_ramp_trajectory(
+            tuning->accel_rad_s2,
+            tuning->decel_rad_s2,
+            tuning->velocity_limit_rad_s,
+            outer.max_dt_s,
+            &ramp
+        )) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     return FOC_RUNTIME_OK;
@@ -1565,6 +1613,29 @@ static void foc_runtime_tuning_commit(
         runtime->config.motion.position.kp_per_s = tuning->position_kp_per_s;
         runtime->config.motion.position.velocity_limit_rad_s = tuning->velocity_limit_rad_s;
         runtime->config.motion.iq_limit_a = tuning->iq_limit_a;
+        /* A ramp, or leaving one, replaces the trajectory policy; both zero before and
+         * after keep an explicit policy. A new session resets the planner anyway. */
+        struct foc_runtime_motion_config *motion = &runtime->config.motion;
+        struct foc_trajectory_config ramp;
+        if ((tuning->accel_rad_s2 != 0.0f || tuning->decel_rad_s2 != 0.0f ||
+             motion->accel_rad_s2 != 0.0f || motion->decel_rad_s2 != 0.0f) &&
+            foc_runtime_ramp_trajectory(
+                tuning->accel_rad_s2,
+                tuning->decel_rad_s2,
+                tuning->velocity_limit_rad_s,
+                motion->velocity.max_dt_s,
+                &ramp
+            )) {
+            motion->trajectory = ramp;
+            runtime->trajectory = (struct foc_trajectory_context){0};
+            if (ramp.enabled) {
+                (void)foc_trajectory_init(&runtime->trajectory, &ramp);
+                (void)foc_trajectory_reset(&runtime->trajectory, 0.0f);
+            }
+            runtime->trajectory_trial = runtime->trajectory;
+        }
+        motion->accel_rad_s2 = tuning->accel_rad_s2;
+        motion->decel_rad_s2 = tuning->decel_rad_s2;
     }
     runtime->tuning_revision++;
 }
@@ -1644,6 +1715,8 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .position_kp_per_s = motion->position.kp_per_s,
         .velocity_limit_rad_s = motion->position.velocity_limit_rad_s,
         .iq_limit_a = motion->iq_limit_a,
+        .accel_rad_s2 = motion->accel_rad_s2,
+        .decel_rad_s2 = motion->decel_rad_s2,
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
         .trips = runtime->config.trips,
         .profile = runtime->config.profile,
@@ -1770,11 +1843,23 @@ int foc_runtime_init(
     }
     struct foc_velocity_context velocity = {0};
     struct foc_trajectory_context trajectory = {0};
-    if (config->motion.trajectory.enabled && !config->motion.enabled) {
+    struct foc_runtime_motion_config motion_config = config->motion;
+    const bool ramp = motion_config.accel_rad_s2 != 0.0f || motion_config.decel_rad_s2 != 0.0f;
+    if ((motion_config.trajectory.enabled || ramp) && !motion_config.enabled) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
+    if (ramp &&
+        !foc_runtime_ramp_trajectory(
+            motion_config.accel_rad_s2,
+            motion_config.decel_rad_s2,
+            motion_config.position.velocity_limit_rad_s,
+            motion_config.velocity.max_dt_s,
+            &motion_config.trajectory
+        )) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     if (config->motion.enabled) {
-        const struct foc_runtime_motion_config *motion = &config->motion;
+        const struct foc_runtime_motion_config *motion = &motion_config;
         struct foc_electrical_state electrical;
         struct foc_position_output position;
         float predicted;
@@ -1807,6 +1892,8 @@ int foc_runtime_init(
 #if defined(FOC_RUNTIME_HOST_COGGING)
     runtime->config.motion.cogging.enabled = foc_runtime_cogging_valid(&config->motion);
 #endif
+    runtime->config.motion.trajectory = motion_config.trajectory;
+    runtime->trajectory_trial = trajectory;
     atomic_init(&runtime->sensor_slot, FOC_RUNTIME_UNPUBLISHED);
     atomic_init(&runtime->command_slot, FOC_RUNTIME_UNPUBLISHED);
     atomic_init(&runtime->foreground_us, 0U);

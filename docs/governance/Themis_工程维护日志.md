@@ -3166,3 +3166,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 串口边界换算：SETPOINT 速度/位置、TELEMETRY 38/42、ID 3 改为输出侧（电机位置 / 减速比 − 零点），Runtime 与保护仍为电机侧；速度目标乘减速比后受 ID 72 约束。新增 ID 124 零点偏移、SET_ZERO（0x54）、TELEMETRY 追加电机侧位置/速度（75 → 83 字节）。存储升为 format 4（216 字节，零点在 208），format 3 照常读入。CONFIG_ERASE 清零点。
 - CLI 新增 `set-zero` 消息、`output-zero` 参数与 SIL `frame` 场景（lockstep、free-run 通过），SIL 单元测试 15 项；fwinteg `uart_check.py` 把遥测追加的两个电机侧字段登记为有意差异。资源：默认镜像 text 81,544 B，bss 12,592 B。
+
+## 2026-11-23 · V2 加减速与轨迹规划，删除位置 Ki（P1 第 B 步）
+
+- `foc_trajectory` 增加减速度与基于计划参考的 `foc_trajectory_track_step`（离散刹车公式，无死区）；Runtime 位置模式改为跟踪计划位置并以计划速度作前馈。ID 106/107 加速度/减速度（电机侧，0 不限）进入 tuning，任一非 0 启用规划；存储升为 format 5（224 字节）。
+- SIL 增加 `--load-torque-nm t,on_us`：恒定负载下速度积分已消除位置稳态误差（Ki=0 时 0.53 rad），删除 ID 105。CLI 新增 `accel`/`decel` 参数与 SIL `trajectory` 场景（lockstep、free-run 通过），SIL 单元测试 16 项；fwinteg `arm_static.py` 登记 `foc_trajectory_position_step` 从 ARM 镜像中移除（Runtime 改用跟踪规划器）。资源：默认镜像 text 82,524 B，bss 12,648 B。

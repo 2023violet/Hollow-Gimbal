@@ -7,7 +7,10 @@
  * Design overview
  * ---------------
  * This module generates bounded mechanical velocity references for the existing
- * velocity PI loop. It owns no position sensor, clock, scheduler, Safety state,
+ * velocity PI loop. Speeding up is limited by the acceleration, slowing down and
+ * reversing by the deceleration. The tracking planner integrates its own planned
+ * position and velocity from the target alone (it never reads the measurement after
+ * seeding), so the caller closes the position loop around the planned reference. It owns no position sensor, clock, scheduler, Safety state,
  * or output path. A caller may copy a context for a trial and commit it only
  * after the downstream control update is accepted.
  *
@@ -26,8 +29,9 @@
  * Failure / recovery
  * ------------------
  * Invalid inputs clear the output and leave the context unchanged. Reset starts
- * a new reference from a caller-confirmed velocity. The position planner uses
- * continuous mechanical coordinates and never wraps a target to one turn.
+ * a new reference from a caller-confirmed velocity; the next tracking step seeds its
+ * planned position from the measurement. The position planners use continuous
+ * mechanical coordinates and never wrap a target to one turn.
  */
 #pragma once
 
@@ -73,8 +77,11 @@ struct foc_trajectory_config {
     bool enabled;
     /** Symmetric maximum planned mechanical speed in rad/s. */
     float max_velocity_rad_s;
-    /** Symmetric maximum planned acceleration in rad/s². */
+    /** Maximum planned acceleration (speeding up) in rad/s². */
     float max_accel_rad_s2;
+    /** Maximum planned deceleration (slowing down, reversing) in rad/s²; 0 uses the
+     * acceleration. */
+    float max_decel_rad_s2;
     /** Maximum accepted actual step interval in seconds. */
     float max_dt_s;
     /** Position band in which the point-to-point target requests zero velocity. */
@@ -87,6 +94,9 @@ struct foc_trajectory_context {
     struct foc_trajectory_config config;
     /** Current planned mechanical velocity in rad/s. */
     float planned_velocity_rad_s;
+    /** Tracking planner: planned mechanical position in rad, valid once seeded. */
+    float planned_position_rad;
+    bool position_seeded;
     /** Lifecycle state. */
     enum foc_trajectory_state state;
     /** Set after successful initialization. */
@@ -99,6 +109,9 @@ struct foc_trajectory_output {
     float velocity_ref_rad_s;
     /** True when the planner generated a bounded reference. */
     bool active;
+    /** Tracking planner only: planned mechanical position in rad. */
+    float position_ref_rad;
+    bool position_valid;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -119,12 +132,24 @@ int foc_trajectory_velocity_step(struct foc_trajectory_context *context,
                                  float dt_s,
                                  struct foc_trajectory_output *output);
 
-/** Generate a bounded point-to-point velocity reference from continuous position. */
+/** Generate a bounded point-to-point velocity reference from the measured position. */
 int foc_trajectory_position_step(struct foc_trajectory_context *context,
                                  float target_position_rad,
                                  float measured_position_rad,
                                  float dt_s,
                                  struct foc_trajectory_output *output);
+
+/**
+ * Plan a point-to-point move on the planned reference: a trapezoidal (or triangular)
+ * profile toward the target under the speed, acceleration and deceleration limits.
+ * The first step after reset seeds the planned position from measured_position_rad;
+ * later steps ignore it. The output carries the planned position and velocity.
+ */
+int foc_trajectory_track_step(struct foc_trajectory_context *context,
+                              float target_position_rad,
+                              float measured_position_rad,
+                              float dt_s,
+                              struct foc_trajectory_output *output);
 
 #ifdef __cplusplus
 }

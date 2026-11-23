@@ -344,8 +344,18 @@ refresh: a model or bandwidth write re-derives the current PI with
 `foc_motor_pi_design()` at the H0 period, a peak current or maximum speed
 tightens the limits, and CAL-3/4/5 write the identified model through the same
 path. Store format 3 (212 bytes) adds the profile and IDs 112–118 after the
-format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124); older records
-load with the boot profile.
+format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124) and format 5
+(224 bytes) the acceleration limits (IDs 106/107); older records load with the
+boot profile.
+
+### Trajectory shaping
+
+IDs 106/107 travel in the Runtime tuning: either nonzero enables the H1 planner
+with the ID 72 speed limit; POSITION mode then tracks a trapezoid planned on its
+own reference. `sil-demo --sil-scenario trajectory` (`--load-torque-nm t,on_us`
+is the SIL's constant load) shows the velocity ramps, a 6 rad trapezoid, the
+refused values, the power-cycle restore, the erase and a loaded hold without a
+position integrator.
 
 ### Output frame
 

@@ -207,8 +207,10 @@ struct foc_serial {
     uint32_t dropped;
     /** Applied RAM-only remote current-vector limit in A. */
     float current_limit_a;
-    /** Applied RAM-only absolute position-reference limit in mechanical rad. */
+    /** Applied RAM-only absolute position-reference limit in output rad. */
     float position_limit_rad;
+    /** Output-position zero offset in output rad (PARAM 124, SET_ZERO). */
+    float output_zero_rad;
     /** Applied RAM-only RX service cap in bytes per poll. */
     uint32_t rx_budget;
     /** Whether the ordinary sequence watermark is initialized. */

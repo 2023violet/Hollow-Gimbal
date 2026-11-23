@@ -83,7 +83,7 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 01 | HELLO | Empty, session 0 | 9-byte capability, new session in header |
 | 02 | CAPABILITY_READ | Empty | 9-byte capability |
 | 03 | STATUS_READ | Empty | 30-byte status |
-| 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), or mode u8 + reference f32 for velocity/position (5 bytes) | ACCEPTED + Runtime publication u32 (5 bytes) |
+| 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), or mode u8 + reference f32 for velocity/position (5 bytes); velocity and position are output-side (see Output frame) | ACCEPTED + Runtime publication u32 (5 bytes) |
 | 11 | COMMAND_STOP | Empty | ACCEPTED, query status for H0 acknowledgement |
 | 12 / 13 | COMMAND_ARM / COMMAND_START | Empty | OUTPUT_LOCKED on Board1; on Host virtual targets (virtual device, Board1 SIL) ACCEPTED + lifecycle request u32 (5 bytes) |
 | 14 | COMMAND_SET_MODE | mode u8 | ACCEPTED + lifecycle request u32 (5 bytes); BAD_STATE unless DISABLED with INHIBIT confirmed |
@@ -95,12 +95,13 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
 | 32 | PARAM_SAVE | Empty | APPLIED + stored record sequence u32 (5 bytes); NOT_SUPPORTED on images without storage |
 | 33 | CONFIG_ERASE | Empty | APPLIED; storage is erased and the running instance returns to the boot configuration, boot tuning and default RAM policies at once (commutation group invalid). NOT_SUPPORTED without storage |
-| 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
+| 40 | TELEMETRY_READ | Empty | 83-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
 | 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
 | 51 | CALIBRATE_READ | Empty | 93-byte calibration progress, results and active configuration (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 | 53 | COMMUTATION_WRITE | pole pairs u16 (1–64) + encoder direction i8 (+1/−1) + electrical offset f32 rad [0, 2π) | APPLIED (group source HOST); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY during a run or pending tuning; INVALID_ARGUMENT out of range |
+| 54 | SET_ZERO | Empty | APPLIED + zero offset f32 output rad (5 bytes): the present output position becomes zero (ID 124); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY without a fresh sensor or during a calibration run; PARAM_SAVE stores it |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
 and continuous mechanical rad. Setpoints must match the current Runtime mode.
@@ -206,8 +207,8 @@ seen 7. Timestamp zero is legal, so the seen flags matter. Ages use the existing
 half-range Runtime rules. Software acknowledgement does not certify a physical
 bridge transition.
 
-TELEMETRY appends f32 d current at 30, f32 q current at 34, f32 mechanical
-position at 38, f32 velocity at 42, u32 sensor source time at 46, u32 CRC errors
+TELEMETRY appends f32 d current at 30, f32 q current at 34, f32 output
+position at 38, f32 output velocity at 42 (see Output frame), u32 sensor source time at 46, u32 CRC errors
 at 50, u32 dropped frames at 54, u32 RX overflow/error events at 58, and a validity byte
 at 62. Its bits are physical applied 0, calibrated current valid 1, sensor
 calibrated 2. In the locked Board1 image all three bits and the current fields
@@ -232,7 +233,7 @@ calibration required 2.
 | --- | --- | --- | --- |
 | 1 | Bytes examined per Foreground protocol poll | u32 | 8–32 / 24 |
 | 2 | Remote current-vector magnitude cap | f32 A | 0.05–2.5 / 2.5 |
-| 3 | Absolute remote position-reference cap | f32 rad | 1–1000 / 100 |
+| 3 | Absolute remote position-reference cap, output-side | f32 rad | 1–1000 / 100 |
 | 16 | Pole pairs | u32, read only | Board1 nominal 7 |
 | 17 | Electrical offset | f32 rad; writable as a trim of a valid commutation group (BAD_STATE without one) | 0–2π / uncalibrated nominal 0 |
 | 18 | Velocity-reference limit | f32 rad/s, read only | Runtime configured 12 |
@@ -388,14 +389,38 @@ After DONE, IDs 16, 17, 38–42, 64–67 and 80–84 read the applied values.
 
 ### Persistent settings
 
+### Output frame
+
+Host positions and speeds are output-side: SETPOINT velocity and position targets,
+TELEMETRY bytes 38/42 and the remote position cap (ID 3). The Runtime, the speed
+limits (IDs 72, 98, 115), protection and FAULT_SNAPSHOT_READ stay rotor-side.
+
+    output position = rotor position / gear ratio − zero offset
+    output velocity = rotor velocity / gear ratio
+
+| ID | Parameter | Type and unit | Range / initial |
+| --- | --- | --- | --- |
+| 124 | Output-position zero offset | f32 rad (unit 2), output-side | ±1000 / 0 |
+
+A velocity target times the gear ratio must stay within ID 72 (INVALID_ARGUMENT
+otherwise). IDs 99 and 124 and SET_ZERO need DISABLED with INHIBIT confirmed, like
+every parameter write, so a held target never jumps. TELEMETRY bytes 75/79 carry
+the rotor position and velocity (appended). Board1's encoder is single-turn
+absolute and a re-initialization (calibration, COMMUTATION_WRITE, CONFIG_ERASE)
+restarts the rotor position at the single-turn angle, so the stored zero gives the
+same output position after a power cycle only within one rotor turn
+(2π / gear ratio output rad). CONFIG_ERASE returns IDs 99 and 124 to 1 and 0.
+
 PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
 pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
 motor profile (IDs 80–83, 85, 86, 96–99, 104), the protection thresholds (IDs
-112–118), the RAM policies (IDs 1–3) and, when one is applied, the on-MCU
-calibration result (ADC zero, direction, pole pairs, electrical offset) in one
-record (format 3, 212 bytes: the format-2 bytes 0–135, then the profile at
-136–179, the thresholds at 180–207 and the CRC at 208). Format-2 (140 bytes) and
-format-1 records still load and keep the boot profile and thresholds. The
+112–118), the RAM policies (IDs 1–3), the output zero (ID 124) and, when one is
+applied, the on-MCU calibration result (ADC zero, direction, pole pairs,
+electrical offset) in one record (format 4, 216 bytes: the format-2 bytes 0–135,
+then the profile at 136–179, the thresholds at 180–207, the output zero at 208
+and the CRC at 212). Format-3 (212 bytes, no output zero), format-2 (140 bytes)
+and format-1 records still load; formats 1 and 2 keep the boot profile and
+thresholds. The
 record is bound to the image's boot motor configuration. A restore applies the
 stored PI as saved; it does not re-derive it from the model. At boot, before any interrupt, a stored
 record is applied only when that boot configuration is identical and every
@@ -447,7 +472,7 @@ identifies 1–30 pole pairs; COMMUTATION_WRITE accepts 1–64.
 | 85 / 86 | Inertia / viscous damping, stored only | f32 kg·m² (unit 15) / N·m·s/rad (unit 16) | 0–1 / 0; 0–10 / 0 |
 | 96 / 97 | Rated / peak current, rated at most peak | f32 A | 0 unset, or 0.05–1000 / 0 |
 | 98 | Maximum mechanical speed | f32 rad/s | 0 unset, or 0.1–1000 / 0 |
-| 99 | Gear ratio (rotor turns per output turn), stored only | f32 | 1–1000 / 1 |
+| 99 | Gear ratio (rotor turns per output turn): the output frame below | f32 | 1–1000 / 1 |
 | 104 | Current-loop bandwidth | f32 Hz (unit 17) | 10–235 / 150 |
 
 The profile travels with the tuning: a write publishes one complete candidate that

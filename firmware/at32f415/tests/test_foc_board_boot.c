@@ -1018,7 +1018,7 @@ static int check_locked_uart(struct foc_boot_test *test, bool calibrated)
     );
     CHECK(foc_boot_test_call(test, FOC_MSG_TELEMETRY_READ, NULL, 0U, &response) == FOC_PROTO_OK);
     /* M1 appended target d/q and tuning revision: all zero in the locked image. */
-    CHECK(response.length == 75U && response.payload[62] == 0U);
+    CHECK(response.length == 83U && response.payload[62] == 0U);
     for (unsigned int index = 30U; index < 38U; ++index) {
         CHECK(response.payload[index] == 0U);
     }

@@ -27,6 +27,7 @@
 #define FOC_SERIAL_TRIP_VBUS_MAX_V    24.0f
 #define FOC_SERIAL_TRIP_VBUS_MIN_V    3.0f
 #define FOC_SERIAL_TRIP_SPEED_MAX     1000.0f
+#define FOC_SERIAL_OUTPUT_ZERO_MAX    1000.0f
 
 enum {
     PARAM_RX_BUDGET = 1,
@@ -97,6 +98,8 @@ enum {
     PARAM_TRIP_SUSTAINED = 116,
     PARAM_TRIP_STALL = 117,
     PARAM_TRIP_DIVERGENCE = 118,
+    /* Output frame (contract 3.7): host positions are output-side and relative to it. */
+    PARAM_OUTPUT_ZERO = 124,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
@@ -186,6 +189,13 @@ foc_serial_capability(const struct foc_serial *serial, struct foc_protocol_frame
     response->length = sizeof capability;
 }
 
+/* Rotor turns per output turn; the Runtime keeps a validated value, 1 without one. */
+static float foc_serial_gear_ratio(const struct foc_runtime *runtime)
+{
+    const float gear = runtime->config.profile.gear_ratio;
+    return isfinite(gear) && gear >= 1.0f ? gear : 1.0f;
+}
+
 static int foc_serial_status(
     struct foc_serial *serial,
     struct foc_uart_buffer *uart,
@@ -228,8 +238,13 @@ static int foc_serial_status(
             body + 34,
             foc_serial_float_bits(view.current_valid ? view.measured_iq_a : 0.0f)
         );
-        foc_protocol_write_u32(body + 38, foc_serial_float_bits(view.mechanical_rad));
-        foc_protocol_write_u32(body + 42, foc_serial_float_bits(view.mechanical_rad_s));
+        /* Output frame: rotor position over the gear ratio, less the zero offset. */
+        const float gear = foc_serial_gear_ratio(runtime);
+        foc_protocol_write_u32(
+            body + 38,
+            foc_serial_float_bits(view.mechanical_rad / gear - serial->output_zero_rad)
+        );
+        foc_protocol_write_u32(body + 42, foc_serial_float_bits(view.mechanical_rad_s / gear));
         foc_protocol_write_u32(body + 46, view.sensor_us);
         foc_protocol_write_u32(body + 50, serial->crc_errors);
         foc_protocol_write_u32(body + 54, serial->dropped);
@@ -248,7 +263,10 @@ static int foc_serial_status(
             foc_serial_float_bits(view.current_valid ? view.target_iq_a : 0.0f)
         );
         foc_protocol_write_u32(body + 71, tuning.revision);
-        response->length = 75;
+        /* P1 append: the rotor-side position and speed the output frame derives from. */
+        foc_protocol_write_u32(body + 75, foc_serial_float_bits(view.mechanical_rad));
+        foc_protocol_write_u32(body + 79, foc_serial_float_bits(view.mechanical_rad_s));
+        response->length = 83;
     }
     return FOC_PROTO_OK;
 }
@@ -784,6 +802,13 @@ static bool foc_serial_parameter_read(
         parameter->unit = UNIT_RADIAN;
         parameter->writable = true;
         break;
+    case PARAM_OUTPUT_ZERO:
+        parameter->value = foc_serial_float_bits(serial->output_zero_rad);
+        parameter->minimum = foc_serial_float_bits(-FOC_SERIAL_OUTPUT_ZERO_MAX);
+        parameter->maximum = foc_serial_float_bits(FOC_SERIAL_OUTPUT_ZERO_MAX);
+        parameter->unit = UNIT_RADIAN;
+        parameter->writable = true;
+        break;
     case PARAM_POLE_PAIRS:
         parameter->type = PARAM_U32;
         parameter->value = runtime->config.motion.rotor.pole_pairs;
@@ -885,6 +910,9 @@ static int foc_serial_parameter(
         case PARAM_POSITION_LIMIT:
             serial->position_limit_rad = foc_serial_bits_float(value);
             break;
+        case PARAM_OUTPUT_ZERO:
+            serial->output_zero_rad = foc_serial_bits_float(value);
+            break;
         case PARAM_ELECTRICAL_OFFSET: {
             const int trimmed =
                 serial->calibration
@@ -937,11 +965,16 @@ static int foc_serial_setpoint(
     const float inner_limit = runtime->pipeline.current.config.current_limit_a;
     const float current_cap =
         serial->current_limit_a < inner_limit ? serial->current_limit_a : inner_limit;
+    /* Velocity and position targets are output-side; the Runtime runs on the rotor side. */
+    const float gear = foc_serial_gear_ratio(runtime);
+    const float rotor_ref =
+        mode == FOC_RUNTIME_MODE_POSITION ? (first + serial->output_zero_rad) * gear : first * gear;
     if ((mode == FOC_RUNTIME_MODE_CURRENT &&
          first * first + second * second > current_cap * current_cap) ||
         (mode == FOC_RUNTIME_MODE_VELOCITY &&
-         fabsf(first) > runtime->config.motion.position.velocity_limit_rad_s) ||
-        (mode == FOC_RUNTIME_MODE_POSITION && fabsf(first) > serial->position_limit_rad)) {
+         fabsf(rotor_ref) > runtime->config.motion.position.velocity_limit_rad_s) ||
+        (mode == FOC_RUNTIME_MODE_POSITION &&
+         (fabsf(first) > serial->position_limit_rad || !isfinite(rotor_ref)))) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
     struct foc_runtime_snapshot view;
@@ -961,7 +994,7 @@ static int foc_serial_setpoint(
             .mode = (enum foc_runtime_mode)mode,
             .seq = seq,
             .produced_us = now_us,
-            .target.motion_ref = first,
+            .target.motion_ref = rotor_ref,
         };
         result = foc_runtime_publish_motion_command(runtime, &command, now_us);
     }
@@ -1116,7 +1149,40 @@ static bool foc_serial_controls(uint8_t type)
     return type == FOC_MSG_SETPOINT || type == FOC_MSG_ARM || type == FOC_MSG_START ||
         type == FOC_MSG_SET_MODE || type == FOC_MSG_PARAM_WRITE || type == FOC_MSG_PARAM_SAVE ||
         type == FOC_MSG_CONFIG_ERASE || type == FOC_MSG_FAULT_CLEAR ||
-        type == FOC_MSG_CALIBRATE_START || type == FOC_MSG_COMMUTATION_WRITE;
+        type == FOC_MSG_CALIBRATE_START || type == FOC_MSG_COMMUTATION_WRITE ||
+        type == FOC_MSG_SET_ZERO;
+}
+
+/* SET_ZERO: the present output position becomes zero. DISABLED with INHIBIT confirmed and
+ * a fresh sensor, as for a parameter write; PARAM_SAVE stores it. */
+static int foc_serial_set_zero(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    uint32_t now_us,
+    struct foc_protocol_frame *response
+)
+{
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    if (view.state != FOC_SAFE_STATE_DISABLED || view.inhibit_pending || !view.output_confirmed ||
+        view.action != FOC_DEVICE_OUTPUT_INHIBIT) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    if (!view.sensor_valid ||
+        !foc_safe_timestamp_fresh(now_us, view.sensor_us, runtime->config.angle_timeout_us)) {
+        return FOC_PROTO_BUSY;
+    }
+    const float zero = view.mechanical_rad / foc_serial_gear_ratio(runtime);
+    if (!isfinite(zero) || fabsf(zero) > FOC_SERIAL_OUTPUT_ZERO_MAX) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    serial->output_zero_rad = zero;
+    serial->dirty = true;
+    foc_protocol_write_u32(response->payload + 1, foc_serial_float_bits(zero));
+    response->length = 5;
+    return FOC_PROTO_APPLIED;
 }
 
 static int
@@ -1253,6 +1319,8 @@ static int foc_serial_dispatch(
         return foc_serial_status(serial, uart, runtime, now_us, response);
     case FOC_MSG_FAULT_SNAPSHOT_READ:
         return foc_serial_fault_snapshot(runtime, response);
+    case FOC_MSG_SET_ZERO:
+        return foc_serial_set_zero(serial, runtime, now_us, response);
     case FOC_MSG_STOP:
         if (serial->calibration.abort != NULL) {
             serial->calibration.abort(serial->calibration.context);

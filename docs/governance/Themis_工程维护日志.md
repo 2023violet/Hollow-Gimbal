@@ -3161,3 +3161,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 ## 2026-11-22 · CAL-3/CAL-4 适用范围修复
 
 - `foc_motor_id`：R/L 分辨率约束由配置边界乘积改为对拟合结果检查（间隔 × Rs / L ≤ 0.3），Board1 CAL-3 边界放宽为 Rs 0.03–10 Ω、L 0.05–50 mH；原先 L < 0.8 mH 或 Rs > 1.15 Ω 一律 RANGE。CAL-4 电压档位按 CAL-3 Rs 缩放，避免低电阻电机反向切档过流导致驱动停止。SIL 下 0.1–2.0 Ω、0.3–2.0 mH、Ψ 至 0.02 Wb 的电机均校准成功；calibrate-faults 改用 Rs/L = 2600 /s 的电机作失败用例。
+
+## 2026-11-23 · V2 输出端坐标系：减速比、机械零点、SET_ZERO（P1 第 A 步）
+
+- 串口边界换算：SETPOINT 速度/位置、TELEMETRY 38/42、ID 3 改为输出侧（电机位置 / 减速比 − 零点），Runtime 与保护仍为电机侧；速度目标乘减速比后受 ID 72 约束。新增 ID 124 零点偏移、SET_ZERO（0x54）、TELEMETRY 追加电机侧位置/速度（75 → 83 字节）。存储升为 format 4（216 字节，零点在 208），format 3 照常读入。CONFIG_ERASE 清零点。
+- CLI 新增 `set-zero` 消息、`output-zero` 参数与 SIL `frame` 场景（lockstep、free-run 通过），SIL 单元测试 15 项；fwinteg `uart_check.py` 把遥测追加的两个电机侧字段登记为有意差异。资源：默认镜像 text 81,544 B，bss 12,592 B。

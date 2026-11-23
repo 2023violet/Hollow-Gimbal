@@ -474,12 +474,13 @@ static int test_calibration_record(void)
     CHECK(out.tuning.profile.rs_ohm == 0.0f && out.tuning.trips.overcurrent_a == 0.0f);
     /* Unknown flag bits are refused. */
     record[104] = 3U;
-    put_word(record + 208, test_crc32(record + 4, 204U));
+    put_word(record + 212, test_crc32(record + 4, 208U));
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     return 0;
 }
 
-/* Format 3 carries the motor profile and the protection thresholds. */
+/* Format 4 carries the motor profile, the protection thresholds and the output zero;
+ * format 3 (212 bytes, CRC at 208) still decodes with a zero offset. */
 static int test_profile_record(void)
 {
     uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
@@ -506,9 +507,10 @@ static int test_profile_record(void)
         .stall_ms = 250U,
         .divergence_ms = 400U,
     };
+    in.output_zero_rad = -2.5f;
     foc_board_store_encode(&nominal, &in, 7U, record);
     put_word(record, UINT32_C(0xC35A4C7E));
-    CHECK(record[8] == 3U && record[10] == 212U);
+    CHECK(record[8] == 4U && record[10] == 216U);
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
@@ -517,6 +519,16 @@ static int test_profile_record(void)
     CHECK(memcmp(&out.tuning.profile, &in.tuning.profile, sizeof in.tuning.profile) == 0);
     CHECK(out.tuning.trips.overcurrent_a == 3.1f && out.tuning.trips.undervoltage_v == 6.0f);
     CHECK(out.tuning.trips.sustained_ms == 1500U && out.tuning.trips.divergence_ms == 400U);
+    CHECK(out.output_zero_rad == -2.5f);
+    uint8_t v3[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v3, 0xFF, sizeof v3);
+    memcpy(v3, record, 208U);
+    v3[8] = 3U;
+    v3[10] = 212U;
+    put_word(v3 + 208, test_crc32(v3 + 4, 204U));
+    CHECK(foc_board_store_decode(v3, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.extended && out.output_zero_rad == 0.0f);
+    CHECK(memcmp(&out.tuning.profile, &in.tuning.profile, sizeof in.tuning.profile) == 0);
     /* A flipped extension byte breaks the CRC. */
     record[150] ^= 1U;
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);

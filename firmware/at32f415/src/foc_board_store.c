@@ -6,12 +6,13 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 3, 212 bytes, little-endian. Format 2 is bytes 0–135 with
- * its CRC at 136; format 1 is bytes 0–103 with its CRC at 104 and no calibration.
- * Both still decode, keeping the boot profile and protection thresholds:
+ * Record "FBP1", format 4, 216 bytes, little-endian. Format 3 is bytes 0–207 with
+ * its CRC at 208 and no output zero; format 2 is bytes 0–135 with its CRC at 136;
+ * format 1 is bytes 0–103 with its CRC at 104 and no calibration. Formats 1 and 2
+ * still decode, keeping the boot profile and protection thresholds:
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 3     10 length u16 = 212
+ *   4  magic "FBP1"          8  format u16 = 4     10 length u16 = 216
  *   12 sequence u32
  *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
  *   28 runtime encoder direction i32   32 electrical offset f32
@@ -27,7 +28,8 @@
  *   160/164/168 rated A, peak A, max speed rad/s   172 gear ratio   176 bandwidth Hz
  *   180/184/188/192 trips: over-current A, over/under-voltage V, over-speed rad/s
  *   196/200/204 sustained, stall, divergence windows u32 ms
- *   208 CRC-32 (IEEE, reflected) of bytes 4–207
+ *   208 output-position zero offset f32 rad (format 4; 0 from format 3)
+ *   212 CRC-32 (IEEE, reflected) of bytes 4–211
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -41,8 +43,10 @@
 
 #define STORE_COMMIT    UINT32_C(0xC35A4C7E)
 #define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT    3U
-#define STORE_CRC_AT    208U
+#define STORE_FORMAT    4U
+#define STORE_CRC_AT    212U
+#define STORE_V3_BYTES  212U
+#define STORE_V3_CRC_AT 208U
 #define STORE_V2_BYTES  140U
 #define STORE_V2_CRC_AT 136U
 #define STORE_V1_BYTES  108U
@@ -208,6 +212,7 @@ static bool settings_from_live(
     settings->rx_budget = serial->rx_budget;
     settings->remote_current_cap_a = serial->current_limit_a;
     settings->remote_position_cap_rad = serial->position_limit_rad;
+    settings->output_zero_rad = serial->output_zero_rad;
     return true;
 }
 
@@ -218,7 +223,8 @@ static bool serial_caps_valid(const struct foc_board_settings *settings)
         isfinite(settings->remote_current_cap_a) && settings->remote_current_cap_a >= 0.05f &&
         settings->remote_current_cap_a <= settings->tuning.iq_limit_a &&
         isfinite(settings->remote_position_cap_rad) && settings->remote_position_cap_rad >= 1.0f &&
-        settings->remote_position_cap_rad <= 1000.0f;
+        settings->remote_position_cap_rad <= 1000.0f && isfinite(settings->output_zero_rad) &&
+        fabsf(settings->output_zero_rad) <= 1000.0f;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -315,6 +321,7 @@ void foc_board_store_encode(
     put_u32(record + 196, t->trips.sustained_ms);
     put_u32(record + 200, t->trips.stall_ms);
     put_u32(record + 204, t->trips.divergence_ms);
+    put_f32(record + 208, settings->output_zero_rad);
     put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
 }
 
@@ -329,10 +336,15 @@ int foc_board_store_decode(
     const unsigned int length = record[10] | (record[11] << 8);
     const bool v1 = format == 1U && length == STORE_V1_BYTES;
     const bool v2 = format == 2U && length == STORE_V2_BYTES;
-    const bool v3 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
-    const size_t crc_at = v1 ? STORE_V1_CRC_AT : v2 ? STORE_V2_CRC_AT : STORE_CRC_AT;
+    const bool v3 = format == 3U && length == STORE_V3_BYTES;
+    const bool v4 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
+    const size_t crc_at = v1 ? STORE_V1_CRC_AT
+        : v2                 ? STORE_V2_CRC_AT
+        : v3                 ? STORE_V3_CRC_AT
+                             : STORE_CRC_AT;
     if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
-        !(v1 || v2 || v3) || get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
+        !(v1 || v2 || v3 || v4) ||
+        get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
         (!v1 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
     }
@@ -362,9 +374,10 @@ int foc_board_store_decode(
         .remote_current_cap_a = get_f32(record + 96),
         .remote_position_cap_rad = get_f32(record + 100),
         .calibration_present = !v1 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
-        .extended = v3,
+        .output_zero_rad = v4 ? get_f32(record + 208) : 0.0f,
+        .extended = v3 || v4,
     };
-    if (v3) {
+    if (v3 || v4) {
         settings->tuning.profile = (struct foc_runtime_profile){
             .rs_ohm = get_f32(record + 136),
             .ld_h = get_f32(record + 140),
@@ -571,6 +584,7 @@ void foc_board_persistence_restore(
     serial->rx_budget = settings.rx_budget;
     serial->current_limit_a = settings.remote_current_cap_a;
     serial->position_limit_rad = settings.remote_position_cap_rad;
+    serial->output_zero_rad = settings.output_zero_rad;
     persistence->loaded_sequence = sequence;
     persistence->state = FOC_BOARD_STORE_LOADED;
 }

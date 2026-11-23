@@ -24,7 +24,7 @@ MESSAGES = {
     "clear": 0x21, "fault-snapshot": 0x22, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
     "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
-    "commutation-write": 0x53,
+    "commutation-write": 0x53, "set-zero": 0x54,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
@@ -53,7 +53,7 @@ PARAMETERS = {
     "trip-divergence-ms": 118,
     "model-rs": 80, "model-ld": 81, "model-lq": 82, "model-flux": 83, "model-kt": 84,
     "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
-    "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104,
+    "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
@@ -267,8 +267,8 @@ def describe(frame):
                       algorithm_modes=body[5], physical_modes=body[6],
                       output_locked=bool(body[7] & 1), capabilities=int.from_bytes(body[7:9], "little"))
     elif frame.type in (3, 0x20, 0x40) and body[0] == 0:
-        # TELEMETRY is 75 bytes since M1; 63 from earlier firmware is still decoded.
-        if len(body) not in ((63, 75) if frame.type == 0x40 else (30,)):
+        # TELEMETRY is 83 bytes since P1 (75 since M1); earlier lengths still decode.
+        if len(body) not in ((63, 75, 83) if frame.type == 0x40 else (30,)):
             raise ValueError("BAD_RESPONSE")
         flags = body[3]
         result.update(
@@ -296,11 +296,17 @@ def describe(frame):
                 current_valid=bool(body[62] & 2), physical_applied=bool(body[62] & 1),
                 sensor_calibrated=bool(body[62] & 4),
             )
-            if len(body) == 75:
+            if len(body) >= 75:
                 result.update(
                     id_target_a=struct.unpack_from("<f", body, 63)[0],
                     iq_target_a=struct.unpack_from("<f", body, 67)[0],
                     tuning_revision=struct.unpack_from("<I", body, 71)[0],
+                )
+            if len(body) == 83:
+                # Bytes 38/42 are output-side (gear ratio, zero offset); these are the rotor.
+                result.update(
+                    rotor_position_rad=struct.unpack_from("<f", body, 75)[0],
+                    rotor_velocity_rad_s=struct.unpack_from("<f", body, 79)[0],
                 )
     elif frame.type in (0x30, 0x31) and body[0] in (0, 1, 2):
         if len(body) != 18 or body[3] not in (1, 2):
@@ -360,6 +366,10 @@ def describe(frame):
             snapshot_fault_names=fault_names(faults), snapshot_h0_us=struct.unpack_from("<I", body, 7)[0],
             **dict(zip(("speed_rad_s", "speed_ref_rad_s", "measured_id_a", "measured_iq_a",
                         "iq_ref_a", "phase_peak_a", "vbus_v"), struct.unpack_from("<7f", body, 11)))))
+    elif frame.type == 0x54 and body[0] == 2:
+        if len(body) != 5:
+            raise ValueError("BAD_RESPONSE")
+        result["zero_rad"] = struct.unpack_from("<f", body, 1)[0]
     elif frame.type == 0x32 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -899,7 +909,7 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist", "calibrate-faults", "protect", "profile", "swap")
+                 "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1996,6 +2006,140 @@ def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad
     return summary
 
 
+def run_sil_frame(simulator, base_arguments, flash_path, json_path=None):
+    """Output frame (parameter contract 3.7, P1 step A): host positions and speeds are
+    output-side through the gear ratio (ID 99) and relative to the zero offset (ID 124);
+    SET_ZERO makes the present output position zero; both are refused unless DISABLED,
+    survive a power cycle and return to the boot values on CONFIG_ERASE. Telemetry bytes
+    75/79 carry the rotor side for the comparison. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    gear = 3.0
+
+    def boot():
+        transport = SimulatorTransport(simulator, list(base_arguments) + ["--flash", str(flash_path)])
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def frame(session):
+        telemetry = session.call("telemetry", quiet=True)
+        return {key: telemetry[key] for key in (
+            "position_rad", "velocity_rad_s", "rotor_position_rad", "rotor_velocity_rad_s")}
+
+    def settle(session, mode, reference, duration_us=1500000):
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode=mode)
+        steps, samples = session.run(mode, reference, duration_us)
+        running = [s for s in samples if s["state"] == SIL_STATE_RUNNING]
+        return steps, running, session.status()
+
+    def stop(session):
+        # Still at the rotor: telemetry speed is output-side, a third of it here.
+        session.stop()
+        for _ in range(20000):
+            if abs(session.call("telemetry", quiet=True)["rotor_velocity_rad_s"]) < 0.05:
+                break
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. Boot values: gear 1 and zero 0 leave the output frame equal to the rotor frame.
+    transport, session = boot()
+    checks["commissioned"] = commission(session.client) == "APPLIED"
+    first = metrics["boot_frame"] = frame(session)
+    checks["boot_frame_is_rotor_frame"] = (
+        abs(first["position_rad"] - first["rotor_position_rad"]) < 1e-6
+        and session.read("output-zero") == 0.0 and session.read("gear-ratio") == 1.0)
+
+    # 2. Gear ratio 3: an output position target moves the rotor three times as far.
+    checks["gear_applied"] = session.tune("gear-ratio", gear) == "APPLIED"
+    steps, running, status = settle(session, "position", 1.0)
+    held = metrics["position_1_rad"] = frame(session)
+    checks["output_position_tracks"] = (
+        steps == {"arm": "APPLIED", "start": "APPLIED"} and not status["fault_names"]
+        and abs(held["position_rad"] - 1.0) < 0.05 and abs(held["rotor_position_rad"] - 3.0) < 0.15)
+    # While running, SET_ZERO and the frame parameters are refused.
+    session.call("setpoint", setpoint("position", 1.0), quiet=True)
+    checks["set_zero_refused_while_running"] = session.call("set-zero")["result"] == "BAD_STATE"
+    checks["zero_write_refused_while_running"] = session.call("param-write", parameter_write(
+        PARAMETERS["output-zero"], "f32", 0.5))["result"] == "BAD_STATE"
+    checks["still_running"] = session.status()["state"] == SIL_STATE_RUNNING
+    stop(session)
+
+    # 3. Output speed: 2 rad/s output is 6 rad/s at the rotor; 5 rad/s output (15 at the
+    # rotor) exceeds the 12 rad/s rotor speed limit (ID 72) and is refused.
+    steps, running, status = settle(session, "velocity", 2.0)
+    tail = running[len(running) * 3 // 4:]
+    spun = metrics["velocity_2_rad_s"] = frame(session)
+    metrics["velocity_tail_error"] = (sum(abs(2.0 - s["velocity_rad_s"]) for s in tail) / len(tail)
+                                      if tail else None)
+    checks["output_velocity_tracks"] = (
+        steps == {"arm": "APPLIED", "start": "APPLIED"} and not status["fault_names"]
+        and metrics["velocity_tail_error"] is not None and metrics["velocity_tail_error"] < 0.2
+        and abs(spun["rotor_velocity_rad_s"] - gear * spun["velocity_rad_s"]) < 1e-3)
+    checks["rotor_speed_limit_applies_through_gear"] = session.call(
+        "setpoint", setpoint("velocity", 5.0))["result"] == "INVALID_ARGUMENT"
+    stop(session)
+
+    # 4. SET_ZERO: the present output position becomes zero.
+    zeroed = session.call("set-zero")
+    after = metrics["after_set_zero"] = frame(session)
+    metrics["zero_rad"] = zeroed.get("zero_rad")
+    checks["set_zero_applied"] = (
+        zeroed["result"] == "APPLIED"
+        and abs(zeroed["zero_rad"] - after["rotor_position_rad"] / gear) < 0.01
+        and abs(after["position_rad"]) < 0.01
+        and abs(session.read("output-zero") - zeroed["zero_rad"]) < 1e-6)
+    steps, running, status = settle(session, "position", 0.5)
+    moved = metrics["position_0_5_from_zero"] = frame(session)
+    checks["position_relative_to_zero"] = (
+        not status["fault_names"] and abs(moved["position_rad"] - 0.5) < 0.05
+        and abs(moved["rotor_position_rad"] - gear * (0.5 + zeroed["zero_rad"])) < 0.15)
+    stop(session)
+    checks["saved"] = session.call("save")["result"] == "APPLIED"
+    transport.__exit__()
+
+    # 5. Power cycle: the zero and the gear ratio restore. The SIL plant restarts at its
+    # initial angle, so the output position is that angle in the restored frame.
+    transport, session = boot()
+    restored = metrics["restored_frame"] = frame(session)
+    checks["frame_restored"] = (
+        abs(session.read("output-zero") - zeroed["zero_rad"]) < 1e-6
+        and session.read("gear-ratio") == gear
+        and abs(restored["position_rad"]
+                - (restored["rotor_position_rad"] / gear - zeroed["zero_rad"])) < 1e-4)
+
+    # 6. CONFIG_ERASE returns the frame to the boot values at once. It is BUSY while the
+    # boot's zero-only CAL-1 owns the Runtime.
+    erased_result = "BUSY"
+    for _ in range(4000):
+        erased_result = session.call("erase-config", quiet=True)["result"]
+        if erased_result != "BUSY":
+            break
+        session.status()
+    checks["erase_applied"] = erased_result == "APPLIED"
+    erased = metrics["erased_frame"] = frame(session)
+    checks["erase_resets_frame"] = (
+        session.read("output-zero") == 0.0 and session.read("gear-ratio") == 1.0
+        and abs(erased["position_rad"] - erased["rotor_position_rad"]) < 1e-6)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-frame",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_swap(simulator, base_arguments, flash_path, json_path=None):
     """Motor replacement end to end (parameter contract step 3): the placeholder is gated,
     motor-setup commissions motor A, a power cycle restores it and measures the zero, motor B
@@ -2418,6 +2562,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "frame":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-frame-flash.bin"))
+                summary = run_sil_frame(os.path.abspath(args.simulator), simulator_arguments,
+                                        flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "swap":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-swap-flash.bin"))

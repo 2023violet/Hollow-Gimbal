@@ -77,6 +77,8 @@ enum foc_protocol_message {
     FOC_MSG_CALIBRATE_ABORT = 0x52,
     /** Write pole pairs, encoder direction and electrical offset together (appended). */
     FOC_MSG_COMMUTATION_WRITE = 0x53,
+    /** Make the present output position the mechanical zero (PARAM 124, appended). */
+    FOC_MSG_SET_ZERO = 0x54,
 };
 
 /** First response payload byte. MORE is local to the stream parser. */

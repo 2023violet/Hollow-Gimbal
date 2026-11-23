@@ -344,7 +344,18 @@ refresh: a model or bandwidth write re-derives the current PI with
 `foc_motor_pi_design()` at the H0 period, a peak current or maximum speed
 tightens the limits, and CAL-3/4/5 write the identified model through the same
 path. Store format 3 (212 bytes) adds the profile and IDs 112–118 after the
-format-2 bytes; older records load with the boot profile. `sil-demo
+format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124); older records
+load with the boot profile.
+
+### Output frame
+
+`foc_serial` converts at the UART boundary only: velocity and position targets,
+TELEMETRY position/velocity and the remote position cap are output-side through
+the gear ratio (ID 99) and the zero offset (ID 124); the Runtime stays rotor-side.
+SET_ZERO (0x54) makes the present output position zero while DISABLED.
+`falconfoc_cli.py request --message set-zero` sends it, and `sil-demo
+--sil-scenario frame` shows gear-scaled position and speed, the refusals while
+running, SET_ZERO, the power-cycle restore and the erase. `sil-demo
 --sil-scenario profile` checks the derived gains, the refused bandwidth and
 model, the tightened limits, the rated-current trip, the power-cycle restore and
 the calibration write-back.

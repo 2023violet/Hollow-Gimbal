@@ -172,6 +172,15 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_swap(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_output_frame_gear_ratio_and_set_zero(self):
+        """Host positions and speeds are output-side through the gear ratio and relative to
+        the zero offset; SET_ZERO zeroes the present position; both are refused while running,
+        survive a power cycle and return to the boot values on CONFIG_ERASE."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_frame(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

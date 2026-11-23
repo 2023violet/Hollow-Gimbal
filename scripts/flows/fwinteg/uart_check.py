@@ -35,11 +35,14 @@ def records(text):
     return out
 
 
-# Intentional M1 differences of the default demo from the option-matched baseline:
-# capability bits 4/5 (remote mode switch, controller tuning) and the 12 bytes appended
-# to TELEMETRY_READ. Only these are tolerated; anything else still fails the check.
+# Intentional differences of the default demo from the option-matched baseline:
+# capability bits 4/5 (remote mode switch, controller tuning), the 12 bytes M1 appended
+# to TELEMETRY_READ and the 8 bytes P1 appended (rotor position and velocity; bytes
+# 38/42 are output-side but equal the rotor side at the boot gear ratio 1 and zero 0).
+# Only these are tolerated; anything else still fails the check.
 M1_CAPABILITIES = {"baseline": 15, "current": 63}
-M1_TELEMETRY_KEYS = ("id_target_a", "iq_target_a", "tuning_revision")
+M1_TELEMETRY_KEYS = ("id_target_a", "iq_target_a", "tuning_revision",
+                     "rotor_position_rad", "rotor_velocity_rad_s")
 
 
 def explained(record, role):

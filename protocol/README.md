@@ -175,6 +175,11 @@ unverified.
 
 ## Parameters
 
+This section describes the implemented parameters. The planned grouping, IDs,
+write rules and persistence of future parameters are in the
+[parameter contract design](../docs/superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md);
+nothing there is implemented until it appears here.
+
 A parameter response is result, ID u16, type u8, unit u8, attributes u8, minimum,
 maximum and value. The final three values occupy four bytes each and use the
 declared type. Types are u32 1 and f32 2. Units are dimensionless 0, A 1, rad 2,

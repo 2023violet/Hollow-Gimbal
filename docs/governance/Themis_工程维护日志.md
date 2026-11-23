@@ -3137,3 +3137,7 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 新增 Host 适配层：`board_adc_candidate.py` 复用生产 `board_capture.py` 的镜像校验与 ADC_ZERO Trace，`foc-board-adc-candidate` 调用既有 `foc_calibration_adc_collect/finalize`，与既有审核 Rotor/Offset 候选组成隔离供应，经 `foc_board_boot_select()` 读回 Runtime、解码与 UART，正式实例不变。无新统计或配置系统，ARM 源码未改。
 - 零电流资格只来自调用方前提：Host 夹具见证可生成标注来源的候选；Board 记录无独立证明时为 `PRECONDITION_UNVERIFIED`，不生成候选。两电流 rank 互换无法由现有证据识别。物理 ADC 零点、物理零电流、采样孔径、增益与 WCET 未验证，G3-PWR LOCKED。 [验收报告](../evidence/2026-11-21-fw-adc-01.md)
+
+## 2026-11-22 · V2 参数契约设计稿
+
+- 新增 `docs/superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md`：参数按电机模型、换相组、用户档案、控制设置、保护阈值、通信、机械零点分组，规定 ID、范围、写入状态、写后统一刷新、存盘与命令；门禁为换相组有效且 ADC 零点就绪。`protocol/README.md` 参数节加指向说明。仅设计，固件未改。

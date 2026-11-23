@@ -75,6 +75,8 @@ enum foc_protocol_message {
     FOC_MSG_CALIBRATE_READ = 0x51,
     /** Abort a running calibration (M3, appended). */
     FOC_MSG_CALIBRATE_ABORT = 0x52,
+    /** Write pole pairs, encoder direction and electrical offset together (appended). */
+    FOC_MSG_COMMUTATION_WRITE = 0x53,
 };
 
 /** First response payload byte. MORE is local to the stream parser. */
@@ -94,6 +96,8 @@ enum foc_protocol_status {
     FOC_PROTO_OUTPUT_LOCKED = 12,
     FOC_PROTO_NOT_SUPPORTED = 13,
     FOC_PROTO_INTERNAL_ERROR = 14,
+    /** ARM/START without a valid commutation group (appended). */
+    FOC_PROTO_NOT_CALIBRATED = 15,
     FOC_PROTO_MORE = 255,
 };
 

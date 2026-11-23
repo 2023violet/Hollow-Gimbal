@@ -116,12 +116,35 @@ struct foc_serial_calibration_view {
 };
 
 /** Optional on-MCU calibration owner. start returns a FOC_PROTO_* result code. */
+/** Commutation state behind PARAM_READ IDs 88-90. */
+struct foc_serial_commission_view {
+    /** 1 when the commutation group is valid (not the boot placeholder). */
+    uint8_t valid;
+    /** CALIBRATE_READ byte 73 source: boot 0, run 1, storage 2, host 3, supply 4. */
+    uint8_t source;
+    /** ADC zero of this boot: pending 0, ready 1, last attempt refused 2. */
+    uint8_t zero_state;
+};
+
 struct foc_serial_calibration {
     void *context;
     int (*start)(void *context, uint32_t now_us, unsigned int stages);
     void (*abort)(void *context);
     bool (*busy)(const void *context);
     bool (*read)(const void *context, struct foc_serial_calibration_view *view);
+    /** COMMUTATION_WRITE: pole pairs, encoder direction (+1/-1) and offset in rad. */
+    int (*commutation)(void *context,
+                       uint32_t now_us,
+                       uint16_t pole_pairs,
+                       int8_t direction,
+                       float offset_rad);
+    /** PARAM_WRITE ID 17: a new electrical offset for the valid group. */
+    int (*trim)(void *context, uint32_t now_us, float offset_rad);
+    /** ARM/START admission: OK, NOT_CALIBRATED or BUSY. */
+    int (*gate)(const void *context);
+    bool (*commission)(const void *context, struct foc_serial_commission_view *view);
+    /** After CONFIG_ERASE: return the instance to the boot configuration. */
+    int (*reset)(void *context, uint32_t now_us);
 };
 
 /** Fixed UART queue depth and default number of bytes examined per poll. */

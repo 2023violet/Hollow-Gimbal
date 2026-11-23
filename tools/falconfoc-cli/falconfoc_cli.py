@@ -24,11 +24,13 @@ MESSAGES = {
     "clear": 0x21, "fault-snapshot": 0x22, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
     "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
+    "commutation-write": 0x53,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
     "UNSUPPORTED_VERSION", "UNKNOWN_COMMAND", "INVALID_ARGUMENT", "BAD_SESSION",
     "REPLAY", "BUSY", "BAD_STATE", "OUTPUT_LOCKED", "NOT_SUPPORTED", "INTERNAL_ERROR",
+    "NOT_CALIBRATED",
 ]
 MODES = {"current": 0, "velocity": 1, "position": 2}
 LIFECYCLE_RESULTS = ["NONE", "PENDING", "APPLIED", "REJECTED", "CANCELLED"]
@@ -41,6 +43,7 @@ PARAMETERS = {
     "phase-b-offset": 39, "phase-c-offset": 40, "measurement-qualified": 45,
     "store-state": 48, "store-loaded-sequence": 49, "store-stored-sequence": 50,
     "store-calibration": 51,
+    "runtime-direction": 42, "commutation-valid": 88, "commutation-source": 89, "adc-zero-state": 90,
     "tuning-revision": 60, "tuning-result": 61, "tuning-sequence": 62,
     "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
     "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
@@ -74,7 +77,7 @@ CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
                 "CAPTURE"]
 CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2}
-CAL_SOURCES = ["BOOT", "RUN", "STORAGE"]
+CAL_SOURCES = ["BOOT", "RUN", "STORAGE", "HOST", "SUPPLY"]
 CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8))
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
@@ -187,6 +190,35 @@ class Stream:
 
 def parameter_read(identifier):
     return struct.pack("<H", identifier)
+
+
+def commutation_write(pole_pairs, direction, offset_rad):
+    """COMMUTATION_WRITE payload: pole pairs u16, encoder direction i8 (+1/-1), offset f32."""
+    if direction not in (1, -1) or not math.isfinite(offset_rad):
+        raise ValueError("direction must be +1 or -1 and the offset finite")
+    return struct.pack("<Hbf", pole_pairs, direction, offset_rad)
+
+
+def commission(client, pole_pairs=None, direction=None, offset_rad=None, polls=4000):
+    """Write a commutation group (by default the one the board booted with) and wait until
+    the firmware has measured this boot's ADC zero. Returns the COMMUTATION_WRITE result.
+    This is the Host import of an offline calibration; the zero is measured on the MCU."""
+    read = lambda identifier: describe(client.call("param-read", parameter_read(identifier)))
+    if pole_pairs is None:
+        pole_pairs = read(PARAMETERS["pole-pairs"])["value"]
+    if offset_rad is None:
+        offset_rad = read(PARAMETERS["electrical-offset"])["value"]
+    if direction is None:
+        direction = 1 if read(42)["value"] == 1 else -1
+    result = describe(client.call("commutation-write",
+                                  commutation_write(pole_pairs, direction, offset_rad)))["result"]
+    if result != "APPLIED":
+        return result
+    for _ in range(polls):
+        describe(client.call("status"))
+        if read(PARAMETERS["adc-zero-state"])["value"] == 1:
+            return result
+    return "ZERO_TIMEOUT"
 
 
 def parameter_write(identifier, kind, value):
@@ -867,7 +899,7 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist", "calibrate-faults", "protect", "profile")
+                 "calibrate-persist", "calibrate-faults", "protect", "profile", "swap")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -900,11 +932,17 @@ class SilSession:
         """Publish ARM/START/SET_MODE and wait for H0's receipt. Returns the receipt name.
         H0 rejects ARM/START until fresh sensing follows boot or STOP; retry those."""
         receipt_name = "TIMEOUT"
+        busy = 0
         for _ in range(50):
             if keep_alive is not None:
                 self.call("setpoint", keep_alive, quiet=True)
             payload = set_mode(mode) if action == "set-mode" else b""
             result = self.call(action, payload)["result"]
+            # BUSY covers a pending ADC zero (about 60 ms after boot) or calibration.
+            while result == "BUSY" and busy < 2000:
+                busy += 1
+                self.status()
+                result = self.call(action, payload, quiet=True)["result"]
             if result == "BUSY":
                 continue
             if result != "ACCEPTED":
@@ -1038,6 +1076,9 @@ def run_sil_demo(client, transport, reference=None, duration_us=None, json_path=
     boot = {name: session.read(name) for name in (
         "boot-configuration", "calibration-input", "measurement-qualified")}
     checks, metrics, samples = {}, {}, []
+    # The nominal placeholder is not runnable: import the boot group (the SIL motor is
+    # that motor) and let the MCU measure this boot's ADC zero.
+    checks["commissioned"] = commission(client) == "APPLIED"
 
     if scenario in ("current", "velocity", "position"):
         default_reference, default_duration = SIL_DEFAULTS[scenario][:2]
@@ -1166,6 +1207,8 @@ def run_sil_persist(simulator, base_arguments, flash_path, json_path=None):
 
     transport, session, first = boot("fresh")
     checks["fresh_storage_empty"] = first["store_state"] == "EMPTY" and first["stored_sequence"] == 0
+    # Import the boot group so the drive may run; the save then stores it (step 3).
+    checks["commissioned"] = commission(session.client) == "APPLIED"
     checks["persistence_capability"] = bool(first["capabilities"] & 64)
     checks["tuning_applied"] = (session.tune("current-kp-q", 2.2) == "APPLIED"
                                 and session.tune("command-lease-us", 30000) == "APPLIED")
@@ -1282,16 +1325,12 @@ def run_sil_calibrate(client, transport, json_path=None):
     checks["host_lease_applied"] = session.tune("command-lease-us", 50000) == "APPLIED"
     metrics["nominal_pole_pairs"] = session.read("pole-pairs")
 
-    # 1. With the nominal configuration this motor does not follow a speed target.
+    # 1. The nominal placeholder is not runnable: ARM is refused until a group exists.
     checks["set_mode_velocity"] = session.lifecycle("set-mode", SIL_STATE_DISABLED,
                                                     mode="velocity") == "APPLIED"
-    steps, samples = session.run("velocity", 5.0, 300000)
-    running = [s for s in samples if s["state"] == SIL_STATE_RUNNING]
-    tail = running[len(running) * 3 // 4:]
-    before_error = sum(abs(5.0 - s["velocity_rad_s"]) for s in tail) / len(tail) if tail else None
-    metrics["uncalibrated_velocity_tail_error"] = before_error
-    checks["uncalibrated_motor_does_not_track"] = before_error is None or before_error > 1.0
-    session.stop()
+    refused = session.lifecycle("arm", SIL_STATE_ARMED, setpoint("velocity", 5.0))
+    metrics["uncalibrated_arm"] = refused
+    checks["uncalibrated_arm_refused"] = refused == "NOT_CALIBRATED"
     checks["shaft_settles"] = _wait_still(session)
 
     # 2. STOP during the drive aborts and keeps the previous configuration.
@@ -1634,6 +1673,7 @@ def run_sil_protect(simulator, base_arguments, json_path=None):
         session = SilSession(client, transport)
         session.status()
         session.tune("command-lease-us", 50000)
+        assert commission(client) == "APPLIED"
         return transport, session
 
     def outcome(session, samples):
@@ -1688,7 +1728,8 @@ def run_sil_protect(simulator, base_arguments, json_path=None):
         checks[f"inject_{name}"] = snapshot_complete(result, expected)
         return transport, session, result
 
-    transport, session, result = inject("overcurrent", ["--adc-step", "100000,2000"],
+    # After commissioning (settle and ADC zero, about 0.2 s of device time).
+    transport, session, result = inject("overcurrent", ["--adc-step", "800000,2000"],
                                         "OVER_CURRENT")
     checks["overcurrent_snapshot_peak"] = result["snapshot"]["phase_peak_a"] > 3.0
     transport.__exit__()
@@ -1805,6 +1846,7 @@ def run_sil_profile(simulator, base_arguments, flash_path, json_path=None):
         flash_path.unlink()
     arguments = ["--flash", str(flash_path)]
     transport, session = boot(arguments)
+    checks["commissioned"] = commission(session.client) == "APPLIED"
 
     # 1. Model and bandwidth derive the current PI (SIL motor: 0.6 Ω, 1.2/1.5 mH).
     for name, value in (("model-rs", 0.6), ("model-ld", 0.0012)):
@@ -1889,6 +1931,192 @@ def run_sil_profile(simulator, base_arguments, flash_path, json_path=None):
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-profile",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def _write_wait(client, name, value, polls=400):
+    """PARAM_WRITE one parameter; for H0-applied parameters wait for the tuning receipt."""
+    identifier = PARAMETERS[name]
+    written = describe(client.call("param-write", parameter_write(
+        identifier, PARAMETER_TYPES.get(identifier, "f32"), value)))["result"]
+    if written != "ACCEPTED":
+        return written
+    for _ in range(polls):
+        describe(client.call("status"))
+        receipt = describe(client.call("param-read", parameter_read(PARAMETERS["tuning-result"])))
+        if receipt["value"] not in (0, 1):
+            return LIFECYCLE_RESULTS[receipt["value"]]
+    return "TIMEOUT"
+
+
+def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad_s=None,
+                bandwidth_hz=None, save=True, polls=200000):
+    """Host motor replacement workflow (parameter contract step 3): on-MCU calibration of
+    the connected motor, the user profile from its datasheet, then PARAM_SAVE. Every step
+    runs on the MCU; the Host only sequences them and reports."""
+    summary = {"kind": "motor-setup", "steps": {}}
+    steps = summary["steps"]
+    started = "BUSY"
+    for _ in range(2000):
+        started = describe(client.call("calibrate"))["result"]
+        if started != "BUSY":
+            break
+        describe(client.call("status"))
+    steps["calibrate"] = started
+    view = None
+    if started == "ACCEPTED":
+        for _ in range(polls):
+            view = describe(client.call("calibrate-read"))
+            if view["calibration_state"] in ("DONE", "FAILED"):
+                break
+        steps["calibration_state"] = view["calibration_state"]
+        steps["calibration_failure"] = view["calibration_failure"]
+        summary["calibration"] = {key: view.get(key) for key in (
+            "pole_pairs", "electrical_offset_rad", "rs_ohm", "ld_h", "lq_h", "flux_wb",
+            "kp_q_v_per_a", "ki_v_per_a_s")}
+    calibrated = view is not None and view["calibration_state"] == "DONE"
+    if calibrated:
+        for name, value in (("peak-current", peak_current_a), ("rated-current", rated_current_a),
+                            ("max-speed", max_speed_rad_s), ("current-bandwidth", bandwidth_hz)):
+            if value is not None:
+                steps[name] = _write_wait(client, name, value)
+        if save:
+            steps["save"] = describe(client.call("save"))["result"]
+    summary["status"] = "OK" if calibrated and all(
+        result in ("APPLIED", "ACCEPTED", "DONE", "NONE")
+        for key, result in steps.items() if key != "calibration_failure") else "FAILED"
+    return summary
+
+
+def run_sil_swap(simulator, base_arguments, flash_path, json_path=None):
+    """Motor replacement end to end (parameter contract step 3): the placeholder is gated,
+    motor-setup commissions motor A, a power cycle restores it and measures the zero, motor B
+    on A's stored profile is caught by protection, motor-setup recommissions B, an exported
+    group imports into an erased board, ID 17 trims the offset and CONFIG_ERASE closes the
+    gate again. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    motor_a = dict(SIL_CALIBRATE_PLANT)
+    # A different motor inside the CAL-3 range (0.35 Ω / 0.7 mH is outside it today).
+    motor_b = dict(SIL_CALIBRATE_PLANT, pole_pairs=14, offset_rad=0.4, rs_ohm=0.6,
+                   ld_h=0.0012, lq_h=0.0015, flux_wb=0.01)
+
+    def plant(values):
+        return ["--motor-pole-pairs", str(values["pole_pairs"]),
+                "--motor-offset-rad", str(values["offset_rad"]),
+                "--adc-offset", ",".join(map(str, values["adc_offset"])),
+                "--motor-rs-ohm", str(values["rs_ohm"]), "--motor-ld-h", str(values["ld_h"]),
+                "--motor-lq-h", str(values["lq_h"]), "--motor-psi-f-wb", str(values["flux_wb"])]
+
+    def boot(values):
+        transport = SimulatorTransport(simulator, list(base_arguments) + plant(values)
+                                       + ["--flash", str(flash_path)])
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def commission_state(session):
+        return {name: session.read(name) for name in (
+            "commutation-valid", "commutation-source", "adc-zero-state", "pole-pairs")}
+
+    def velocity(session, duration_us=800000):
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, samples = session.run("velocity", 5.0, duration_us)
+        running = [s for s in samples if s["state"] == SIL_STATE_RUNNING]
+        tail = running[len(running) * 3 // 4:]
+        status = session.status()
+        session.stop()
+        _wait_still(session)
+        return {"steps": steps, "faults": status["fault_names"],
+                "tail_error": sum(abs(5.0 - s["velocity_rad_s"]) for s in tail) / len(tail)
+                if tail else None}
+
+    def tracks(result):
+        return (result["steps"] == {"arm": "APPLIED", "start": "APPLIED"} and not result["faults"]
+                and result["tail_error"] is not None and result["tail_error"] < 0.3)
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. Placeholder: the gate refuses ARM.
+    transport, session = boot(motor_a)
+    metrics["fresh"] = commission_state(session)
+    refused = session.lifecycle("arm", SIL_STATE_ARMED, setpoint("current", 0.0, 0.2))
+    checks["placeholder_gated"] = (refused == "NOT_CALIBRATED"
+                                   and metrics["fresh"]["commutation-valid"] == 0)
+    # 2. motor-setup commissions motor A and saves.
+    setup = metrics["setup_a"] = motor_setup(session.client, rated_current_a=1.0,
+                                             peak_current_a=2.0, max_speed_rad_s=60.0)
+    checks["motor_a_setup"] = setup["status"] == "OK"
+    transport.__exit__()
+
+    # 3. Power cycle: restored, zero measured on the MCU, the drive tracks.
+    transport, session = boot(motor_a)
+    restored = velocity(session)
+    metrics["restored_a"] = dict(restored, **commission_state(session))
+    checks["motor_a_restored_runs"] = (tracks(restored)
+                                       and metrics["restored_a"]["commutation-source"] == 2
+                                       and metrics["restored_a"]["adc-zero-state"] == 1)
+    group_a = {"pole_pairs": session.read("pole-pairs"),
+               "offset": session.read("electrical-offset"),
+               "direction": 1 if session.read("runtime-direction") == 1 else -1}
+    transport.__exit__()
+
+    # 4. Motor B on A's stored profile: the gate opens (restored group) and protection trips.
+    transport, session = boot(motor_b)
+    wrong = metrics["motor_b_on_profile_a"] = velocity(session, 1500000)
+    checks["swap_without_setup_trips"] = bool(set(wrong["faults"]) & {
+        "TRACKING_DIVERGENCE", "SUSTAINED_CURRENT", "STALL", "OVER_SPEED"})
+    session.call("clear")
+    for _ in range(400):
+        if session.status()["state"] == SIL_STATE_DISABLED:
+            break
+    _wait_still(session)
+    # 5. motor-setup recommissions motor B; a power cycle runs it.
+    setup = metrics["setup_b"] = motor_setup(session.client, rated_current_a=0.8,
+                                             peak_current_a=1.5, max_speed_rad_s=50.0)
+    checks["motor_b_setup"] = (setup["status"] == "OK"
+                               and setup["calibration"]["pole_pairs"] == motor_b["pole_pairs"])
+    transport.__exit__()
+    transport, session = boot(motor_b)
+    checks["motor_b_runs_after_setup"] = tracks(velocity(session))
+
+    # 6. CONFIG_ERASE closes the gate at once.
+    checks["erase_applied"] = session.call("erase-config")["result"] == "APPLIED"
+    metrics["after_erase"] = commission_state(session)
+    checks["erase_closes_gate"] = (
+        metrics["after_erase"]["commutation-valid"] == 0 and metrics["after_erase"]["pole-pairs"] == 7
+        and session.lifecycle("arm", SIL_STATE_ARMED, setpoint("current", 0.0, 0.2))
+        == "NOT_CALIBRATED")
+    transport.__exit__()
+
+    # 7. Offline import: motor A's exported group into the erased board, then an ID 17 trim.
+    transport, session = boot(motor_a)
+    checks["trim_refused_without_group"] = session.call("param-write", parameter_write(
+        PARAMETERS["electrical-offset"], "f32", 1.0))["result"] == "BAD_STATE"
+    imported = commission(session.client, group_a["pole_pairs"], group_a["direction"],
+                          group_a["offset"])
+    checks["import_applied"] = imported == "APPLIED" and session.read("commutation-source") == 3
+    checks["imported_group_runs"] = tracks(velocity(session))
+    trimmed = (group_a["offset"] + 0.01) % (2.0 * math.pi)
+    checks["offset_trim_applied"] = (session.call("param-write", parameter_write(
+        PARAMETERS["electrical-offset"], "f32", trimmed))["result"] == "APPLIED"
+        and abs(session.read("electrical-offset") - trimmed) < 1e-5)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-swap",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -2004,7 +2232,7 @@ def main():
     parser.add_argument(
         "action",
         choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "sil-demo",
-                 "calibrate"],
+                 "calibrate", "motor-setup"],
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
     parser.add_argument("--hex", default="", help="Wire hex for decode, including delimiter")
@@ -2028,6 +2256,15 @@ def main():
                         help="sil-demo: virtual/wall time ratio of the free-running device")
     parser.add_argument("--sil-scenario", choices=SIL_SCENARIOS, default="current",
                         help="sil-demo: product scenario to run")
+    parser.add_argument("--rated-current", type=float, default=None,
+                        help="motor-setup: rated phase current in A (ID 96)")
+    parser.add_argument("--peak-current", type=float, default=None,
+                        help="motor-setup: peak phase current in A (ID 97)")
+    parser.add_argument("--max-speed", type=float, default=None,
+                        help="motor-setup: maximum mechanical speed in rad/s (ID 98)")
+    parser.add_argument("--bandwidth", type=float, default=None,
+                        help="motor-setup: current-loop bandwidth in Hz (ID 104)")
+    parser.add_argument("--no-save", action="store_true", help="motor-setup: skip PARAM_SAVE")
     parser.add_argument("--sil-flash", default=None,
                         help="sil-demo persist: flash image file (recreated)")
     parser.add_argument("--sil-lockstep-us", type=int, default=0,
@@ -2173,13 +2410,19 @@ def main():
                     ]
                 if args.virtual_scenario == "fault":
                     simulator_arguments += ["--sensor-fault-us", str(args.sensor_fault_us)]
-            if args.action == "sil-demo":
+            if args.action in ("sil-demo", "motor-setup"):
                 simulator_arguments = (
                     ["--lockstep-us", str(args.sil_lockstep_us)] if args.sil_lockstep_us > 0
                     else ["--speed", str(args.sil_speed)]
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "swap":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-swap-flash.bin"))
+                summary = run_sil_swap(os.path.abspath(args.simulator), simulator_arguments,
+                                       flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "profile":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-profile-flash.bin"))
@@ -2213,9 +2456,17 @@ def main():
                 if args.simulator
                 else SerialTransport(args.port)
             )
+            if args.action == "motor-setup" and args.simulator and args.sil_flash:
+                transport = SimulatorTransport(os.path.abspath(args.simulator),
+                                               simulator_arguments + ["--flash", args.sil_flash])
             with transport:
                 client = Client(transport)
                 hello = client.hello()
+                if args.action == "motor-setup":
+                    summary = motor_setup(client, args.rated_current, args.peak_current,
+                                          args.max_speed, args.bandwidth, not args.no_save)
+                    print(json.dumps(summary, allow_nan=False))
+                    return 0 if summary["status"] == "OK" else 3
                 if args.action == "virtual-demo":
                     default_duration = {
                         "current": 10000,

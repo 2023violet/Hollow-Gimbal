@@ -389,6 +389,15 @@ int foc_board_encoder_complete(struct foc_runtime *runtime,
                                uint16_t code);
 
 /**
+ * Re-initialize a quiescent instance with the nominal boot configuration (after
+ * CONFIG_ERASE). The caller holds H0/H1 producers off; the output backend survives.
+ */
+int foc_board_reconfigure_nominal(struct foc_runtime *runtime,
+                                  struct foc_board_output *output,
+                                  struct foc_board_encoder *encoder,
+                                  uint32_t now_us);
+
+/**
  * Re-initialize a quiescent instance with an accepted calibration snapshot.
  * The caller holds H0/H1 producers off for the duration. The output backend
  * survives; on failure Runtime, journal and encoder keep their previous state.

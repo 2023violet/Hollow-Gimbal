@@ -38,6 +38,7 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_LIFECYCLE_READ:
     case FOC_MSG_FAULT_READ:
     case FOC_MSG_FAULT_CLEAR:
+    case FOC_MSG_FAULT_SNAPSHOT_READ:
     case FOC_MSG_PARAM_READ:
     case FOC_MSG_PARAM_WRITE:
     case FOC_MSG_PARAM_SAVE:
@@ -47,6 +48,7 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_CALIBRATE_START:
     case FOC_MSG_CALIBRATE_READ:
     case FOC_MSG_CALIBRATE_ABORT:
+    case FOC_MSG_COMMUTATION_WRITE:
         return true;
     default:
         return false;

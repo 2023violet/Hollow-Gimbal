@@ -861,6 +861,22 @@ int main(int argc, char **argv)
     }
     foc_serial_init_with_policy(&device.serial, &device.runtime, FOC_SERIAL_TARGET_VIRTUAL_ONLY);
     foc_serial_attach_boot(&device.serial, foc_board_boot_serial_readback, &device.boot);
+    /* Single-threaded SIL: no producer runs while the manager reconfigures. */
+    foc_board_calibration_bind(
+        &device.calibration,
+        &device.runtime,
+        &device.output,
+        &device.encoder,
+        &device.adc,
+        &device.serial,
+        NULL,
+        NULL
+    );
+    const struct foc_serial_calibration calibration =
+        foc_board_calibration_serial(&device.calibration);
+    foc_serial_attach_calibration(&device.serial, &calibration);
+    /* The boot configuration and tuning CONFIG_ERASE returns to, before any restore. */
+    foc_board_calibration_capture_boot(&device.calibration, &device.boot);
     /* Boot restore before any producer, as an image with storage does on the target. */
     sil_flash_open(&device.flash, flash_path);
     device.persistence.driver = (struct foc_board_store_driver){
@@ -880,20 +896,6 @@ int main(int argc, char **argv)
     const struct foc_serial_persistence persistence =
         foc_board_persistence_serial(&device.persistence);
     foc_serial_attach_persistence(&device.serial, &persistence);
-    /* Single-threaded SIL: no producer runs while the manager reconfigures. */
-    foc_board_calibration_bind(
-        &device.calibration,
-        &device.runtime,
-        &device.output,
-        &device.encoder,
-        &device.adc,
-        &device.serial,
-        NULL,
-        NULL
-    );
-    const struct foc_serial_calibration calibration =
-        foc_board_calibration_serial(&device.calibration);
-    foc_serial_attach_calibration(&device.serial, &calibration);
     /* A calibration restored from storage is the manager's applied result; saves keep it. */
     if (device.persistence.calibration_restored) {
         foc_board_calibration_adopt(&device.calibration, &device.persistence.restored_calibration);

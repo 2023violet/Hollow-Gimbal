@@ -69,6 +69,7 @@ The first response payload byte is its result.
 | 3–7 | BAD_FRAME, BAD_CRC, UNSUPPORTED_VERSION, UNKNOWN_COMMAND, INVALID_ARGUMENT | Validation failure |
 | 8–11 | BAD_SESSION, REPLAY, BUSY, BAD_STATE | Request admission or state failure |
 | 12–14 | OUTPUT_LOCKED, NOT_SUPPORTED, INTERNAL_ERROR | Explicit device limitation or internal failure |
+| 15 | NOT_CALIBRATED | ARM/START without a valid commutation group (appended) |
 
 Malformed frames are counted and discarded. Business errors use a one-byte
 response payload. Damaged bytes never extend a lease.
@@ -93,12 +94,13 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 30 | PARAM_READ | ID u16 | 18-byte typed parameter |
 | 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
 | 32 | PARAM_SAVE | Empty | APPLIED + stored record sequence u32 (5 bytes); NOT_SUPPORTED on images without storage |
-| 33 | CONFIG_ERASE | Empty | APPLIED; the next boot uses the boot configuration. NOT_SUPPORTED without storage |
+| 33 | CONFIG_ERASE | Empty | APPLIED; storage is erased and the running instance returns to the boot configuration, boot tuning and default RAM policies at once (commutation group invalid). NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 75-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
-| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
+| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
 | 51 | CALIBRATE_READ | Empty | 93-byte calibration progress, results and active configuration (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
+| 53 | COMMUTATION_WRITE | pole pairs u16 (1–64) + encoder direction i8 (+1/−1) + electrical offset f32 rad [0, 2π) | APPLIED (group source HOST); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY during a run or pending tuning; INVALID_ARGUMENT out of range |
 
 Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
 and continuous mechanical rad. Setpoints must match the current Runtime mode.
@@ -232,7 +234,7 @@ calibration required 2.
 | 2 | Remote current-vector magnitude cap | f32 A | 0.05–2.5 / 2.5 |
 | 3 | Absolute remote position-reference cap | f32 rad | 1–1000 / 100 |
 | 16 | Pole pairs | u32, read only | Board1 nominal 7 |
-| 17 | Electrical offset | f32 rad, read only | Uncalibrated nominal 0 |
+| 17 | Electrical offset | f32 rad; writable as a trim of a valid commutation group (BAD_STATE without one) | 0–2π / uncalibrated nominal 0 |
 | 18 | Velocity-reference limit | f32 rad/s, read only | Runtime configured 12 |
 
 IDs 32–45 are a read-only startup readback, added without changing the frame
@@ -362,7 +364,7 @@ d-axis voltage on the rotor angle until 0.5 A to find its excitation scale.
 | 59 / 63 / 67 | f32 | Designed current Kp d / Kp q V/A / Ki V/(A·s) |
 | 71 | u8 | Committed by the latest run: bit 0 rotor phase, bit 1 electrical phase |
 | 72 | u8 | Results the latest run produced: bit 0 rotor fit, 1 R/L, 2 flux, 3 PI applied |
-| 73 | u8 | Active rotor calibration source: 0 boot configuration, 1 a run in this boot, 2 restored from storage |
+| 73 | u8 | Active rotor calibration source: 0 boot configuration, 1 a run in this boot, 2 restored from storage, 3 COMMUTATION_WRITE, 4 accepted build supply |
 | 74 | u8 | Largest backlog of the H0 capture ring (64 entries) in the latest run |
 | 75 / 77 | u16 / f32 | Active pole pairs / electrical offset rad (Runtime) |
 | 81 / 85 / 89 | f32 | Active ADC zero A / B / C in counts (Runtime) |
@@ -406,7 +408,28 @@ when a save is interrupted. A successful save clears the dirty flag.
 | 48 | Boot outcome | 0 unavailable (no storage), 1 empty, 2 loaded, 3 invalid record, 4 identity mismatch, 5 value rejected, 6 I/O error |
 | 49 | Applied record sequence | 0 when none was applied |
 | 50 | Newest stored record sequence | 0 when storage is erased |
-| 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot |
+| 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot (0 after CONFIG_ERASE) |
+
+### Commutation gate
+
+| ID | Readback | Values |
+| --- | --- | --- |
+| 88 | Commutation group valid | 1 unless the group is the boot placeholder |
+| 89 | Group source | as CALIBRATE_READ byte 73 |
+| 90 | ADC zero of this boot | 0 pending, 1 ready, 2 last measurement refused (retried after 1 s) |
+
+The commutation group is pole pairs, encoder direction and electrical offset. It is
+valid when it came from a calibration run, storage, COMMUTATION_WRITE or an accepted
+build supply; the nominal placeholder (7 pole pairs, offset 0) is not. ARM and START
+return NOT_CALIBRATED without a valid group, and BUSY until this boot's ADC zero is
+measured or while a calibration run owns the Runtime (a Host retries BUSY). The zero
+is measured on the MCU: with a valid group and the output inhibited, the manager
+runs a zero-only CAL-1 (256 frames, at most 4 counts rms) 100 ms after the group was
+installed and replaces the group's ADC zero by re-initialization; a rotor
+calibration sets it as well. The ADC zero stored in a record serves only until that
+measurement. COMMUTATION_WRITE imports a group exported from another board or a
+bench calibration (IDs 16, 17, 42); the measured zero stays this board's. CAL-2
+identifies 1–30 pole pairs; COMMUTATION_WRITE accepts 1–64.
 
 ### Motor profile
 

@@ -650,6 +650,8 @@ int main(void)
         );
         const struct foc_serial_calibration calibrate = foc_board_calibration_serial(&calibration);
         foc_serial_attach_calibration(&serial, &calibrate);
+        /* The boot configuration and tuning CONFIG_ERASE returns to, before any restore. */
+        foc_board_calibration_capture_boot(&calibration, &boot);
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
         /* Restore saved settings before any producer or IRQ starts. */
         persistence.driver = foc_at32_store_driver();

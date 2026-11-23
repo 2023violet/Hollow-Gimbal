@@ -349,6 +349,20 @@ format-2 bytes; older records load with the boot profile. `sil-demo
 model, the tightened limits, the rated-current trip, the power-cycle restore and
 the calibration write-back.
 
+### Commutation gate and motor replacement
+
+ARM/START require a valid commutation group and an ADC zero measured in this boot
+(NOT_CALIBRATED / BUSY otherwise). The calibration manager measures the zero by
+itself (zero-only CAL-1, no drive) once a group is valid; COMMUTATION_WRITE (0x53)
+installs a group by re-initialization; ID 17 trims its offset; CONFIG_ERASE returns
+the running instance to the boot configuration. After any re-initialization H0
+keeps INHIBIT without counting angle-less samples toward the invalid-sample latch
+until H1 publishes the first sensor (sensor warm-up). `falconfoc_cli.py
+motor-setup --rated-current --peak-current --max-speed` runs the replacement
+workflow (calibrate, profile, save), and `sil-demo --sil-scenario swap` shows the
+gate, motor-setup, a replaced motor on the old profile caught by protection, the
+recommissioned motor, an exported-group import, the trim and the erase.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

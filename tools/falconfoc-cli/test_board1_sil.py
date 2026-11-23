@@ -77,7 +77,8 @@ class Board1SilTest(unittest.TestCase):
         """Writes apply only while DISABLED, through H0, with a revision receipt."""
         summary = self.scenario("tuning")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
-        self.assertEqual(summary["metrics"]["tuning_revision"], 3)
+        # Commissioning re-initializes once and re-applies the tuning: one more revision.
+        self.assertEqual(summary["metrics"]["tuning_revision"], 4)
 
     def test_fault_clear_and_rerun(self):
         """Lease expiry latches COMMAND_TIMEOUT; FAULT_CLEAR returns to DISABLED; it runs again."""
@@ -97,7 +98,7 @@ class Board1SilTest(unittest.TestCase):
         calibration = summary["metrics"]["calibration"]
         self.assertEqual(calibration["pole_pairs"], 11)
         self.assertLess(summary["metrics"]["offset_error_rad"], 0.05)
-        self.assertGreater(summary["metrics"]["uncalibrated_velocity_tail_error"], 1.0)
+        self.assertEqual(summary["metrics"]["uncalibrated_arm"], "NOT_CALIBRATED")
         # CAL-3/4/5 on the MCU: Rs, Ld/Lq, flux and Kt of the hidden plant, PI applied.
         errors = summary["metrics"]["electrical_relative_error"]
         self.assertLess(errors["rs"], 0.05)
@@ -162,11 +163,21 @@ class Board1SilTest(unittest.TestCase):
                                           Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_motor_replacement_workflow(self):
+        """The placeholder is gated; motor-setup commissions a motor; a replaced motor on the
+        old profile trips protection; motor-setup recommissions it; an exported group imports,
+        ID 17 trims it and CONFIG_ERASE closes the gate again."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_swap(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:
             client = cli.Client(transport, sequence=1)
             client.hello()
+            self.assertEqual(cli.commission(client), "APPLIED")
             payload = start_current(client, 0.4)
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
@@ -184,13 +195,17 @@ class Board1SilTest(unittest.TestCase):
         self.assertFalse(silent["current_valid"])
         self.assertEqual(sil[-1]["drive"], "HIGH_Z")
 
-    def test_plant_adc_offset_is_not_known_to_firmware(self):
-        """The firmware decodes with its own nominal offsets; the plant truth never leaks.
-        An unmeasured phase-A offset shows up as decode error (the CAL-1 motivation)."""
+    def test_plant_adc_offset_is_measured_on_the_mcu_at_boot(self):
+        """The plant truth never leaks: the firmware boots with nominal offsets and the
+        placeholder group refuses ARM. Once a group is imported, the MCU measures this
+        boot's ADC zero (step 3) and decodes the plant current."""
         with cli.SimulatorTransport(SIL, ["--lockstep-us", "500", "--adc-offset", "2078,2048,2048"]) \
                 as transport:
             client = cli.Client(transport, sequence=1)
             client.hello()
+            boot_offset_a = call(client, "param-read", cli.parameter_read(38))["value"]
+            refused = call(client, "arm")["result"]
+            self.assertEqual(cli.commission(client), "APPLIED")
             offset_a = call(client, "param-read", cli.parameter_read(38))["value"]
             payload = start_current(client, 0.4)
             for _ in range(20):
@@ -200,10 +215,12 @@ class Board1SilTest(unittest.TestCase):
             time.sleep(0.1)
             sil = [m for m in transport.drain_metadata()
                    if m.get("kind") == "sil" and m["firmware_current_valid"]]
-        self.assertEqual(offset_a, 2048.0)
+        self.assertEqual(boot_offset_a, 2048.0)
+        self.assertEqual(refused, "NOT_CALIBRATED")
+        self.assertAlmostEqual(offset_a, 2078.0, delta=1.0)
         delta = max(abs(m["sample_plant_iq_a"] - m["firmware_iq_a"]) +
                     abs(m["sample_plant_id_a"] - m["firmware_id_a"]) for m in sil)
-        self.assertGreater(delta, 0.02)
+        self.assertLess(delta, 0.05)
 
 
 if __name__ == "__main__":

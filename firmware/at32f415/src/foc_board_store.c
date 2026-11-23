@@ -620,6 +620,7 @@ static int persistence_erase(void *context)
     }
     persistence->stored = false;
     persistence->stored_sequence = 0U;
+    persistence->calibration_restored = false;
     return FOC_PROTO_APPLIED;
 }
 

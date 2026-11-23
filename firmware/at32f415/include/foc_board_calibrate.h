@@ -33,6 +33,7 @@
 #pragma once
 
 #include "foc_board.h"
+#include "foc_board_boot.h"
 #include "foc_calibration.h"
 #include "foc_flux_id.h"
 #include "foc_motor_id.h"
@@ -71,6 +72,8 @@ enum foc_board_cal_stages {
     /** CAL-3 R/L, CAL-4 flux/Kt and CAL-5 current PI design. Needs an applied rotor result. */
     FOC_BOARD_CAL_STAGE_ELECTRICAL = 2,
     FOC_BOARD_CAL_STAGE_ALL = 3,
+    /** CAL-1 only: measure the ADC zero and apply it to the valid group (no drive). */
+    FOC_BOARD_CAL_STAGE_ZERO = 4,
 };
 
 /** CALIBRATE_READ byte 73: where the active rotor calibration came from. */
@@ -78,6 +81,17 @@ enum foc_board_cal_source {
     FOC_BOARD_CAL_SOURCE_BOOT = 0,
     FOC_BOARD_CAL_SOURCE_RUN = 1,
     FOC_BOARD_CAL_SOURCE_STORAGE = 2,
+    /** COMMUTATION_WRITE from the Host. */
+    FOC_BOARD_CAL_SOURCE_HOST = 3,
+    /** The build's accepted calibration supply. */
+    FOC_BOARD_CAL_SOURCE_SUPPLY = 4,
+};
+
+/** PARAM_READ ID 90: the ADC zero of this boot. */
+enum foc_board_cal_zero_state {
+    FOC_BOARD_CAL_ZERO_PENDING = 0,
+    FOC_BOARD_CAL_ZERO_READY = 1,
+    FOC_BOARD_CAL_ZERO_REFUSED = 2,
 };
 
 /** CALIBRATE_READ byte 72: results the latest run produced (present, not applied). */
@@ -215,6 +229,19 @@ struct foc_board_calibration {
     uint8_t committed;
     uint8_t active_source;
     uint8_t ring_high_water;
+    /* Step 3: ADC zero of this boot, the automatic zero run and the boot configuration
+     * that CONFIG_ERASE returns to. */
+    bool zero_ready;
+    bool zero_refused;
+    bool zero_pending;
+    bool zero_attempted;
+    uint32_t zero_attempt_us;
+    /* After a re-initialization the encoder speed settles before the zero is measured. */
+    bool zero_settling;
+    uint32_t zero_settle_us;
+    bool boot_calibrated;
+    struct foc_calibration_snapshot boot_snapshot;
+    struct foc_runtime_tuning boot_tuning;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -239,6 +266,26 @@ int foc_board_calibration_start(struct foc_board_calibration *calibration,
 /** Adopt a calibration applied at boot from storage (electrical stages, later saves). */
 void foc_board_calibration_adopt(struct foc_board_calibration *calibration,
                                  const struct foc_calibration_snapshot *snapshot);
+
+/** Record the boot configuration and tuning CONFIG_ERASE returns to. Call after bind and
+ * before a stored record is restored; an accepted supply becomes the SUPPLY group. */
+void foc_board_calibration_capture_boot(struct foc_board_calibration *calibration,
+                                        const struct foc_board_boot *boot);
+
+/** Write a commutation group (pole pairs 1-64, direction +1/-1, offset in [0, 2π)) with
+ * the active ADC zero, by re-initialization. Returns a FOC_PROTO_* result. */
+int foc_board_calibration_commutation(struct foc_board_calibration *calibration,
+                                      uint32_t now_us,
+                                      uint16_t pole_pairs,
+                                      int8_t direction,
+                                      float offset_rad);
+
+/** Return the instance to the boot configuration and tuning (after CONFIG_ERASE). */
+int foc_board_calibration_reset(struct foc_board_calibration *calibration, uint32_t now_us);
+
+/** ARM/START admission: OK with a valid group and this boot's ADC zero, NOT_CALIBRATED
+ * without a valid group, BUSY while the zero is pending or a run owns the Runtime. */
+int foc_board_calibration_gate(const struct foc_board_calibration *calibration);
 
 /** Advance the state machine. Foreground only, every pass. */
 void foc_board_calibration_poll(struct foc_board_calibration *calibration, uint32_t now_us);

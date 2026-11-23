@@ -55,6 +55,10 @@
 #define CAL_SENSOR_AGE_US        2000U
 #define CAL_STOP_TIMEOUT_US      20000U
 #define CAL_FAIL_QUIET_US        1000000U
+/* A refused automatic ADC zero is retried after this interval. */
+#define CAL_ZERO_RETRY_US        1000000U
+/* Settling time of the encoder speed after a re-initialization, before a zero run. */
+#define CAL_ZERO_SETTLE_US       100000U
 /* M3b: H0 slot clock and preload. A command computed in slot k takes effect at the
  * next update, so an aperture interval sees 80 % of V(k-2) and 20 % of V(k-1). */
 #define CAL_SLOT_US              ((uint32_t)FOC_BOARD_H0_US)
@@ -388,6 +392,8 @@ static void cal_apply(struct foc_board_calibration *cal, uint32_t now_us)
     cal->committed |= FOC_BOARD_CAL_STAGE_ROTOR;
     cal->active_source = FOC_BOARD_CAL_SOURCE_RUN;
     cal->mode_claimed = false;
+    cal->zero_ready = true;
+    cal->zero_refused = false;
     if ((cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U) {
         cal->electrical_phase = true;
         cal_enter(cal, FOC_BOARD_CAL_DRIVE_MODE, now_us);
@@ -401,6 +407,85 @@ static void cal_apply(struct foc_board_calibration *cal, uint32_t now_us)
 static float cal_voltage_limit(const struct foc_board_calibration *cal)
 {
     return cal->runtime->pipeline.current.config.pwm.voltage_limit_v;
+}
+
+/* A commutation group other than the boot placeholder is in effect. */
+static bool cal_commutation_valid(const struct foc_board_calibration *cal)
+{
+    return cal->snapshot.accepted && cal->active_source != FOC_BOARD_CAL_SOURCE_BOOT;
+}
+
+/* Re-initialize under quiescence (NULL snapshot: nominal) and keep the given tuning. */
+static int cal_reconfigure(
+    struct foc_board_calibration *cal,
+    const struct foc_calibration_snapshot *snapshot,
+    const struct foc_runtime_tuning *tuning,
+    uint32_t now_us
+)
+{
+    if (cal->quiesce != NULL) {
+        cal->quiesce(cal->quiesce_argument, true);
+    }
+    const int status = snapshot != NULL
+        ? foc_board_reconfigure(cal->runtime, cal->output, cal->encoder, snapshot, now_us)
+        : foc_board_reconfigure_nominal(cal->runtime, cal->output, cal->encoder, now_us);
+    if (status == FOC_RUNTIME_OK) {
+        /* Tuning outlives a re-initialization; a refused value keeps the new defaults. */
+        (void)foc_runtime_apply_tuning(cal->runtime, tuning);
+    }
+    if (cal->quiesce != NULL) {
+        cal->quiesce(cal->quiesce_argument, false);
+    }
+    return status;
+}
+
+/* Zero-only run: the measured ADC zero replaces the valid group's, without a drive. */
+static void cal_zero_apply(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    struct foc_calibration_snapshot snapshot = cal->snapshot;
+    snapshot.phase_a_offset_count = cal->adc_result.offset_a_counts;
+    snapshot.phase_b_offset_count = cal->adc_result.offset_b_counts;
+    snapshot.phase_c_offset_count = cal->adc_result.offset_c_counts;
+    if (!foc_calibration_snapshot_valid(&snapshot) ||
+        cal_reconfigure(cal, &snapshot, &cal->tuning, now_us) != FOC_RUNTIME_OK) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_APPLY, now_us);
+        return;
+    }
+    cal->snapshot = snapshot;
+    cal->zero_ready = true;
+    cal->zero_refused = false;
+    cal_enter(cal, FOC_BOARD_CAL_DONE, now_us);
+}
+
+/* Foreground, while idle: measure this boot's ADC zero once a valid group exists. */
+static void cal_auto_zero(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (cal->zero_pending) {
+        cal->zero_pending = false;
+        /* Only a refused measurement waits; an interrupted one (shaft moved, state
+         * changed) retries after the settling time. */
+        cal->zero_refused = !cal->zero_ready && cal->failure == FOC_BOARD_CAL_FAILURE_ADC;
+        cal->zero_attempted = cal->zero_refused;
+        cal->zero_attempt_us = now_us;
+        if (!cal->zero_ready && !cal->zero_refused) {
+            cal->zero_settling = true;
+            cal->zero_settle_us = now_us;
+        }
+    }
+    if (cal->zero_settling && now_us - cal->zero_settle_us >= CAL_ZERO_SETTLE_US) {
+        cal->zero_settling = false;
+    }
+    if (cal->zero_ready || !cal_commutation_valid(cal) || cal->zero_settling ||
+        (cal->zero_attempted && now_us - cal->zero_attempt_us < CAL_ZERO_RETRY_US)) {
+        return;
+    }
+    /* A transient refusal (moving shaft, pending tuning, not yet inhibited) retries on the
+     * next pass; only a measurement that ran is rate-limited. */
+    if (foc_board_calibration_start(cal, now_us, FOC_BOARD_CAL_STAGE_ZERO) == FOC_PROTO_ACCEPTED) {
+        cal->zero_pending = true;
+        cal->zero_attempted = true;
+        cal->zero_attempt_us = now_us;
+    }
 }
 
 static float cal_mean(float older, float newer)
@@ -817,12 +902,16 @@ int foc_board_calibration_start(
     unsigned int stages
 )
 {
-    if (stages < FOC_BOARD_CAL_STAGE_ROTOR || stages > FOC_BOARD_CAL_STAGE_ALL) {
+    const bool zero_only = stages == FOC_BOARD_CAL_STAGE_ZERO;
+    if (!zero_only && (stages < FOC_BOARD_CAL_STAGE_ROTOR || stages > FOC_BOARD_CAL_STAGE_ALL)) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
-    if (cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
+    if (!zero_only && cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
         cal->output->backend == NULL) {
         return FOC_PROTO_OUTPUT_LOCKED; /* CAL-2 must drive the motor. */
+    }
+    if (zero_only && !cal_commutation_valid(cal)) {
+        return FOC_PROTO_BAD_STATE; /* The zero applies to a valid group. */
     }
     if (foc_board_calibration_busy(cal)) {
         return FOC_PROTO_BUSY;
@@ -889,7 +978,7 @@ int foc_board_calibration_start(
     cal->ring_high_water = 0U;
     cal->mode_claimed = false;
     cal->failing = false;
-    if ((stages & FOC_BOARD_CAL_STAGE_ROTOR) == 0U) {
+    if ((stages & FOC_BOARD_CAL_STAGE_ROTOR) == 0U && !zero_only) {
         /* The electrical stages commutate with the rotor mapping applied in this boot. */
         if (!cal->snapshot.accepted) {
             return FOC_PROTO_BAD_STATE;
@@ -918,6 +1007,122 @@ void foc_board_calibration_adopt(
     }
 }
 
+void foc_board_calibration_capture_boot(
+    struct foc_board_calibration *calibration,
+    const struct foc_board_boot *boot
+)
+{
+    if (calibration == NULL || boot == NULL ||
+        foc_runtime_read_tuning(calibration->runtime, &calibration->boot_tuning) !=
+            FOC_RUNTIME_OK) {
+        return;
+    }
+    calibration->boot_calibrated =
+        boot->configuration == FOC_BOARD_CALIBRATED_CONFIGURATION && boot->snapshot.accepted;
+    if (calibration->boot_calibrated) {
+        calibration->boot_snapshot = boot->snapshot;
+        calibration->snapshot = boot->snapshot;
+        calibration->active_source = FOC_BOARD_CAL_SOURCE_SUPPLY;
+    }
+}
+
+int foc_board_calibration_commutation(
+    struct foc_board_calibration *cal,
+    uint32_t now_us,
+    uint16_t pole_pairs,
+    int8_t direction,
+    float offset_rad
+)
+{
+    if (foc_board_calibration_busy(cal)) {
+        return FOC_PROTO_BUSY;
+    }
+    struct foc_runtime_snapshot view;
+    struct foc_runtime_tuning_result tuning_result;
+    struct foc_runtime_tuning tuning;
+    if (foc_runtime_read_snapshot(cal->runtime, &view) != FOC_RUNTIME_OK ||
+        foc_runtime_read_tuning_result(cal->runtime, &tuning_result) != FOC_RUNTIME_OK ||
+        tuning_result.result == FOC_RUNTIME_REQUEST_PENDING) {
+        return FOC_PROTO_BUSY;
+    }
+    if (!cal_quiet(&view)) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    if (pole_pairs == 0U || pole_pairs > FOC_BOARD_POLE_PAIRS_MAX ||
+        (direction != 1 && direction != -1) || !isfinite(offset_rad) || offset_rad < 0.0f ||
+        offset_rad >= CAL_TWO_PI ||
+        foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    /* The group joins the ADC zero in effect; the Runtime direction is the raw source
+     * direction times the calibration direction. */
+    const struct foc_device_adc_config *adc = &cal->runtime->pipeline.adc_config;
+    struct foc_calibration_snapshot snapshot = {
+        .phase_a_offset_count = adc->phase_a_offset_count,
+        .phase_b_offset_count = adc->phase_b_offset_count,
+        .phase_c_offset_count = adc->phase_c_offset_count,
+        .runtime_encoder_direction = direction,
+        .pole_pairs = pole_pairs,
+        .electrical_offset_rad = offset_rad,
+        .accepted = true,
+    };
+    foc_board_calibration_identity(pole_pairs, &snapshot.source_identity);
+    snapshot.calibration_direction = direction * snapshot.source_identity.encoder_direction;
+    if (!foc_calibration_snapshot_valid(&snapshot)) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    if (cal_reconfigure(cal, &snapshot, &tuning, now_us) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    cal->snapshot = snapshot;
+    cal->align_voltage_v = 0.0f;
+    cal->active_source = FOC_BOARD_CAL_SOURCE_HOST;
+    cal->zero_settling = true;
+    cal->zero_settle_us = now_us;
+    return FOC_PROTO_APPLIED;
+}
+
+int foc_board_calibration_reset(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (foc_board_calibration_busy(cal)) {
+        return FOC_PROTO_BUSY;
+    }
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(cal->runtime, &view) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    if (!cal_quiet(&view)) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    const struct foc_calibration_snapshot *boot = cal->boot_calibrated ? &cal->boot_snapshot : NULL;
+    if (cal_reconfigure(cal, boot, &cal->boot_tuning, now_us) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_INTERNAL_ERROR;
+    }
+    cal->serial->rx_budget = FOC_SERIAL_RX_DEFAULT;
+    cal->serial->current_limit_a = cal->boot_tuning.iq_limit_a;
+    cal->serial->position_limit_rad = 100.0f;
+    cal->snapshot = boot != NULL ? *boot : (struct foc_calibration_snapshot){0};
+    cal->active_source = boot != NULL ? FOC_BOARD_CAL_SOURCE_SUPPLY : FOC_BOARD_CAL_SOURCE_BOOT;
+    cal->align_voltage_v = 0.0f;
+    cal->zero_ready = false;
+    cal->zero_refused = false;
+    cal->zero_attempted = false;
+    cal->zero_settling = true;
+    cal->zero_settle_us = now_us;
+    return FOC_PROTO_APPLIED;
+}
+
+int foc_board_calibration_gate(const struct foc_board_calibration *cal)
+{
+    if (!cal_commutation_valid(cal)) {
+        return FOC_PROTO_NOT_CALIBRATED;
+    }
+    if (!cal->zero_ready || foc_board_calibration_busy(cal)) {
+        return FOC_PROTO_BUSY;
+    }
+    return FOC_PROTO_OK;
+}
+
 void foc_board_calibration_abort(struct foc_board_calibration *calibration)
 {
     if (foc_board_calibration_busy(calibration) && !calibration->failing) {
@@ -928,6 +1133,7 @@ void foc_board_calibration_abort(struct foc_board_calibration *calibration)
 void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_us)
 {
     if (!foc_board_calibration_busy(cal)) {
+        cal_auto_zero(cal, now_us);
         return;
     }
     const float dt_s = (float)(now_us - cal->last_us) * 1.0e-6f;
@@ -962,6 +1168,8 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
                       cal->adc_result.noise_rms_c_counts
                   ) <= CAL_ADC_MAX_NOISE_COUNTS)) {
                 cal_fail(cal, FOC_BOARD_CAL_FAILURE_ADC, now_us);
+            } else if (cal->stages == FOC_BOARD_CAL_STAGE_ZERO) {
+                cal_zero_apply(cal, now_us);
             } else {
                 cal_enter(cal, FOC_BOARD_CAL_DRIVE_MODE, now_us);
             }
@@ -1180,6 +1388,55 @@ static bool cal_serial_read(const void *context, struct foc_serial_calibration_v
     return true;
 }
 
+static int cal_serial_commutation(
+    void *context,
+    uint32_t now_us,
+    uint16_t pole_pairs,
+    int8_t direction,
+    float offset_rad
+)
+{
+    return foc_board_calibration_commutation(context, now_us, pole_pairs, direction, offset_rad);
+}
+
+static int cal_serial_trim(void *context, uint32_t now_us, float offset_rad)
+{
+    struct foc_board_calibration *cal = context;
+    if (!cal_commutation_valid(cal)) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    return foc_board_calibration_commutation(
+        cal,
+        now_us,
+        cal->snapshot.pole_pairs,
+        (int8_t)cal->snapshot.runtime_encoder_direction,
+        offset_rad
+    );
+}
+
+static int cal_serial_gate(const void *context)
+{
+    return foc_board_calibration_gate(context);
+}
+
+static bool cal_serial_commission(const void *context, struct foc_serial_commission_view *view)
+{
+    const struct foc_board_calibration *cal = context;
+    *view = (struct foc_serial_commission_view){
+        .valid = cal_commutation_valid(cal) ? 1U : 0U,
+        .source = cal->active_source,
+        .zero_state = cal->zero_ready ? FOC_BOARD_CAL_ZERO_READY
+            : cal->zero_refused       ? FOC_BOARD_CAL_ZERO_REFUSED
+                                      : FOC_BOARD_CAL_ZERO_PENDING,
+    };
+    return true;
+}
+
+static int cal_serial_reset(void *context, uint32_t now_us)
+{
+    return foc_board_calibration_reset(context, now_us);
+}
+
 struct foc_serial_calibration foc_board_calibration_serial(
     struct foc_board_calibration *calibration
 )
@@ -1190,6 +1447,11 @@ struct foc_serial_calibration foc_board_calibration_serial(
         .abort = cal_serial_abort,
         .busy = cal_serial_busy,
         .read = cal_serial_read,
+        .commutation = cal_serial_commutation,
+        .trim = cal_serial_trim,
+        .gate = cal_serial_gate,
+        .commission = cal_serial_commission,
+        .reset = cal_serial_reset,
     };
 }
 

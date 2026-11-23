@@ -3152,3 +3152,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 档案（Rs、Ld、Lq、Ψ、J、B、额定/峰值电流、最大转速、减速比、电流带宽）并入 Runtime tuning，与 PI、限值、保护阈值一起由 H0 生效；Runtime 校验档案范围与顺序约束，并以额定电流、最大转速作为保护基准。新增 `foc_board_profile` 统一刷新：写模型或带宽时用 `foc_motor_pi_design()` 重算电流 PI（设计拒绝则写入失败），写峰值电流、最大转速时收紧限值；CAL-3/4/5 经同一路径写回辨识模型。UART 新增 ID 80–86、96–99、104；ID 2 随 ID 73 下调。
 - 存储 format 3（212 字节）在 format 2 之后追加档案与保护阈值 ID 112–118，旧格式按启动值兼容读入；恢复时不重新推导 PI。SIL 新增 `profile` 场景（lockstep 与 free-run 通过），SIL 单元测试 13 项通过。资源：默认镜像 text 79,176 B（+1,408 B），bss 12,376 B；持久化镜像 text 83,024 B。
+
+## 2026-11-22 · V2 门禁、换相组写入、每次上电测零与换电机流程（参数契约第三步）
+
+- ARM/START 需有效换相组（来源 RUN/STORAGE/HOST/SUPPLY，NOMINAL 占位无效）与本次上电测得的 ADC 零点：无效返回新结果码 15 NOT_CALIBRATED，零点未就绪返回 BUSY。校准管理器在换相组有效时自动执行只测零点的 CAL-1（阶段 4，不驱动电机）并重新初始化；新增 COMMUTATION_WRITE（0x53）整组写入、ID 17 组内微调、只读 ID 88–90；CONFIG_ERASE 同时把 RAM 恢复为启动配置与启动 tuning。Runtime 增加传感器预热期：重新初始化后、首个传感器发布前，DISABLED 的 H0 不计入无效采样锁存。协议层登记 0x22、0x53。
+- CLI 新增 `motor-setup`（校准 → 档案 → 保存）与 `commission()`；SIL 场景改为先经串口导入启动换相组；新增 `swap` 场景（lockstep 与 free-run 通过），SIL 单元测试 14 项通过。已知局限：CAL-3 对 0.35 Ω/0.7 mH 电机拟合失败。资源：默认镜像 text 81,000 B，bss 12,584 B。

@@ -808,6 +808,21 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     const float aligned = foc_runtime_align_angle(runtime, &sensor, input);
     runtime->observed_sensor = sensor.sample;
     runtime->observed_sensor.valid = isfinite(aligned) && runtime->config.motion.enabled;
+    if (index == FOC_RUNTIME_UNPUBLISHED && runtime->config.motion.enabled &&
+        pipeline->safety.state == FOC_SAFE_STATE_DISABLED &&
+        input->action == FOC_RUNTIME_ACTION_NONE) {
+        /* Sensor warm-up: after initialization (boot or a re-initialization that installs a
+         * new commutation group) H1 needs its first usable encoder frames before any angle
+         * exists. A DISABLED instance keeps INHIBIT and its heartbeats without counting
+         * these angle-less samples toward the invalid-sample latch; ARM still requires a
+         * valid angle and the latch applies again once a sensor is published. */
+        foc_runtime_import_foreground(runtime, now_us);
+        runtime->pipeline_status = foc_pipeline_request_inhibit(pipeline, now_us, 0U);
+        if (pipeline->mock.output_confirmed) {
+            (void)foc_safe_heartbeat_fast(&pipeline->safety, now_us);
+        }
+        return FOC_RUNTIME_ERR_ALIGNMENT;
+    }
     const bool outer = foc_runtime_outer_mode(runtime->mode);
     const bool protection = outer && foc_runtime_protection_enabled(&runtime->config.motion);
     bool target_valid = outer && isfinite(aligned) && sensor.target_valid &&

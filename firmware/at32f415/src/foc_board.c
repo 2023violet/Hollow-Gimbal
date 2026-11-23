@@ -363,6 +363,37 @@ int foc_board_reconfigure(
     return FOC_RUNTIME_OK;
 }
 
+int foc_board_reconfigure_nominal(
+    struct foc_runtime *runtime,
+    struct foc_board_output *output,
+    struct foc_board_encoder *encoder,
+    uint32_t now_us
+)
+{
+    if (runtime == NULL || output == NULL || encoder == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    /* Keep the running lane schedules and the output backend, as foc_board_reconfigure. */
+    const struct foc_runtime_lane lanes[] =
+        {runtime->h0, runtime->h1, runtime->supervision, runtime->telemetry};
+    const foc_board_output_backend backend = output->backend;
+    void *const backend_argument = output->backend_argument;
+    /* foc_runtime_init() validates before it writes, so a refusal keeps the Runtime; the
+     * nominal configuration is a compile-time constant that always validates. */
+    const int status = foc_board_init(runtime, output, now_us);
+    output->backend = backend;
+    output->backend_argument = backend_argument;
+    if (status != FOC_RUNTIME_OK) {
+        return status;
+    }
+    *encoder = (struct foc_board_encoder){0};
+    runtime->h0 = lanes[0];
+    runtime->h1 = lanes[1];
+    runtime->supervision = lanes[2];
+    runtime->telemetry = lanes[3];
+    return FOC_RUNTIME_OK;
+}
+
 bool foc_board_elapsed_s(uint32_t now_us, uint32_t previous_us, uint32_t limit_us, float *seconds)
 {
     if (seconds == NULL || !foc_safe_timestamp_fresh(now_us, previous_us, limit_us)) {

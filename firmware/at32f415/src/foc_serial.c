@@ -55,6 +55,10 @@ enum {
     PARAM_STORE_LOADED_SEQUENCE = 49,
     PARAM_STORE_STORED_SEQUENCE = 50,
     PARAM_STORE_CALIBRATION = 51,
+    /* Commutation readback (step 3). */
+    PARAM_COMMUTATION_VALID = 88,
+    PARAM_COMMUTATION_SOURCE = 89,
+    PARAM_ADC_ZERO_STATE = 90,
     /* Controller tuning receipt, read only. */
     PARAM_TUNING_REVISION = 60,
     PARAM_TUNING_RESULT = 61,
@@ -730,6 +734,17 @@ static bool foc_serial_parameter_read(
         foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
+    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_ADC_ZERO_STATE &&
+        serial->calibration.commission != NULL) {
+        struct foc_serial_commission_view view = {0};
+        (void)serial->calibration.commission(serial->calibration.context, &view);
+        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
+        parameter->value = id == PARAM_COMMUTATION_VALID ? view.valid
+            : id == PARAM_COMMUTATION_SOURCE             ? view.source
+                                                         : view.zero_state;
+        parameter->minimum = parameter->maximum = parameter->value;
+        return true;
+    }
     if (id >= PARAM_STORE_STATE && id <= PARAM_STORE_CALIBRATION) {
         struct foc_serial_persistence_view view = {0};
         if (serial->persistence.read != NULL) {
@@ -779,6 +794,10 @@ static bool foc_serial_parameter_read(
             foc_serial_float_bits(runtime->config.motion.rotor.electrical_offset_rad);
         parameter->unit = UNIT_RADIAN;
         parameter->calibration_required = true;
+        /* A trim of the valid commutation group, [0, 2π). */
+        parameter->writable = serial->calibration.trim != NULL;
+        parameter->minimum = foc_serial_float_bits(0.0f);
+        parameter->maximum = foc_serial_float_bits(6.283185f);
         break;
     case PARAM_VELOCITY_LIMIT:
         parameter->value =
@@ -798,6 +817,7 @@ static int foc_serial_parameter(
     struct foc_serial *serial,
     struct foc_runtime *runtime,
     const struct foc_protocol_frame *request,
+    uint32_t now_us,
     struct foc_protocol_frame *response
 )
 {
@@ -865,6 +885,15 @@ static int foc_serial_parameter(
         case PARAM_POSITION_LIMIT:
             serial->position_limit_rad = foc_serial_bits_float(value);
             break;
+        case PARAM_ELECTRICAL_OFFSET: {
+            const int trimmed =
+                serial->calibration
+                    .trim(serial->calibration.context, now_us, foc_serial_bits_float(value));
+            if (trimmed != FOC_PROTO_APPLIED) {
+                return trimmed;
+            }
+            break;
+        }
         default:
             return FOC_PROTO_INTERNAL_ERROR;
         }
@@ -1009,6 +1038,7 @@ static int foc_serial_store(
     struct foc_serial *serial,
     struct foc_runtime *runtime,
     uint8_t type,
+    uint32_t now_us,
     struct foc_protocol_frame *response
 )
 {
@@ -1024,7 +1054,15 @@ static int foc_serial_store(
         return FOC_PROTO_BAD_STATE;
     }
     if (type == FOC_MSG_CONFIG_ERASE) {
-        return serial->persistence.erase(serial->persistence.context);
+        const int erased = serial->persistence.erase(serial->persistence.context);
+        if (erased != FOC_PROTO_APPLIED || serial->calibration.reset == NULL) {
+            return erased;
+        }
+        const int reset = serial->calibration.reset(serial->calibration.context, now_us);
+        if (reset == FOC_PROTO_APPLIED) {
+            serial->dirty = false;
+        }
+        return reset;
     }
     uint32_t sequence = 0U;
     const int result =
@@ -1078,7 +1116,7 @@ static bool foc_serial_controls(uint8_t type)
     return type == FOC_MSG_SETPOINT || type == FOC_MSG_ARM || type == FOC_MSG_START ||
         type == FOC_MSG_SET_MODE || type == FOC_MSG_PARAM_WRITE || type == FOC_MSG_PARAM_SAVE ||
         type == FOC_MSG_CONFIG_ERASE || type == FOC_MSG_FAULT_CLEAR ||
-        type == FOC_MSG_CALIBRATE_START;
+        type == FOC_MSG_CALIBRATE_START || type == FOC_MSG_COMMUTATION_WRITE;
 }
 
 static int
@@ -1147,7 +1185,7 @@ static int foc_serial_dispatch(
         return FOC_PROTO_BUSY;
     }
     if (request->type == FOC_MSG_PARAM_READ || request->type == FOC_MSG_PARAM_WRITE) {
-        return foc_serial_parameter(serial, runtime, request, response);
+        return foc_serial_parameter(serial, runtime, request, now_us, response);
     }
     if (request->type == FOC_MSG_SETPOINT) {
         const int result = foc_serial_setpoint(serial, runtime, request, now_us);
@@ -1174,12 +1212,31 @@ static int foc_serial_dispatch(
     if (request->type == FOC_MSG_CALIBRATE_START) {
         /* Optional stage mask: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5); empty means both. */
         const unsigned int stages = request->length == 0U ? 3U : request->payload[0];
-        if (request->length > 1U || stages < 1U || stages > 3U) {
+        if (request->length > 1U || stages < 1U || stages > 4U) {
             return FOC_PROTO_INVALID_ARGUMENT;
         }
         return serial->calibration.start == NULL
             ? FOC_PROTO_NOT_SUPPORTED
             : serial->calibration.start(serial->calibration.context, now_us, stages);
+    }
+    if (request->type == FOC_MSG_COMMUTATION_WRITE) {
+        if (serial->calibration.commutation == NULL) {
+            return FOC_PROTO_NOT_SUPPORTED;
+        }
+        if (request->length != 7U) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
+        const int result = serial->calibration.commutation(
+            serial->calibration.context,
+            now_us,
+            foc_protocol_read_u16(request->payload),
+            (int8_t)request->payload[2],
+            foc_serial_bits_float(foc_protocol_read_u32(request->payload + 3))
+        );
+        if (result == FOC_PROTO_APPLIED) {
+            serial->dirty = true;
+        }
+        return result;
     }
     if (request->length != 0U) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -1215,6 +1272,12 @@ static int foc_serial_dispatch(
         if (serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY) {
             return FOC_PROTO_OUTPUT_LOCKED;
         }
+        if (serial->calibration.gate != NULL) {
+            const int admitted = serial->calibration.gate(serial->calibration.context);
+            if (admitted != FOC_PROTO_OK) {
+                return admitted;
+            }
+        }
         return foc_serial_lifecycle(
             serial,
             runtime,
@@ -1232,7 +1295,7 @@ static int foc_serial_dispatch(
     }
     case FOC_MSG_PARAM_SAVE:
     case FOC_MSG_CONFIG_ERASE:
-        return foc_serial_store(serial, runtime, request->type, response);
+        return foc_serial_store(serial, runtime, request->type, now_us, response);
     case FOC_MSG_TELEMETRY_STREAM:
         return FOC_PROTO_NOT_SUPPORTED;
     default:

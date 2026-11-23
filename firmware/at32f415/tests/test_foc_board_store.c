@@ -108,6 +108,9 @@ static struct foc_board_settings settings_with_kp(float kp)
                 .velocity_limit_rad_s = 12.0f,
                 .iq_limit_a = 2.5f,
                 .command_timeout_us = 2500U,
+                /* Board1 initial protection and profile, as a format-3 record carries. */
+                .trips = {3.0f, 22.0f, 5.0f, 0.0f, 1000U, 200U, 300U},
+                .profile = {.gear_ratio = 1.0f, .current_bandwidth_hz = 150.0f},
             },
         .rx_budget = 24U,
         .remote_current_cap_a = 2.5f,
@@ -458,9 +461,64 @@ static int test_calibration_record(void)
     put_word(v1 + 104, test_crc32(v1 + 4, 100U));
     CHECK(foc_board_store_decode(v1, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
     CHECK(!out.calibration_present && out.tuning.current_kp_v_per_a.q == 2.0f && sequence == 3U);
+    CHECK(!out.extended);
+    /* A format-2 record (140 bytes, CRC at 136) keeps its calibration, no profile. */
+    uint8_t v2[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v2, 0xFF, sizeof v2);
+    memcpy(v2, record, 136U);
+    v2[8] = 2U;
+    v2[10] = 140U;
+    put_word(v2 + 136, test_crc32(v2 + 4, 132U));
+    CHECK(foc_board_store_decode(v2, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.calibration_present && out.calibration.pole_pairs == 11U && !out.extended);
+    CHECK(out.tuning.profile.rs_ohm == 0.0f && out.tuning.trips.overcurrent_a == 0.0f);
     /* Unknown flag bits are refused. */
     record[104] = 3U;
-    put_word(record + 136, test_crc32(record + 4, 132U));
+    put_word(record + 208, test_crc32(record + 4, 204U));
+    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    return 0;
+}
+
+/* Format 3 carries the motor profile and the protection thresholds. */
+static int test_profile_record(void)
+{
+    uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
+    struct foc_board_settings in = settings_with_kp(2.0f);
+    in.tuning.profile = (struct foc_runtime_profile){
+        .rs_ohm = 0.45f,
+        .ld_h = 0.0009f,
+        .lq_h = 0.0013f,
+        .flux_wb = 0.008f,
+        .inertia_kg_m2 = 2.0e-5f,
+        .damping_nm_s_per_rad = 1.0e-4f,
+        .rated_current_a = 1.2f,
+        .peak_current_a = 2.0f,
+        .max_speed_rad_s = 80.0f,
+        .gear_ratio = 9.0f,
+        .current_bandwidth_hz = 120.0f,
+    };
+    in.tuning.trips = (struct foc_runtime_trip_limits){
+        .overcurrent_a = 3.1f,
+        .overvoltage_v = 21.0f,
+        .undervoltage_v = 6.0f,
+        .overspeed_rad_s = 90.0f,
+        .sustained_ms = 1500U,
+        .stall_ms = 250U,
+        .divergence_ms = 400U,
+    };
+    foc_board_store_encode(&nominal, &in, 7U, record);
+    put_word(record, UINT32_C(0xC35A4C7E));
+    CHECK(record[8] == 3U && record[10] == 212U);
+    struct foc_board_store_identity identity;
+    struct foc_board_settings out;
+    uint32_t sequence = 0U;
+    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.extended && sequence == 7U);
+    CHECK(memcmp(&out.tuning.profile, &in.tuning.profile, sizeof in.tuning.profile) == 0);
+    CHECK(out.tuning.trips.overcurrent_a == 3.1f && out.tuning.trips.undervoltage_v == 6.0f);
+    CHECK(out.tuning.trips.sustained_ms == 1500U && out.tuning.trips.divergence_ms == 400U);
+    /* A flipped extension byte breaks the CRC. */
+    record[150] ^= 1U;
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     return 0;
 }
@@ -510,7 +568,7 @@ static int test_restore_calibration(void)
 int main(void)
 {
     return test_codec() || test_slots() || test_sequence_wrap() || test_restore() ||
-        test_calibration_record() || test_restore_calibration();
+        test_calibration_record() || test_profile_record() || test_restore_calibration();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

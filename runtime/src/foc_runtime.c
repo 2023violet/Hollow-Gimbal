@@ -635,10 +635,40 @@ static enum foc_following_state foc_runtime_following_trial(
 
 /* Protection ------------------------------------------------------------------ */
 
+static bool foc_runtime_unset_or(float value, float minimum, float maximum)
+{
+    return isfinite(value) && (value == 0.0f || (value >= minimum && value <= maximum));
+}
+
+/* Profile ranges and the ordering against the limits it bounds. */
+static bool foc_runtime_profile_valid(
+    const struct foc_runtime_profile *profile,
+    float current_limit_a,
+    float velocity_limit_rad_s
+)
+{
+    return foc_runtime_unset_or(profile->rs_ohm, 1.0e-3f, 100.0f) &&
+        foc_runtime_unset_or(profile->ld_h, 1.0e-6f, 1.0f) &&
+        foc_runtime_unset_or(profile->lq_h, 1.0e-6f, 1.0f) &&
+        foc_runtime_unset_or(profile->flux_wb, 1.0e-5f, 1.0f) &&
+        foc_runtime_unset_or(profile->inertia_kg_m2, 0.0f, 1.0f) &&
+        foc_runtime_unset_or(profile->damping_nm_s_per_rad, 0.0f, 10.0f) &&
+        foc_runtime_unset_or(profile->rated_current_a, 0.05f, 1000.0f) &&
+        foc_runtime_unset_or(profile->peak_current_a, 0.05f, 1000.0f) &&
+        foc_runtime_unset_or(profile->max_speed_rad_s, 0.1f, 100000.0f) &&
+        foc_runtime_unset_or(profile->gear_ratio, 1.0f, 1000.0f) &&
+        foc_runtime_unset_or(profile->current_bandwidth_hz, 10.0f, 1000.0f) &&
+        (profile->rated_current_a == 0.0f || profile->peak_current_a == 0.0f ||
+         profile->rated_current_a <= profile->peak_current_a) &&
+        (profile->peak_current_a == 0.0f || current_limit_a <= profile->peak_current_a) &&
+        (profile->max_speed_rad_s == 0.0f || velocity_limit_rad_s <= profile->max_speed_rad_s);
+}
+
 /* Derive effective thresholds; a disabled instance yields a disabled configuration. */
 static bool foc_runtime_trip_resolve(
     bool enabled,
     const struct foc_runtime_trip_limits *trips,
+    const struct foc_runtime_profile *profile,
     float current_limit_a,
     float iq_limit_a,
     float velocity_limit_rad_s,
@@ -650,6 +680,8 @@ static bool foc_runtime_trip_resolve(
         return true;
     }
     const float iq_basis = iq_limit_a > 0.0f ? iq_limit_a : current_limit_a;
+    const float speed_basis =
+        profile->max_speed_rad_s > 0.0f ? profile->max_speed_rad_s : velocity_limit_rad_s;
     if (!isfinite(trips->overcurrent_a) || !(trips->overcurrent_a > current_limit_a) ||
         !isfinite(trips->overspeed_rad_s) ||
         !(trips->overspeed_rad_s == 0.0f || trips->overspeed_rad_s >= velocity_limit_rad_s) ||
@@ -667,10 +699,11 @@ static bool foc_runtime_trip_resolve(
         .voltage_samples = 3U,
         .overspeed_rad_s =
             trips->overspeed_rad_s > 0.0f ? trips->overspeed_rad_s : 1.25f * velocity_limit_rad_s,
-        .sustained_current_a = 0.95f * current_limit_a,
+        .sustained_current_a =
+            profile->rated_current_a > 0.0f ? profile->rated_current_a : 0.95f * current_limit_a,
         .sustained_us = trips->sustained_ms * 1000U,
         .stall_current_a = 0.95f * iq_basis,
-        .stall_speed_rad_s = 0.05f * velocity_limit_rad_s,
+        .stall_speed_rad_s = 0.05f * speed_basis,
         .stall_us = trips->stall_ms * 1000U,
         .divergence_current_a = 0.95f * iq_basis,
         .divergence_us = trips->divergence_ms * 1000U,
@@ -1444,14 +1477,20 @@ static int foc_runtime_tuning_check(
 )
 {
     if (tuning != NULL &&
-        !foc_runtime_trip_resolve(
-            runtime->config.trip_enabled,
-            &tuning->trips,
-            tuning->current_limit_a,
-            runtime->config.motion.enabled ? tuning->iq_limit_a : 0.0f,
-            tuning->velocity_limit_rad_s,
-            protect
-        )) {
+        (!foc_runtime_profile_valid(
+             &tuning->profile,
+             tuning->current_limit_a,
+             tuning->velocity_limit_rad_s
+         ) ||
+         !foc_runtime_trip_resolve(
+             runtime->config.trip_enabled,
+             &tuning->trips,
+             &tuning->profile,
+             tuning->current_limit_a,
+             runtime->config.motion.enabled ? tuning->iq_limit_a : 0.0f,
+             tuning->velocity_limit_rad_s,
+             protect
+         ))) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     if (tuning == NULL || runtime->pipeline.feedforward.enabled ||
@@ -1504,6 +1543,7 @@ static void foc_runtime_tuning_commit(
         runtime->config.trips = tuning->trips;
         runtime->protect = *protect;
     }
+    runtime->config.profile = tuning->profile;
     if (runtime->config.motion.enabled) {
         runtime->outer_velocity = *velocity;
         runtime->config.motion.velocity = velocity->config;
@@ -1591,6 +1631,7 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .iq_limit_a = motion->iq_limit_a,
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
         .trips = runtime->config.trips,
+        .profile = runtime->config.profile,
     };
     return FOC_RUNTIME_OK;
 }
@@ -1696,9 +1737,15 @@ int foc_runtime_init(
     struct foc_pipeline pipeline;
     struct foc_protect_config protect;
     if (foc_pipeline_init(&pipeline, pipeline_config) != FOC_PIPELINE_OK ||
+        !foc_runtime_profile_valid(
+            &config->profile,
+            pipeline_config->current.current_limit_a,
+            config->motion.position.velocity_limit_rad_s
+        ) ||
         !foc_runtime_trip_resolve(
             config->trip_enabled,
             &config->trips,
+            &config->profile,
             pipeline_config->current.current_limit_a,
             config->motion.enabled ? config->motion.iq_limit_a : 0.0f,
             config->motion.position.velocity_limit_rad_s,

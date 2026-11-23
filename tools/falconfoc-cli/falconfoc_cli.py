@@ -48,7 +48,15 @@ PARAMETERS = {
     "trip-overcurrent": 112, "trip-overvoltage": 113, "trip-undervoltage": 114,
     "trip-overspeed": 115, "trip-sustained-ms": 116, "trip-stall-ms": 117,
     "trip-divergence-ms": 118,
+    "model-rs": 80, "model-ld": 81, "model-lq": 82, "model-flux": 83, "model-kt": 84,
+    "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
+    "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104,
 }
+# Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
+PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
+                      "model-damping", "rated-current", "peak-current", "max-speed",
+                      "gear-ratio", "current-bandwidth", "current-kp-q", "current-ki-q",
+                      "current-limit", "velocity-limit", "trip-sustained-ms")
 PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32"}
 # Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection.
 FAULT_BITS = ["COMMAND_TIMEOUT", "SAMPLE_TIMEOUT", "SAMPLE_INVALID", "FAST_HEARTBEAT",
@@ -859,7 +867,7 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist", "calibrate-faults", "protect")
+                 "calibrate-persist", "calibrate-faults", "protect", "profile")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1717,7 +1725,7 @@ def run_sil_protect(simulator, base_arguments, json_path=None):
     transport.__exit__()
     transport, session, result = inject(
         "sustained_current", [], "SUSTAINED_CURRENT",
-        prepare=(("iq-limit", 0.5), ("current-limit", 0.6), ("trip-sustained-ms", 100)),
+        prepare=(("iq-limit", 0.6), ("current-limit", 0.6), ("trip-sustained-ms", 100)),
         reference=0.6)
     transport.__exit__()
     transport, session, result = inject(
@@ -1757,6 +1765,130 @@ def run_sil_protect(simulator, base_arguments, json_path=None):
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-protect",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_profile(simulator, base_arguments, flash_path, json_path=None):
+    """Motor profile, unified refresh and store format 3 (parameter contract section 13):
+    the model and bandwidth derive the current PI, the peak current and maximum speed
+    bound the limits, the rated current sets the sustained-current protection, the profile
+    survives a power cycle, and an on-MCU calibration writes the identified model.
+    Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+
+    def boot(arguments):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def close(value, expected, tolerance=1e-4):
+        return abs(value - expected) <= tolerance * max(1.0, abs(expected))
+
+    def gains(session):
+        return {name: session.read(name) for name in (
+            "current-kp-d", "current-kp-q", "current-ki-d", "current-ki-q")}
+
+    if flash_path.exists():
+        flash_path.unlink()
+    arguments = ["--flash", str(flash_path)]
+    transport, session = boot(arguments)
+
+    # 1. Model and bandwidth derive the current PI (SIL motor: 0.6 Ω, 1.2/1.5 mH).
+    for name, value in (("model-rs", 0.6), ("model-ld", 0.0012)):
+        assert session.tune(name, value) == "APPLIED", name
+    metrics["gains_incomplete_model"] = gains(session)
+    checks["incomplete_model_keeps_gains"] = close(
+        metrics["gains_incomplete_model"]["current-kp-q"], 1.35)
+    assert session.tune("model-lq", 0.0015) == "APPLIED"
+    omega = 2.0 * math.pi * 150.0
+    derived = metrics["gains_150hz"] = gains(session)
+    checks["pi_derived_at_150hz"] = (close(derived["current-kp-d"], omega * 0.0012)
+                                     and close(derived["current-kp-q"], omega * 0.0015)
+                                     and close(derived["current-ki-q"], omega * 0.6))
+    assert session.tune("current-bandwidth", 100.0) == "APPLIED"
+    omega = 2.0 * math.pi * 100.0
+    derived = metrics["gains_100hz"] = gains(session)
+    checks["pi_follows_bandwidth"] = (close(derived["current-kp-q"], omega * 0.0015)
+                                      and close(derived["current-ki-d"], omega * 0.6))
+    checks["bandwidth_above_h0_limit_refused"] = (
+        session.tune("current-bandwidth", 300.0) == "INVALID_ARGUMENT")
+    checks["model_the_design_refuses_is_refused"] = (
+        session.tune("model-rs", 5.0) == "INVALID_ARGUMENT" and close(session.read("model-rs"), 0.6))
+
+    # 2. Flux gives Kt; inertia, damping and gear ratio are stored.
+    for name, value in (("model-flux", 0.01), ("model-inertia", 0.002),
+                        ("model-damping", 0.006), ("gear-ratio", 9.0)):
+        assert session.tune(name, value) == "APPLIED", name
+    checks["kt_from_flux"] = close(session.read("model-kt"), 1.5 * 7 * 0.01)
+
+    # 3. Peak current and maximum speed bound the limits.
+    assert session.tune("peak-current", 1.5) == "APPLIED"
+    checks["peak_tightens_limits"] = (close(session.read("current-limit"), 1.5)
+                                      and close(session.read("iq-limit"), 1.5))
+    checks["limit_above_peak_refused"] = session.tune("current-limit", 2.0) == "INVALID_ARGUMENT"
+    assert session.tune("max-speed", 8.0) == "APPLIED"
+    checks["max_speed_tightens_speed_limit"] = close(session.read("velocity-limit"), 8.0)
+    checks["speed_limit_above_max_refused"] = (
+        session.tune("velocity-limit", 10.0) == "INVALID_ARGUMENT")
+
+    # 4. The rated current sets the sustained-current protection.
+    assert session.tune("rated-current", 0.5) == "APPLIED"
+    assert session.tune("trip-sustained-ms", 100) == "APPLIED"
+    steps, samples = session.run("current", 0.6, 600000)
+    status = session.status()
+    metrics["rated_current_trip"] = status["fault_names"]
+    checks["rated_current_drives_sustained_trip"] = status["fault_names"] == ["SUSTAINED_CURRENT"]
+    session.call("clear")
+    for _ in range(200):
+        if session.status()["state"] == SIL_STATE_DISABLED:
+            break
+    before = {name: session.read(name) for name in PROFILE_PARAMETERS}
+    checks["save_applied"] = session.call("save")["result"] == "APPLIED"
+    transport.__exit__()
+
+    # 5. The profile, the derived PI and the thresholds survive a power cycle.
+    transport, session = boot(arguments)
+    after = {name: session.read(name) for name in PROFILE_PARAMETERS}
+    metrics["restored"] = after
+    checks["profile_restored"] = (session.read("store-state") == 2 and all(
+        close(after[name], before[name]) for name in PROFILE_PARAMETERS))
+    transport.__exit__()
+
+    # 6. An on-MCU calibration writes the identified model into the profile.
+    plant = SIL_CALIBRATE_PLANT
+    transport, session = boot(list(SIL_CALIBRATE_ARGUMENTS))
+    session.call("calibrate")
+    view, _ = _calibrate_wait(session)
+    model = {name: session.read(name) for name in (
+        "model-rs", "model-ld", "model-lq", "model-flux", "model-kt", "current-kp-q",
+        "current-ki-q")}
+    metrics["calibrated_model"] = model
+    checks["calibration_writes_profile"] = (
+        view["calibration_state"] == "DONE" and close(model["model-rs"], view["rs_ohm"])
+        and close(model["model-ld"], view["ld_h"]) and close(model["model-lq"], view["lq_h"])
+        and close(model["model-flux"], view["flux_wb"])
+        and close(model["model-kt"], 1.5 * plant["pole_pairs"] * view["flux_wb"], 1e-3)
+        and close(model["current-kp-q"], view["kp_q_v_per_a"])
+        and close(model["current-ki-q"], view["ki_v_per_a_s"]))
+    checks["calibrated_model_near_plant"] = (abs(model["model-rs"] - plant["rs_ohm"]) < 0.05
+                                             and abs(model["model-flux"] - plant["flux_wb"]) < 0.001)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-profile",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -2048,6 +2180,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "profile":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-profile-flash.bin"))
+                summary = run_sil_profile(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "protect":
                 summary = run_sil_protect(os.path.abspath(args.simulator), simulator_arguments,
                                           args.json)

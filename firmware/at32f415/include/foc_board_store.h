@@ -43,8 +43,8 @@ enum foc_board_store_limits {
     /** Bytes reserved per slot; the device erase unit must fit inside. */
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
     /** Encoded record size and programming unit. */
-    /** Format 2 record; format 1 (108 bytes, no calibration) still decodes. */
-    FOC_BOARD_STORE_RECORD_BYTES = 140,
+    /** Format 3 record; formats 1 (108 bytes) and 2 (140 bytes) still decode. */
+    FOC_BOARD_STORE_RECORD_BYTES = 212,
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 
@@ -80,6 +80,9 @@ struct foc_board_settings {
     /** Format 2: an applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;
+    /** Format 3: tuning.profile and tuning.trips came from the record. Otherwise the
+     * restore keeps their boot values. */
+    bool extended;
 };
 
 /** Wire values of UART PARAM_READ ID 48. */

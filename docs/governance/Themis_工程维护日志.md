@@ -3147,3 +3147,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 新增可移植模块 `g3/safe/foc_protect`：过流、过压/欠压、过速、持续大电流、堵转、跟踪发散（分窗统计）。Runtime 在 H0 每个接受的运行周期后评估，跳闸经既有 stop 路径锁存故障位 9–15 并 INHIBIT，同时锁存快照（0x22 FAULT_SNAPSHOT_READ）。FAULT_CLEAR 扩展到保护类故障（电压类要求 VBUS 回到窗口内）。阈值为 tuning ID 112–118，暂只在 RAM。初始值依据原理图（VM 5.25–20 V）与 DRV8311 数据手册（VM 绝对最大 24 V），待实物确认。
 - SIL 新增 `--adc-step` 注入与 `sil-demo --sil-scenario protect`：换相错配 6 例、逐规则注入、清除、反向不误报，全部通过；物理输出、目标板阈值与 WCET 未验证。
 - 资源基线（arm-none-eabi-size）：默认镜像 text 77,768 B（此前 75,200 B，约占 128 KB Flash 59%），data+bss 12,340 B（约占 32 KB RAM 38%，另有 4 KB 栈余量断言）；持久化镜像 text 81,112 B。回归 fwinteg 126×3 VERDICT PASS，protect 场景 lockstep 与 free-run 均 SIL_PASS。
+
+## 2026-11-22 · V2 电机档案、统一刷新与存储 format 3（参数契约第二步）
+
+- 档案（Rs、Ld、Lq、Ψ、J、B、额定/峰值电流、最大转速、减速比、电流带宽）并入 Runtime tuning，与 PI、限值、保护阈值一起由 H0 生效；Runtime 校验档案范围与顺序约束，并以额定电流、最大转速作为保护基准。新增 `foc_board_profile` 统一刷新：写模型或带宽时用 `foc_motor_pi_design()` 重算电流 PI（设计拒绝则写入失败），写峰值电流、最大转速时收紧限值；CAL-3/4/5 经同一路径写回辨识模型。UART 新增 ID 80–86、96–99、104；ID 2 随 ID 73 下调。
+- 存储 format 3（212 字节）在 format 2 之后追加档案与保护阈值 ID 112–118，旧格式按启动值兼容读入；恢复时不重新推导 PI。SIL 新增 `profile` 场景（lockstep 与 free-run 通过），SIL 单元测试 13 项通过。资源：默认镜像 text 79,176 B（+1,408 B），bss 12,376 B；持久化镜像 text 83,024 B。

@@ -13,6 +13,8 @@
 
 #include "foc_serial.h"
 
+#include "foc_board_profile.h"
+
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -69,6 +71,20 @@ enum {
     PARAM_VELOCITY_REFERENCE_LIMIT = 72,
     PARAM_IQ_LIMIT = 73,
     PARAM_COMMAND_LEASE = 74,
+    /* Motor model (contract 3.1); Kt is derived and read only. */
+    PARAM_MODEL_RS = 80,
+    PARAM_MODEL_LD = 81,
+    PARAM_MODEL_LQ = 82,
+    PARAM_MODEL_FLUX = 83,
+    PARAM_MODEL_KT = 84,
+    PARAM_MODEL_INERTIA = 85,
+    PARAM_MODEL_DAMPING = 86,
+    /* User profile (contract 3.3) and the current-loop bandwidth (3.4). */
+    PARAM_PROFILE_RATED_CURRENT = 96,
+    PARAM_PROFILE_PEAK_CURRENT = 97,
+    PARAM_PROFILE_MAX_SPEED = 98,
+    PARAM_PROFILE_GEAR_RATIO = 99,
+    PARAM_CURRENT_BANDWIDTH = 104,
     /* Motor-protection thresholds, writable while DISABLED; applied by H0. */
     PARAM_TRIP_OVERCURRENT = 112,
     PARAM_TRIP_OVERVOLTAGE = 113,
@@ -90,6 +106,13 @@ enum {
     UNIT_A_PER_RAD_S = 8,
     UNIT_A_PER_RAD = 9,
     UNIT_PER_SECOND = 10,
+    UNIT_OHM = 11,
+    UNIT_HENRY = 12,
+    UNIT_WEBER = 13,
+    UNIT_NM_PER_A = 14,
+    UNIT_KG_M2 = 15,
+    UNIT_NM_S_PER_RAD = 16,
+    UNIT_HERTZ = 17,
     UNIT_VOLT = 18,
     UNIT_MILLISECOND = 20,
     /* Direction codes on the wire: none, +1 and -1. */
@@ -331,8 +354,11 @@ static bool foc_serial_tuning_parameter(
     struct foc_runtime_tuning tuning;
     struct foc_runtime_tuning_result receipt;
     const bool trip = id >= PARAM_TRIP_OVERCURRENT && id <= PARAM_TRIP_DIVERGENCE;
+    const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
+        (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
+        id == PARAM_CURRENT_BANDWIDTH;
     if ((trip ? !runtime->config.trip_enabled
-              : (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
+              : !profile && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
         foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
         foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) != FOC_RUNTIME_OK) {
         return false;
@@ -426,6 +452,76 @@ static bool foc_serial_tuning_parameter(
             .writable = true,
             .tuning = true,
         };
+        return true;
+    case PARAM_MODEL_RS:
+        foc_serial_tuning_float(parameter, tuning.profile.rs_ohm, 0.0f, 100.0f, UNIT_OHM);
+        return true;
+    case PARAM_MODEL_LD:
+    case PARAM_MODEL_LQ:
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_MODEL_LD ? tuning.profile.ld_h : tuning.profile.lq_h,
+            0.0f,
+            1.0f,
+            UNIT_HENRY
+        );
+        return true;
+    case PARAM_MODEL_FLUX:
+        foc_serial_tuning_float(parameter, tuning.profile.flux_wb, 0.0f, 1.0f, UNIT_WEBER);
+        return true;
+    case PARAM_MODEL_KT: {
+        /* Kt = 1.5 x pole pairs x flux linkage, per peak q ampere; 0 without a flux. */
+        const float kt =
+            1.5f * (float)runtime->config.motion.rotor.pole_pairs * tuning.profile.flux_wb;
+        foc_serial_tuning_float(parameter, kt, kt, kt, UNIT_NM_PER_A);
+        parameter->writable = false;
+        parameter->tuning = false;
+        return true;
+    }
+    case PARAM_MODEL_INERTIA:
+        foc_serial_tuning_float(parameter, tuning.profile.inertia_kg_m2, 0.0f, 1.0f, UNIT_KG_M2);
+        return true;
+    case PARAM_MODEL_DAMPING:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.profile.damping_nm_s_per_rad,
+            0.0f,
+            10.0f,
+            UNIT_NM_S_PER_RAD
+        );
+        return true;
+    case PARAM_PROFILE_RATED_CURRENT:
+    case PARAM_PROFILE_PEAK_CURRENT:
+        /* A motor may be rated above the board: ID 68 keeps the board ceiling. */
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_PROFILE_RATED_CURRENT ? tuning.profile.rated_current_a
+                                              : tuning.profile.peak_current_a,
+            0.0f,
+            1000.0f,
+            UNIT_AMPERE
+        );
+        return true;
+    case PARAM_PROFILE_MAX_SPEED:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.profile.max_speed_rad_s,
+            0.0f,
+            FOC_SERIAL_TRIP_SPEED_MAX,
+            UNIT_RAD_S
+        );
+        return true;
+    case PARAM_PROFILE_GEAR_RATIO:
+        foc_serial_tuning_float(parameter, tuning.profile.gear_ratio, 1.0f, 1000.0f, UNIT_NONE);
+        return true;
+    case PARAM_CURRENT_BANDWIDTH:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.profile.current_bandwidth_hz,
+            (float)FOC_BOARD_PROFILE_BANDWIDTH_MIN_HZ,
+            (float)FOC_BOARD_PROFILE_BANDWIDTH_MAX_HZ,
+            UNIT_HERTZ
+        );
         return true;
     case PARAM_TRIP_OVERCURRENT:
         /* H0 also requires it strictly above the current-vector limit. */
@@ -553,8 +649,59 @@ static int foc_serial_tuning_write(
     case PARAM_TRIP_DIVERGENCE:
         tuning.trips.divergence_ms = value;
         break;
+    case PARAM_MODEL_RS:
+        tuning.profile.rs_ohm = floating;
+        break;
+    case PARAM_MODEL_LD:
+        tuning.profile.ld_h = floating;
+        break;
+    case PARAM_MODEL_LQ:
+        tuning.profile.lq_h = floating;
+        break;
+    case PARAM_MODEL_FLUX:
+        tuning.profile.flux_wb = floating;
+        break;
+    case PARAM_MODEL_INERTIA:
+        tuning.profile.inertia_kg_m2 = floating;
+        break;
+    case PARAM_MODEL_DAMPING:
+        tuning.profile.damping_nm_s_per_rad = floating;
+        break;
+    case PARAM_PROFILE_RATED_CURRENT:
+        tuning.profile.rated_current_a = floating;
+        break;
+    case PARAM_PROFILE_PEAK_CURRENT:
+        tuning.profile.peak_current_a = floating;
+        break;
+    case PARAM_PROFILE_MAX_SPEED:
+        tuning.profile.max_speed_rad_s = floating;
+        break;
+    case PARAM_PROFILE_GEAR_RATIO:
+        tuning.profile.gear_ratio = floating;
+        break;
+    case PARAM_CURRENT_BANDWIDTH:
+        tuning.profile.current_bandwidth_hz = floating;
+        break;
     default:
         return FOC_PROTO_INTERNAL_ERROR;
+    }
+    /* Unified refresh (contract 13.3), for profile fields only: a model or bandwidth change
+     * re-derives the current PI, a peak current or maximum speed tightens the limits it
+     * bounds. A written limit is never adjusted: H0 refuses one that breaks the ordering. */
+    const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
+        (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
+        id == PARAM_CURRENT_BANDWIDTH;
+    const bool redesign = id == PARAM_MODEL_RS || id == PARAM_MODEL_LD || id == PARAM_MODEL_LQ ||
+        id == PARAM_CURRENT_BANDWIDTH;
+    if (profile &&
+        !foc_board_profile_refresh(
+            runtime->config.h0.period_us,
+            runtime->pipeline.current.config.pwm.voltage_limit_v,
+            &tuning,
+            redesign,
+            NULL
+        )) {
+        return FOC_PROTO_INVALID_ARGUMENT;
     }
     const uint32_t sequence = serial->tuning_sequence + 1U;
     const int result = foc_runtime_publish_tuning(runtime, &tuning, sequence);
@@ -565,6 +712,10 @@ static int foc_serial_tuning_write(
         return FOC_PROTO_INVALID_ARGUMENT;
     }
     serial->tuning_sequence = sequence;
+    /* The remote current cap (ID 2) stays within the outer q-current limit it serves. */
+    if (serial->current_limit_a > tuning.iq_limit_a) {
+        serial->current_limit_a = tuning.iq_limit_a;
+    }
     return FOC_PROTO_ACCEPTED;
 }
 

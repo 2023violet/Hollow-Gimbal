@@ -141,15 +141,19 @@ static const struct foc_runtime_config runtime_config = {
      * All values await confirmation on the target board.
      */
     .trip_enabled = true,
-    .trips = {
-        .overcurrent_a = 3.0f,
-        .overvoltage_v = 22.0f,
-        .undervoltage_v = 5.0f,
-        .overspeed_rad_s = 0.0f,
-        .sustained_ms = 1000U,
-        .stall_ms = 200U,
-        .divergence_ms = 300U,
-    },
+    .trips =
+        {
+            .overcurrent_a = 3.0f,
+            .overvoltage_v = 22.0f,
+            .undervoltage_v = 5.0f,
+            .overspeed_rad_s = 0.0f,
+            .sustained_ms = 1000U,
+            .stall_ms = 200U,
+            .divergence_ms = 300U,
+        },
+    /* No motor is identified at boot: the model and the user profile are unset. The
+     * 150 Hz bandwidth is the value CAL-5 has designed with since M3b. */
+    .profile = {.gear_ratio = 1.0f, .current_bandwidth_hz = 150.0f},
 };
 
 static const struct foc_encoder_config encoder_config = {

@@ -25,6 +25,7 @@
 
 #include "foc_board_calibrate.h"
 #include "foc_board_boot.h"
+#include "foc_board_profile.h"
 
 #include <math.h>
 
@@ -64,7 +65,6 @@
 #define CAL_FLUX_SETTLE_US       400000U
 #define CAL_FLUX_WINDOW          32U
 #define CAL_FLUX_WINDOWS         4U
-#define CAL_PI_BANDWIDTH_HZ      150.0f
 #define CAL_TUNE_TIMEOUT_US      50000U
 
 /* Private Helpers -------------------------------------------------------------- */
@@ -737,22 +737,30 @@ static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
         cal_enter(cal, FOC_BOARD_CAL_RESTORE, now_us);
         return;
     }
-    const struct foc_motor_pi_request request = {
-        .bandwidth_hz = CAL_PI_BANDWIDTH_HZ,
-        .sample_period_s = (float)CAL_SLOT_US * 1.0e-6f,
-        .update_delay_s = (float)(CAL_SLOT_US - FOC_BOARD_ADC_COMPARE_US) * 1.0e-6f,
-        .initial_error_a = 0.5f,
-        .available_voltage_v = cal_voltage_limit(cal),
-    };
+    /* The identified model joins the profile; the unified refresh designs the PI at
+     * the profile bandwidth (ID 104), and H0 applies model and gains together. */
     struct foc_runtime_tuning tuning;
-    if (foc_motor_pi_design(&cal->rl_model, &request, &cal->pi) != FOC_MOTOR_ID_OK ||
-        foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
+    if (foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
         return;
     }
-    tuning.current_kp_v_per_a = (struct foc_vector_dq){cal->pi.kp_d_v_per_a, cal->pi.kp_q_v_per_a};
-    tuning.current_ki_v_per_a_s =
-        (struct foc_vector_dq){cal->pi.ki_v_per_a_s, cal->pi.ki_v_per_a_s};
+    tuning.profile.rs_ohm = cal->rl_model.rs_ohm;
+    tuning.profile.ld_h = cal->rl_model.ld_h;
+    tuning.profile.lq_h = cal->rl_model.lq_h;
+    if (cal->flux_result.state == FOC_CALIBRATION_STATE_VALID) {
+        tuning.profile.flux_wb = cal->flux_result.flux_wb;
+    }
+    if (!foc_board_profile_refresh(
+            cal->runtime->config.h0.period_us,
+            cal_voltage_limit(cal),
+            &tuning,
+            true,
+            &cal->pi
+        ) ||
+        !foc_board_profile_model_complete(&tuning.profile)) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+        return;
+    }
     const uint32_t sequence = cal->serial->tuning_sequence + 1U;
     if (foc_runtime_publish_tuning(cal->runtime, &tuning, sequence) != FOC_RUNTIME_OK) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);

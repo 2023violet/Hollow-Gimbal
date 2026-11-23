@@ -377,16 +377,20 @@ TUNE 14, RESTORE 15. Failures: none 0, state 1, ADC 2, lifecycle 3, drive 4,
 current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted 11,
 timeout 12, R/L 13, flux 14, tune 15, capture 16. Byte 4 carries the admission
 failure, or for R/L and flux failures the estimator's `foc_calibration_failure`.
-After DONE, IDs 16, 17, 38–42 and 64–67 read the applied values.
+After DONE, IDs 16, 17, 38–42, 64–67 and 80–84 read the applied values.
 
 ### Persistent settings
 
 PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
 pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
-RAM policies (IDs 1–3) and, when one is applied, the on-MCU calibration result
-(ADC zero, direction, pole pairs, electrical offset) in one record (format 2,
-140 bytes; format-1 records without calibration still load) bound to the
-image's boot motor configuration. At boot, before any interrupt, a stored
+motor profile (IDs 80–83, 85, 86, 96–99, 104), the protection thresholds (IDs
+112–118), the RAM policies (IDs 1–3) and, when one is applied, the on-MCU
+calibration result (ADC zero, direction, pole pairs, electrical offset) in one
+record (format 3, 212 bytes: the format-2 bytes 0–135, then the profile at
+136–179, the thresholds at 180–207 and the CRC at 208). Format-2 (140 bytes) and
+format-1 records still load and keep the boot profile and thresholds. The
+record is bound to the image's boot motor configuration. A restore applies the
+stored PI as saved; it does not re-derive it from the model. At boot, before any interrupt, a stored
 record is applied only when that boot configuration is identical and every
 value passes the same checks as a UART write and the calibration passes the
 same re-initialization as a live run; it applies completely or not at all,
@@ -403,6 +407,40 @@ when a save is interrupted. A successful save clears the dirty flag.
 | 49 | Applied record sequence | 0 when none was applied |
 | 50 | Newest stored record sequence | 0 when storage is erased |
 | 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot |
+
+### Motor profile
+
+| ID | Parameter | Type and unit | Range / Board1 initial |
+| --- | --- | --- | --- |
+| 80 | Phase resistance Rs | f32 Ω (unit 11) | 0 unset, or 0.001–100 / 0 |
+| 81 / 82 | d / q inductance | f32 H (unit 12) | 0 unset, or 1e-6–1 / 0 |
+| 83 | Flux linkage | f32 Wb (unit 13) | 0 unset, or 1e-5–1 / 0 |
+| 84 | Torque constant Kt = 1.5 × pole pairs × flux | f32 N·m/A (unit 14), read only | derived |
+| 85 / 86 | Inertia / viscous damping, stored only | f32 kg·m² (unit 15) / N·m·s/rad (unit 16) | 0–1 / 0; 0–10 / 0 |
+| 96 / 97 | Rated / peak current, rated at most peak | f32 A | 0 unset, or 0.05–1000 / 0 |
+| 98 | Maximum mechanical speed | f32 rad/s | 0 unset, or 0.1–1000 / 0 |
+| 99 | Gear ratio (rotor turns per output turn), stored only | f32 | 1–1000 / 1 |
+| 104 | Current-loop bandwidth | f32 Hz (unit 17) | 10–235 / 150 |
+
+The profile travels with the tuning: a write publishes one complete candidate that
+H0 applies like IDs 64–74 (ID 61 is the receipt). Writing a profile field runs the
+unified refresh before publication:
+
+- IDs 80–82 and 104: when Rs, Ld and Lq are all set, the current PI (IDs 64–67) is
+  re-derived: Kp d/q = 2π·f·Ld/Lq, Ki = 2π·f·Rs. A model or bandwidth the design
+  refuses (R·T/L, sampling or delay phase at the 200 µs H0 period) is
+  INVALID_ARGUMENT and changes nothing. IDs 64–67 stay writable as a manual
+  override until the next such write.
+- ID 97: IDs 68 and 73 are tightened to the peak current; ID 98: ID 72 is
+  tightened to the maximum speed. A write of ID 68 or 72 beyond them is refused,
+  never clamped.
+- IDs 96 and 98 set the protection bases: sustained current uses the rated
+  current (0.95 × ID 68 when unset), stall uses 5% of the maximum speed (ID 72
+  when unset).
+
+Any applied tuning that lowers ID 73 below the remote current cap (ID 2) lowers
+that cap to match. CAL-3/4/5 write the identified Rs, Ld, Lq and flux into IDs
+80–83 and derive the PI at ID 104 in the same candidate.
 
 ### Controller tuning
 
@@ -423,9 +461,8 @@ when a save is interrupted. A successful save clears the dirty flag.
 | 116 | Sustained-current window, 0 off | u32 ms (unit 20) | 0–60000 / 1000 |
 | 117 / 118 | Stall / tracking-divergence window, 0 off | u32 ms (unit 20) | 0–10000 / 200, 300 |
 
-IDs 112–118 follow the tuning rules above (H0 applies them; ID 61 is the receipt).
-They are RAM values in this release: a stored record does not carry them and a
-restart restores the initial values. The initial values come from Board1 facts:
+IDs 112–118 follow the tuning rules above (H0 applies them; ID 61 is the receipt)
+and are stored by PARAM_SAVE. The initial values come from Board1 facts:
 the 2.5 A control limit and the ±3.3 A current-sense span, the 5.25–20 V VM input
 of the schematic and the 24 V DRV8311 absolute maximum. They await confirmation on
 the target board.

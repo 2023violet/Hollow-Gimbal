@@ -334,6 +334,21 @@ lowered limits, `--motor-damping`), clears a latch and checks that a deliberate
 +5 → −5 rad/s reversal does not trip. Torque-mode reversal from a wrong offset is
 not detected.
 
+### Motor profile and store format 3
+
+The motor model (Rs, Ld, Lq, flux, inertia, damping), the user profile (rated
+and peak current, maximum speed, gear ratio) and the current-loop bandwidth
+travel inside the Runtime tuning, so H0 applies them with the PI, the limits and
+the protection thresholds as one candidate. `foc_board_profile` is the unified
+refresh: a model or bandwidth write re-derives the current PI with
+`foc_motor_pi_design()` at the H0 period, a peak current or maximum speed
+tightens the limits, and CAL-3/4/5 write the identified model through the same
+path. Store format 3 (212 bytes) adds the profile and IDs 112–118 after the
+format-2 bytes; older records load with the boot profile. `sil-demo
+--sil-scenario profile` checks the derived gains, the refused bandwidth and
+model, the tightened limits, the rated-current trip, the power-cycle restore and
+the calibration write-back.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

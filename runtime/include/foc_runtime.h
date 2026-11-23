@@ -154,9 +154,10 @@ enum foc_runtime_request_result {
  */
 /**
  * Motor-protection thresholds as configured. Effective foc_protect values are
- * derived from these and the tuning limits: the over-speed trip of 0 follows
- * 1.25 x velocity_limit_rad_s; sustained current is 0.95 x current_limit_a;
- * stall and divergence use 0.95 x iq_limit_a and 0.05 x velocity_limit_rad_s.
+ * derived from these, the tuning limits and the profile: the over-speed trip of 0
+ * follows 1.25 x velocity_limit_rad_s; sustained current is the rated current, or
+ * 0.95 x current_limit_a when unset; stall uses 0.95 x iq_limit_a and 5% of the
+ * maximum speed (velocity_limit_rad_s when unset); divergence uses 0.95 x iq_limit_a.
  */
 struct foc_runtime_trip_limits {
     /** Phase over-current trip in A, above the current-vector limit. */
@@ -170,6 +171,33 @@ struct foc_runtime_trip_limits {
     uint32_t sustained_ms;
     uint32_t stall_ms;
     uint32_t divergence_ms;
+};
+
+/**
+ * Motor profile carried with the tuning (parameter contract, groups 3.1 and 3.3).
+ * Zero marks an unset field. The Runtime checks ranges and ordering only: the
+ * current-vector limit stays at or below the peak current, the speed reference
+ * limit at or below the maximum speed, and the rated current at or below the
+ * peak. The rated current and maximum speed set the protection bases. Deriving
+ * the current PI from the model belongs to the caller.
+ */
+struct foc_runtime_profile {
+    /** Phase resistance in Ω, d/q inductance in H and flux linkage in Wb. */
+    float rs_ohm;
+    float ld_h;
+    float lq_h;
+    float flux_wb;
+    /** Rotor inertia in kg·m² and viscous damping in N·m·s/rad, stored only. */
+    float inertia_kg_m2;
+    float damping_nm_s_per_rad;
+    /** Rated and peak phase current in A, maximum mechanical speed in rad/s. */
+    float rated_current_a;
+    float peak_current_a;
+    float max_speed_rad_s;
+    /** Gear ratio in rotor turns per output turn, stored only. */
+    float gear_ratio;
+    /** Current-loop bandwidth in Hz used to derive the current PI. */
+    float current_bandwidth_hz;
 };
 
 struct foc_runtime_tuning {
@@ -190,6 +218,8 @@ struct foc_runtime_tuning {
     uint32_t command_timeout_us;
     /** Protection thresholds, checked only when the instance enables protection. */
     struct foc_runtime_trip_limits trips;
+    /** Motor profile; all zero preserves an instance without one. */
+    struct foc_runtime_profile profile;
 };
 
 /** Inclusive bounds of the command lease a tuning candidate may select, in µs. */
@@ -421,6 +451,8 @@ struct foc_runtime_config {
     bool trip_enabled;
     /** Initial protection thresholds, used only when trip_enabled. */
     struct foc_runtime_trip_limits trips;
+    /** Initial motor profile; zero fields are unset. */
+    struct foc_runtime_profile profile;
 };
 
 /** Measurements latched at the first protection trip, cleared by an applied fault clear. */

@@ -152,6 +152,16 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(summary["metrics"]["mismatch_pole_pairs_11"]["faults"],
                          ["TRACKING_DIVERGENCE"])
 
+    def test_motor_profile_derives_limits_and_survives_power_cycles(self):
+        """The model and bandwidth derive the current PI, the peak current and maximum
+        speed bound the limits, the rated current sets the sustained-current trip, the
+        profile restores after a power cycle and calibration writes the identified model."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_profile(SIL, ["--lockstep-us", "500"],
+                                          Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

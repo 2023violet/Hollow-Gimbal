@@ -69,6 +69,7 @@ add_executable(
   falconfoc-virtual-device
   src/falconfoc_virtual_device.c
   "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_serial.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_board_profile.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_uart_buffer.c"
 )
 target_include_directories(
@@ -77,7 +78,9 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/../calibration/include"
           "${CMAKE_CURRENT_SOURCE_DIR}/../sensors/include"
 )
-target_link_libraries(falconfoc-virtual-device PRIVATE falconfoc-virtual-motor falconfoc-wire)
+target_link_libraries(
+  falconfoc-virtual-device PRIVATE falconfoc-virtual-motor falconfoc-wire falconfoc-calibration
+)
 
 add_executable(test-foc-motor-id-virtual tests/test_foc_motor_id_virtual.c)
 target_link_libraries(

@@ -6,11 +6,12 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 2, 140 bytes, little-endian (format 1 is bytes 0–107 with
- * its CRC at 104 and no calibration section; it still decodes):
+ * Record "FBP1", format 3, 212 bytes, little-endian. Format 2 is bytes 0–135 with
+ * its CRC at 136; format 1 is bytes 0–103 with its CRC at 104 and no calibration.
+ * Both still decode, keeping the boot profile and protection thresholds:
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 2     10 length u16 = 140
+ *   4  magic "FBP1"          8  format u16 = 3     10 length u16 = 212
  *   12 sequence u32
  *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
  *   28 runtime encoder direction i32   32 electrical offset f32
@@ -22,7 +23,11 @@
  *   104 flags u32 (bit 0: calibration present)
  *   108/112/116 calibrated phase A/B/C ADC offset f32   120 pole pairs u32
  *   124 electrical offset f32   128 calibration direction i32   132 Runtime direction i32
- *   136 CRC-32 (IEEE, reflected) of bytes 4–135
+ *   136/140/144/148 Rs Ω, Ld H, Lq H, flux Wb   152/156 inertia, damping
+ *   160/164/168 rated A, peak A, max speed rad/s   172 gear ratio   176 bandwidth Hz
+ *   180/184/188/192 trips: over-current A, over/under-voltage V, over-speed rad/s
+ *   196/200/204 sustained, stall, divergence windows u32 ms
+ *   208 CRC-32 (IEEE, reflected) of bytes 4–207
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -36,8 +41,10 @@
 
 #define STORE_COMMIT    UINT32_C(0xC35A4C7E)
 #define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT    2U
-#define STORE_CRC_AT    136U
+#define STORE_FORMAT    3U
+#define STORE_CRC_AT    208U
+#define STORE_V2_BYTES  140U
+#define STORE_V2_CRC_AT 136U
 #define STORE_V1_BYTES  108U
 #define STORE_V1_CRC_AT 104U
 #define STORE_FLAG_CAL  1U
@@ -284,6 +291,30 @@ void foc_board_store_encode(
         put_u32(record + 128, (uint32_t)cal->calibration_direction);
         put_u32(record + 132, (uint32_t)cal->runtime_encoder_direction);
     }
+    const struct foc_runtime_profile *profile = &t->profile;
+    const float profile_values[] = {
+        profile->rs_ohm,
+        profile->ld_h,
+        profile->lq_h,
+        profile->flux_wb,
+        profile->inertia_kg_m2,
+        profile->damping_nm_s_per_rad,
+        profile->rated_current_a,
+        profile->peak_current_a,
+        profile->max_speed_rad_s,
+        profile->gear_ratio,
+        profile->current_bandwidth_hz,
+    };
+    for (size_t index = 0U; index < sizeof profile_values / sizeof profile_values[0]; ++index) {
+        put_f32(record + 136 + 4U * index, profile_values[index]);
+    }
+    put_f32(record + 180, t->trips.overcurrent_a);
+    put_f32(record + 184, t->trips.overvoltage_v);
+    put_f32(record + 188, t->trips.undervoltage_v);
+    put_f32(record + 192, t->trips.overspeed_rad_s);
+    put_u32(record + 196, t->trips.sustained_ms);
+    put_u32(record + 200, t->trips.stall_ms);
+    put_u32(record + 204, t->trips.divergence_ms);
     put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
 }
 
@@ -297,11 +328,12 @@ int foc_board_store_decode(
     const unsigned int format = record[8] | (record[9] << 8);
     const unsigned int length = record[10] | (record[11] << 8);
     const bool v1 = format == 1U && length == STORE_V1_BYTES;
-    const bool v2 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
-    const size_t crc_at = v1 ? STORE_V1_CRC_AT : STORE_CRC_AT;
-    if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC || !(v1 || v2) ||
-        get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
-        (v2 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
+    const bool v2 = format == 2U && length == STORE_V2_BYTES;
+    const bool v3 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
+    const size_t crc_at = v1 ? STORE_V1_CRC_AT : v2 ? STORE_V2_CRC_AT : STORE_CRC_AT;
+    if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
+        !(v1 || v2 || v3) || get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
+        (!v1 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
     }
     *sequence = get_u32(record + 12);
@@ -329,8 +361,33 @@ int foc_board_store_decode(
         .rx_budget = get_u32(record + 92),
         .remote_current_cap_a = get_f32(record + 96),
         .remote_position_cap_rad = get_f32(record + 100),
-        .calibration_present = v2 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
+        .calibration_present = !v1 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
+        .extended = v3,
     };
+    if (v3) {
+        settings->tuning.profile = (struct foc_runtime_profile){
+            .rs_ohm = get_f32(record + 136),
+            .ld_h = get_f32(record + 140),
+            .lq_h = get_f32(record + 144),
+            .flux_wb = get_f32(record + 148),
+            .inertia_kg_m2 = get_f32(record + 152),
+            .damping_nm_s_per_rad = get_f32(record + 156),
+            .rated_current_a = get_f32(record + 160),
+            .peak_current_a = get_f32(record + 164),
+            .max_speed_rad_s = get_f32(record + 168),
+            .gear_ratio = get_f32(record + 172),
+            .current_bandwidth_hz = get_f32(record + 176),
+        };
+        settings->tuning.trips = (struct foc_runtime_trip_limits){
+            .overcurrent_a = get_f32(record + 180),
+            .overvoltage_v = get_f32(record + 184),
+            .undervoltage_v = get_f32(record + 188),
+            .overspeed_rad_s = get_f32(record + 192),
+            .sustained_ms = get_u32(record + 196),
+            .stall_ms = get_u32(record + 200),
+            .divergence_ms = get_u32(record + 204),
+        };
+    }
     if (settings->calibration_present) {
         const uint16_t pole_pairs = (uint16_t)get_u32(record + 120);
         settings->calibration = (struct foc_calibration_snapshot){
@@ -482,8 +539,11 @@ void foc_board_persistence_restore(
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
     }
-    /* The record does not carry the protection thresholds yet: keep the boot values. */
-    settings.tuning.trips = boot_tuning.trips;
+    /* Formats 1 and 2 carry no profile or protection thresholds: keep the boot values. */
+    if (!settings.extended) {
+        settings.tuning.trips = boot_tuning.trips;
+        settings.tuning.profile = boot_tuning.profile;
+    }
     if (foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;

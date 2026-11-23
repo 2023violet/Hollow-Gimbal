@@ -88,6 +88,7 @@ add_library(
   "${repo}/g3/np/src/foc_device.c"
   "${repo}/g3/np/src/foc_device_sim.c"
   "${repo}/g3/safe/src/foc_safe.c"
+  "${repo}/g3/safe/src/foc_protect.c"
   "${repo}/runtime/src/foc_pipeline.c"
   "${repo}/runtime/src/foc_runtime.c"
 )

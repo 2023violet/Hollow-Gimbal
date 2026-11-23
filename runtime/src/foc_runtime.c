@@ -405,6 +405,13 @@ static bool foc_runtime_admit_update(void *argument)
     return !admission->following_denied;
 }
 
+/* FAULT_CLEAR recovers command timeout and motor protection only, never other causes. */
+static bool foc_runtime_clearable_faults(uint32_t faults)
+{
+    return faults != FOC_SAFE_FAULT_NONE &&
+        (faults & ~(FOC_SAFE_FAULT_COMMAND_TIMEOUT | FOC_SAFE_FAULT_PROTECTION_MASK)) == 0U;
+}
+
 static bool foc_runtime_timeout_clear_ready(
     struct foc_runtime *runtime,
     const struct foc_runtime_fast_input *input
@@ -413,9 +420,11 @@ static bool foc_runtime_timeout_clear_ready(
     const struct foc_pipeline *pipeline = &runtime->pipeline;
     const unsigned int sensor = atomic_load_explicit(&runtime->sensor_slot, memory_order_acquire);
     struct foc_device_measurement measurement;
+    const uint32_t latched = pipeline->safety.latched_faults;
+    const bool voltage =
+        (latched & (FOC_SAFE_FAULT_OVER_VOLTAGE | FOC_SAFE_FAULT_UNDER_VOLTAGE)) != 0U;
     return pipeline->safety.state == FOC_SAFE_STATE_FAULT_LATCHED &&
-        pipeline->safety.latched_faults == FOC_SAFE_FAULT_COMMAND_TIMEOUT &&
-        pipeline->mock.output_confirmed &&
+        foc_runtime_clearable_faults(latched) && pipeline->mock.output_confirmed &&
         pipeline->mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT &&
         atomic_load(&runtime->command_slot) == FOC_RUNTIME_UNPUBLISHED &&
         atomic_load(&runtime->foreground_seen) != 0U &&
@@ -436,6 +445,9 @@ static bool foc_runtime_timeout_clear_ready(
         ) &&
         foc_device_decode_sample(&input->adc, &pipeline->adc_config, &measurement) ==
         FOC_DEVICE_STATUS_OK &&
+        (!voltage ||
+         (measurement.core.vbus_v >= runtime->protect.undervoltage_v &&
+          measurement.core.vbus_v <= runtime->protect.overvoltage_v)) &&
         sensor != FOC_RUNTIME_UNPUBLISHED &&
         isfinite(foc_runtime_align_angle(runtime, &runtime->sensor_slots[sensor], input));
 }
@@ -621,6 +633,118 @@ static enum foc_following_state foc_runtime_following_trial(
     return foc_following_error_step(&runtime->config.motion.following_error, trial, &sample);
 }
 
+/* Protection ------------------------------------------------------------------ */
+
+/* Derive effective thresholds; a disabled instance yields a disabled configuration. */
+static bool foc_runtime_trip_resolve(
+    bool enabled,
+    const struct foc_runtime_trip_limits *trips,
+    float current_limit_a,
+    float iq_limit_a,
+    float velocity_limit_rad_s,
+    struct foc_protect_config *protect
+)
+{
+    *protect = (struct foc_protect_config){0};
+    if (!enabled) {
+        return true;
+    }
+    const float iq_basis = iq_limit_a > 0.0f ? iq_limit_a : current_limit_a;
+    if (!isfinite(trips->overcurrent_a) || !(trips->overcurrent_a > current_limit_a) ||
+        !isfinite(trips->overspeed_rad_s) ||
+        !(trips->overspeed_rad_s == 0.0f || trips->overspeed_rad_s >= velocity_limit_rad_s) ||
+        !isfinite(velocity_limit_rad_s) || !(velocity_limit_rad_s > 0.0f) ||
+        trips->sustained_ms > FOC_RUNTIME_TRIP_WINDOW_MAX_MS ||
+        trips->stall_ms > FOC_RUNTIME_TRIP_WINDOW_MAX_MS ||
+        trips->divergence_ms > FOC_RUNTIME_TRIP_WINDOW_MAX_MS) {
+        return false;
+    }
+    *protect = (struct foc_protect_config){
+        .enabled = true,
+        .overcurrent_a = trips->overcurrent_a,
+        .overvoltage_v = trips->overvoltage_v,
+        .undervoltage_v = trips->undervoltage_v,
+        .voltage_samples = 3U,
+        .overspeed_rad_s =
+            trips->overspeed_rad_s > 0.0f ? trips->overspeed_rad_s : 1.25f * velocity_limit_rad_s,
+        .sustained_current_a = 0.95f * current_limit_a,
+        .sustained_us = trips->sustained_ms * 1000U,
+        .stall_current_a = 0.95f * iq_basis,
+        .stall_speed_rad_s = 0.05f * velocity_limit_rad_s,
+        .stall_us = trips->stall_ms * 1000U,
+        .divergence_current_a = 0.95f * iq_basis,
+        .divergence_us = trips->divergence_ms * 1000U,
+    };
+    return foc_protect_validate(protect);
+}
+
+static void foc_runtime_publish_fault_snapshot(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_fault_snapshot *snapshot
+)
+{
+    const unsigned int current =
+        atomic_load_explicit(&runtime->fault_snapshot_slot, memory_order_relaxed);
+    const unsigned int next = current == 0U ? 1U : 0U;
+    runtime->fault_snapshots[next] = *snapshot;
+    atomic_store_explicit(&runtime->fault_snapshot_slot, next, memory_order_release);
+}
+
+/* H0, after an accepted running cycle: evaluate the rules and request a latching stop. */
+static void foc_runtime_protect(
+    struct foc_runtime *runtime,
+    const struct foc_runtime_sensor_slot *sensor,
+    bool target_valid,
+    bool sensor_fresh,
+    uint32_t now_us
+)
+{
+    if (!runtime->protect.enabled) {
+        return;
+    }
+    const struct foc_pipeline *pipeline = &runtime->pipeline;
+    const struct foc_vector_dq measured = pipeline->measured_dq_a;
+    const bool reference = target_valid && sensor->velocity_ref_valid;
+    const struct foc_protect_input input = {
+        .now_us = now_us,
+        .scope = runtime->mode == FOC_RUNTIME_MODE_CALIBRATION ? FOC_PROTECT_SCOPE_ELECTRICAL
+            : foc_runtime_cascade_mode(runtime->mode)          ? FOC_PROTECT_SCOPE_MOTION
+                                                               : FOC_PROTECT_SCOPE_TORQUE,
+        .phase_current_a = pipeline->measurement.phase_current_a,
+        .vbus_v = pipeline->measurement.core.vbus_v,
+        .current_magnitude_a = sqrtf(measured.d * measured.d + measured.q * measured.q),
+        .speed_rad_s = sensor->sample.mechanical_rad_s,
+        .speed_ref_rad_s = reference ? sensor->velocity_ref_rad_s : 0.0f,
+        .iq_ref_a = reference ? sensor->target.target_a.q : 0.0f,
+        .speed_valid = runtime->config.motion.enabled && sensor->sample.valid && sensor_fresh,
+        .reference_valid = reference,
+    };
+    const uint32_t trips = foc_protect_step(&runtime->protect, &runtime->protect_state, &input);
+    if (trips == FOC_SAFE_FAULT_NONE) {
+        return;
+    }
+    const unsigned int slot =
+        atomic_load_explicit(&runtime->fault_snapshot_slot, memory_order_relaxed);
+    if (!runtime->fault_snapshots[slot].valid) {
+        const struct foc_vector_abc *phase = &input.phase_current_a;
+        const struct foc_runtime_fault_snapshot snapshot = {
+            .faults = trips,
+            .h0_us = now_us,
+            .mode = runtime->mode,
+            .speed_rad_s = input.speed_valid ? input.speed_rad_s : 0.0f,
+            .speed_ref_rad_s = input.speed_ref_rad_s,
+            .measured_id_a = measured.d,
+            .measured_iq_a = measured.q,
+            .iq_ref_a = input.iq_ref_a,
+            .phase_peak_a = fmaxf(fabsf(phase->a), fmaxf(fabsf(phase->b), fabsf(phase->c))),
+            .vbus_v = input.vbus_v,
+            .valid = true,
+        };
+        foc_runtime_publish_fault_snapshot(runtime, &snapshot);
+    }
+    foc_runtime_request_inhibit(runtime, trips);
+}
+
 static int
 foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_input *input)
 {
@@ -758,6 +882,10 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
     const int status =
         foc_pipeline_step_guarded(pipeline, &step, foc_runtime_admit_update, &admission);
     runtime->pipeline_status = status;
+    if (status == FOC_PIPELINE_OK && running) {
+        /* A trip joins the stop drained below, which latches it and inhibits. */
+        foc_runtime_protect(runtime, &sensor, target_valid, isfinite(aligned), now_us);
+    }
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_AFTER_CONTROL);
     const bool stopped = foc_runtime_drain_stop(runtime, now_us);
     if (pipeline->mock.output_confirmed) {
@@ -1164,6 +1292,8 @@ static void foc_runtime_prepare_outer(
         runtime->outer_trial_a = trial.integral_a;
         runtime->outer_trial_seen = true;
         iq = output.iq_ref_a;
+        candidate->velocity_ref_rad_s = speed;
+        candidate->velocity_ref_valid = true;
         if (protection) {
             candidate->motion_request.velocity_ref_rad_s = speed;
         }
@@ -1309,9 +1439,21 @@ static int foc_runtime_tuning_check(
     const struct foc_runtime *runtime,
     const struct foc_runtime_tuning *tuning,
     struct foc_current_context *current,
-    struct foc_velocity_context *velocity
+    struct foc_velocity_context *velocity,
+    struct foc_protect_config *protect
 )
 {
+    if (tuning != NULL &&
+        !foc_runtime_trip_resolve(
+            runtime->config.trip_enabled,
+            &tuning->trips,
+            tuning->current_limit_a,
+            runtime->config.motion.enabled ? tuning->iq_limit_a : 0.0f,
+            tuning->velocity_limit_rad_s,
+            protect
+        )) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
     if (tuning == NULL || runtime->pipeline.feedforward.enabled ||
         runtime->config.motion.impedance.enabled || !isfinite(tuning->current_limit_a) ||
         tuning->command_timeout_us < FOC_RUNTIME_LEASE_MIN_US ||
@@ -1352,11 +1494,16 @@ static void foc_runtime_tuning_commit(
     struct foc_runtime *runtime,
     const struct foc_runtime_tuning *tuning,
     const struct foc_current_context *current,
-    const struct foc_velocity_context *velocity
+    const struct foc_velocity_context *velocity,
+    const struct foc_protect_config *protect
 )
 {
     runtime->pipeline.current = *current;
     runtime->pipeline.safety.config.command_timeout_us = tuning->command_timeout_us;
+    if (runtime->config.trip_enabled) {
+        runtime->config.trips = tuning->trips;
+        runtime->protect = *protect;
+    }
     if (runtime->config.motion.enabled) {
         runtime->outer_velocity = *velocity;
         runtime->config.motion.velocity = velocity->config;
@@ -1407,15 +1554,16 @@ static void foc_runtime_tuning_service(struct foc_runtime *runtime, uint32_t now
     int status = FOC_RUNTIME_ERR_CONTROL;
     struct foc_current_context current;
     struct foc_velocity_context velocity;
+    struct foc_protect_config protect;
     if (cancel || atomic_load(&runtime->stop_requests) != 0U) {
         result = FOC_RUNTIME_REQUEST_CANCELLED;
     } else if (
         pipeline->safety.state == FOC_SAFE_STATE_DISABLED && pipeline->mock.output_confirmed &&
         pipeline->mock.last_request.action == FOC_DEVICE_OUTPUT_INHIBIT
     ) {
-        status = foc_runtime_tuning_check(runtime, &tuning, &current, &velocity);
+        status = foc_runtime_tuning_check(runtime, &tuning, &current, &velocity, &protect);
         if (status == FOC_RUNTIME_OK) {
-            foc_runtime_tuning_commit(runtime, &tuning, &current, &velocity);
+            foc_runtime_tuning_commit(runtime, &tuning, &current, &velocity, &protect);
             result = FOC_RUNTIME_REQUEST_APPLIED;
         }
     }
@@ -1442,6 +1590,7 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .velocity_limit_rad_s = motion->position.velocity_limit_rad_s,
         .iq_limit_a = motion->iq_limit_a,
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
+        .trips = runtime->config.trips,
     };
     return FOC_RUNTIME_OK;
 }
@@ -1455,10 +1604,12 @@ int foc_runtime_apply_tuning(struct foc_runtime *runtime, const struct foc_runti
     }
     struct foc_current_context current;
     struct foc_velocity_context velocity;
-    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity) != FOC_RUNTIME_OK) {
+    struct foc_protect_config protect;
+    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity, &protect) !=
+        FOC_RUNTIME_OK) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
-    foc_runtime_tuning_commit(runtime, tuning, &current, &velocity);
+    foc_runtime_tuning_commit(runtime, tuning, &current, &velocity, &protect);
     runtime->tuning_request_sequence = 0U;
     foc_runtime_tuning_write_result(
         runtime,
@@ -1480,7 +1631,9 @@ int foc_runtime_publish_tuning(
     }
     struct foc_current_context current;
     struct foc_velocity_context velocity;
-    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity) != FOC_RUNTIME_OK) {
+    struct foc_protect_config protect;
+    if (foc_runtime_tuning_check(runtime, tuning, &current, &velocity, &protect) !=
+        FOC_RUNTIME_OK) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     if (atomic_load_explicit(&runtime->tuning_pending, memory_order_acquire) !=
@@ -1541,7 +1694,16 @@ int foc_runtime_init(
         return FOC_RUNTIME_ERR_CONFIG;
     }
     struct foc_pipeline pipeline;
-    if (foc_pipeline_init(&pipeline, pipeline_config) != FOC_PIPELINE_OK) {
+    struct foc_protect_config protect;
+    if (foc_pipeline_init(&pipeline, pipeline_config) != FOC_PIPELINE_OK ||
+        !foc_runtime_trip_resolve(
+            config->trip_enabled,
+            &config->trips,
+            pipeline_config->current.current_limit_a,
+            config->motion.enabled ? config->motion.iq_limit_a : 0.0f,
+            config->motion.position.velocity_limit_rad_s,
+            &protect
+        )) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
     struct foc_velocity_context velocity = {0};
@@ -1574,6 +1736,7 @@ int foc_runtime_init(
         .pipeline = pipeline,
         .outer_velocity = velocity,
         .trajectory = trajectory,
+        .protect = protect,
         .h0 = {.next_us = now_us, .last_call_us = now_us},
         .h1 = {.next_us = now_us, .last_call_us = now_us},
         .supervision = {.next_us = now_us, .last_call_us = now_us},
@@ -1597,6 +1760,7 @@ int foc_runtime_init(
     atomic_init(&runtime->lifecycle_sequence_seen, 0U);
     atomic_init(&runtime->tuning_pending, FOC_RUNTIME_REQUEST_IDLE);
     atomic_init(&runtime->tuning_result_slot, 0U);
+    atomic_init(&runtime->fault_snapshot_slot, 0U);
     runtime->lifecycle_results[0] = (struct foc_runtime_lifecycle_result){
         .result = FOC_RUNTIME_REQUEST_NONE,
         .state = FOC_SAFE_STATE_BOOT,
@@ -1957,12 +2121,15 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
                 recovery.action = FOC_RUNTIME_ACTION_CLEAR_FAULT;
             }
             status = foc_runtime_control(runtime, &recovery);
+            const bool cleared = recovery.action == FOC_RUNTIME_ACTION_CLEAR_FAULT &&
+                runtime->pipeline.safety.state == FOC_SAFE_STATE_DISABLED;
+            if (cleared) {
+                const struct foc_runtime_fault_snapshot none = {0};
+                foc_runtime_publish_fault_snapshot(runtime, &none);
+            }
             atomic_store(
                 &runtime->clear_result,
-                recovery.action == FOC_RUNTIME_ACTION_CLEAR_FAULT &&
-                        runtime->pipeline.safety.state == FOC_SAFE_STATE_DISABLED
-                    ? FOC_RUNTIME_CLEAR_APPLIED
-                    : FOC_RUNTIME_CLEAR_REJECTED
+                cleared ? FOC_RUNTIME_CLEAR_APPLIED : FOC_RUNTIME_CLEAR_REJECTED
             );
         } else {
             /* A rejected mailbox stays separate from the ordinary H0 cycle.
@@ -1993,6 +2160,7 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
          previous_state != FOC_SAFE_STATE_FAULT_LATCHED)) {
         runtime->motion_session++;
         runtime->accepted_outer_seen = false;
+        foc_protect_reset(&runtime->protect_state);
         if (runtime->config.motion.following_error.enabled) {
             const enum foc_following_state observed = runtime->following.status;
             const enum foc_following_state retained =
@@ -2002,10 +2170,12 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
             runtime->following = (struct foc_following_error_state){.status = retained};
         }
     }
-    if (runtime->config.motion.following_error.enabled &&
-        previous_state != FOC_SAFE_STATE_RUNNING &&
+    if (previous_state != FOC_SAFE_STATE_RUNNING &&
         runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING) {
-        runtime->following = (struct foc_following_error_state){0};
+        foc_protect_reset(&runtime->protect_state);
+        if (runtime->config.motion.following_error.enabled) {
+            runtime->following = (struct foc_following_error_state){0};
+        }
     }
     if (lifecycle_claimed) {
         foc_runtime_lifecycle_finish(
@@ -2092,9 +2262,9 @@ int foc_runtime_request_timeout_clear(struct foc_runtime *runtime, uint32_t now_
 {
     struct foc_runtime_snapshot view;
     if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK ||
-        view.state != FOC_SAFE_STATE_FAULT_LATCHED ||
-        view.faults != FOC_SAFE_FAULT_COMMAND_TIMEOUT || view.inhibit_pending ||
-        !view.output_confirmed || view.action != FOC_DEVICE_OUTPUT_INHIBIT) {
+        view.state != FOC_SAFE_STATE_FAULT_LATCHED || !foc_runtime_clearable_faults(view.faults) ||
+        view.inhibit_pending || !view.output_confirmed ||
+        view.action != FOC_DEVICE_OUTPUT_INHIBIT) {
         return FOC_RUNTIME_ERR_CONTROL;
     }
     if (view.clear_result == FOC_RUNTIME_CLEAR_PENDING) {
@@ -2112,6 +2282,20 @@ int foc_runtime_read_snapshot(struct foc_runtime *runtime, struct foc_runtime_sn
         return FOC_RUNTIME_ERR_INPUT;
     }
     return foc_runtime_copy_snapshot(runtime, snapshot, FOC_RUNTIME_HOOK_TELEMETRY_READING);
+}
+
+int foc_runtime_read_fault_snapshot(
+    struct foc_runtime *runtime,
+    struct foc_runtime_fault_snapshot *snapshot
+)
+{
+    if (runtime == NULL || !runtime->initialized || snapshot == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const unsigned int slot =
+        atomic_load_explicit(&runtime->fault_snapshot_slot, memory_order_acquire);
+    *snapshot = runtime->fault_snapshots[slot];
+    return FOC_RUNTIME_OK;
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

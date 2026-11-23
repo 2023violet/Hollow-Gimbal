@@ -118,19 +118,37 @@ static const struct foc_runtime_config runtime_config = {
     .telemetry = {.period_us = 10000U, .max_delay_us = 500U, .budget_us = 100U},
     .foreground_budget_us = 150U,
     .angle_timeout_us = 650U,
-    .motion = {
-        .enabled = true,
-        .rotor = {.pole_pairs = 7U, .electrical_offset_rad = 0.0f},
-        .prediction =
-            {
-                .max_prediction_us = 650U,
-                .max_accel_rad_s2 = 2000.0f,
-                .max_error_rad = 0.00065f,
-            },
-        .velocity = {.kp_a_per_rad_s = 0.18f, .ki_a_per_rad = 1.4f, .max_dt_s = 0.002f},
-        .position = {.kp_per_s = 4.0f, .velocity_limit_rad_s = 12.0f},
-        .iq_limit_a = 2.5f,
-        .trajectory = {.enabled = false},
+    .motion =
+        {
+            .enabled = true,
+            .rotor = {.pole_pairs = 7U, .electrical_offset_rad = 0.0f},
+            .prediction =
+                {
+                    .max_prediction_us = 650U,
+                    .max_accel_rad_s2 = 2000.0f,
+                    .max_error_rad = 0.00065f,
+                },
+            .velocity = {.kp_a_per_rad_s = 0.18f, .ki_a_per_rad = 1.4f, .max_dt_s = 0.002f},
+            .position = {.kp_per_s = 4.0f, .velocity_limit_rad_s = 12.0f},
+            .iq_limit_a = 2.5f,
+            .trajectory = {.enabled = false},
+        },
+    /*
+     * Motor protection (contract section 12.4). 3.0 A lies between the 2.5 A control
+     * limit and the ±3.3 A current-sense span; 22 V lies between the 20 V VM input
+     * rating of the schematic and the 24 V DRV8311 absolute maximum; 5.0 V is just
+     * below the 5.25 V input minimum. Over-speed 0 follows 1.25 x the speed limit.
+     * All values await confirmation on the target board.
+     */
+    .trip_enabled = true,
+    .trips = {
+        .overcurrent_a = 3.0f,
+        .overvoltage_v = 22.0f,
+        .undervoltage_v = 5.0f,
+        .overspeed_rad_s = 0.0f,
+        .sustained_ms = 1000U,
+        .stall_ms = 200U,
+        .divergence_ms = 300U,
     },
 };
 

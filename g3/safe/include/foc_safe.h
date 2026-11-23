@@ -102,7 +102,27 @@ enum foc_safe_fault {
     FOC_SAFE_FAULT_FLASH = 1U << 7,
     /** This fault explicitly requires an independent watchdog reset. */
     FOC_SAFE_FAULT_FATAL_RESET_REQUIRED = 1U << 8,
+    /** A phase current exceeded the over-current trip (foc_protect). */
+    FOC_SAFE_FAULT_OVER_CURRENT = 1U << 9,
+    /** The bus voltage stayed above the over-voltage trip (foc_protect). */
+    FOC_SAFE_FAULT_OVER_VOLTAGE = 1U << 10,
+    /** The bus voltage stayed below the under-voltage trip (foc_protect). */
+    FOC_SAFE_FAULT_UNDER_VOLTAGE = 1U << 11,
+    /** The mechanical speed exceeded the over-speed trip (foc_protect). */
+    FOC_SAFE_FAULT_OVER_SPEED = 1U << 12,
+    /** The current stayed near its limit for the sustained window (foc_protect). */
+    FOC_SAFE_FAULT_SUSTAINED_CURRENT = 1U << 13,
+    /** Near-limit current at near-zero speed for the stall window (foc_protect). */
+    FOC_SAFE_FAULT_STALL = 1U << 14,
+    /** Saturated outer loop moving against its reference without converging (foc_protect). */
+    FOC_SAFE_FAULT_TRACKING_DIVERGENCE = 1U << 15,
 };
+
+/** Motor-protection causes. FAULT_CLEAR may clear these, unlike the other latched causes. */
+#define FOC_SAFE_FAULT_PROTECTION_MASK                                                          \
+    (FOC_SAFE_FAULT_OVER_CURRENT | FOC_SAFE_FAULT_OVER_VOLTAGE | FOC_SAFE_FAULT_UNDER_VOLTAGE | \
+     FOC_SAFE_FAULT_OVER_SPEED | FOC_SAFE_FAULT_SUSTAINED_CURRENT | FOC_SAFE_FAULT_STALL |      \
+     FOC_SAFE_FAULT_TRACKING_DIVERGENCE)
 
 /** Timeout and invalid-sample policy owned by the safety caller. */
 struct foc_safe_config {

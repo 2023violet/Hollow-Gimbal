@@ -131,6 +131,9 @@ struct sil_device {
     /* Optional phase-rank noise in counts rms (deterministic xorshift32). */
     double adc_noise_counts;
     uint32_t noise_state;
+    /* Fault injection: from adc_step_us on, add adc_step_counts to the first current rank. */
+    uint32_t adc_step_us;
+    double adc_step_counts;
     /* Plant truth at the conversion aperture, and for the frame H0 last used. */
     double aperture_id_a;
     double aperture_iq_a;
@@ -277,6 +280,12 @@ static void sil_tmr1_compare(struct sil_device *device)
             ) == 0) {
             device->adc_ranks[0] = raw.vbus_raw;
             device->adc_ranks[1] = sil_adc_noisy(device, raw.rank2_raw);
+            if (device->adc_step_counts != 0.0 && device->now_us >= device->adc_step_us) {
+                const double stepped = (double)device->adc_ranks[1] + device->adc_step_counts;
+                device->adc_ranks[1] = (uint16_t)(stepped < 0.0          ? 0.0
+                                                      : stepped > 4095.0 ? 4095.0
+                                                                         : stepped);
+            }
             device->adc_ranks[2] = sil_adc_noisy(device, raw.rank3_raw);
             device->adc_ranks[3] = sil_adc_noisy(device, raw.rank4_raw);
             struct foc_virtual_motor_observation truth;
@@ -645,6 +654,7 @@ static void sil_usage(const char *name)
         stderr,
         "usage: %s [--speed factor | --lockstep-us us] [--duration-us us] [--trace-us us]\n"
         "          [--flash file] [--adc-offset a,b,c] [--adc-noise rms] [--vbus-v v]\n"
+        "          [--adc-step us,counts]\n"
         "          [--motor-rs-ohm r] "
         "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
@@ -771,6 +781,10 @@ int main(int argc, char **argv)
         } else if (strcmp(option, "--adc-noise") == 0) {
             device.adc_noise_counts = strtod(value, NULL);
             device.noise_state = UINT32_C(0x9E3779B9);
+        } else if (strcmp(option, "--adc-step") == 0) {
+            char *rest = NULL;
+            device.adc_step_us = (uint32_t)strtoul(value, &rest, 0);
+            device.adc_step_counts = rest != NULL && *rest == ',' ? strtod(rest + 1, NULL) : 0.0;
         } else if (strcmp(option, "--flash") == 0) {
             flash_path = value;
         } else if (strcmp(option, "--vbus-v") == 0) {

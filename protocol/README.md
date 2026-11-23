@@ -88,7 +88,8 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 14 | COMMAND_SET_MODE | mode u8 | ACCEPTED + lifecycle request u32 (5 bytes); BAD_STATE unless DISABLED with INHIBIT confirmed |
 | 15 | LIFECYCLE_READ | Empty | 25-byte receipt of the latest ARM/START/SET_MODE (below) |
 | 20 | FAULT_READ | Empty | 30-byte status including faults and recovery result |
-| 21 | FAULT_CLEAR | Empty | ACCEPTED only for isolated command-timeout recovery |
+| 21 | FAULT_CLEAR | Empty | ACCEPTED only for command-timeout and motor-protection recovery |
+| 22 | FAULT_SNAPSHOT_READ | Empty | 39-byte snapshot latched at the first protection trip (below) |
 | 30 | PARAM_READ | ID u16 | 18-byte typed parameter |
 | 31 | PARAM_WRITE | ID u16 + type u8 + value u32/f32 | APPLIED + the updated typed parameter |
 | 32 | PARAM_SAVE | Empty | APPLIED + stored record sequence u32 (5 bytes); NOT_SUPPORTED on images without storage |
@@ -131,11 +132,50 @@ command-observed set establishes H0 command observation. Fault and pipeline
 results describe subsequent admission. Physical applied remains false.
 
 STOP revokes the reference before asking H0 to acknowledge INHIBIT. FAULT_CLEAR
-requests only isolated COMMAND_TIMEOUT recovery. H0 rechecks the fault mask,
-fresh ADC/angle data, Foreground progress, request age and software inhibition
-before invoking its existing clear operation. The clear result is queryable.
-Other fault masks return BAD_STATE. Recovery ends in DISABLED with old command
-and sample validity cleared.
+requests recovery of a latch that holds only COMMAND_TIMEOUT and motor-protection
+causes (bits 9–15, below). H0 rechecks the fault mask, fresh ADC/angle data,
+Foreground progress, request age and software inhibition, and for OVER_VOLTAGE or
+UNDER_VOLTAGE a fresh bus voltage back inside IDs 114–113, before invoking its
+existing clear operation. The clear result is queryable. Other fault masks return
+BAD_STATE. Recovery ends in DISABLED with old command and sample validity cleared
+and the protection snapshot cleared.
+
+### Motor protection
+
+Fault bits: COMMAND_TIMEOUT 0, SAMPLE_TIMEOUT 1, SAMPLE_INVALID 2, FAST_HEARTBEAT 3,
+FOREGROUND_HEARTBEAT 4, INVALID_STATE 5, WDT 6, FLASH 7, FATAL_RESET_REQUIRED 8,
+and the motor-protection causes OVER_CURRENT 9, OVER_VOLTAGE 10, UNDER_VOLTAGE 11,
+OVER_SPEED 12, SUSTAINED_CURRENT 13, STALL 14, TRACKING_DIVERGENCE 15.
+
+H0 evaluates the rules after every accepted running cycle and latches a trip with
+INHIBIT (at most one 200 µs cycle late; the DRV8311 over-current protection is the
+faster hardware path):
+
+| Rule | Condition | Modes |
+| --- | --- | --- |
+| Over-current | Largest absolute phase current above ID 112 | All, including CALIBRATION |
+| Over / under voltage | Bus above ID 113 or below ID 114 for 3 consecutive samples | All |
+| Over-speed | Absolute mechanical speed above ID 115 (0: 1.25 × ID 72) | CURRENT, VELOCITY, POSITION |
+| Sustained current | Measured d/q current magnitude ≥ 0.95 × ID 68 for ID 116 | CURRENT, VELOCITY, POSITION |
+| Stall | Current magnitude ≥ 0.95 × ID 73 at a speed below 0.05 × ID 72 for ID 117 | VELOCITY, POSITION |
+| Tracking divergence | In a window of ID 118, the outer q-current reference ≥ 0.95 × ID 73 for at least half of the samples, and the window's mean speed error is not at least 2% below the previous such window's | VELOCITY, POSITION |
+
+A wrong commutation (a stored profile on a replaced motor, or the nominal
+placeholder) shows up as sustained current, over-speed or tracking divergence in
+VELOCITY and POSITION. In CURRENT mode a wrong electrical offset can reverse the
+torque at a normal current; no rule detects that, so a replaced motor must be
+recalibrated.
+
+FAULT_SNAPSHOT_READ returns the measurements of the first trip since the last
+applied clear:
+
+| Byte | Type | Field |
+| --- | --- | --- |
+| 1 / 2 | u8 / u8 | Valid / mode |
+| 3 / 7 | u32 / u32 | Protection fault bits / H0 time µs |
+| 11 / 15 | f32 / f32 | Mechanical speed / outer speed reference rad/s (0 without one) |
+| 19 / 23 / 27 | f32 | Measured id / iq / outer q-current reference A |
+| 31 / 35 | f32 / f32 | Largest phase current A / bus voltage V |
 
 ## Capability and status layout
 
@@ -377,6 +417,18 @@ when a save is interrupted. A successful save clears the dirty flag.
 | 72 | Speed reference limit (also bounds VELOCITY setpoints) | f32 rad/s | 0.1–1000 / 12 |
 | 73 | Outer-loop q-current limit | f32 A | 0.05–current limit / 2.5 |
 | 74 | Command lease | u32 µs (unit 5) | 2500–500000 / 2500 |
+| 112 | Over-current trip, above ID 68 | f32 A | ID 68–3.2 / 3.0 |
+| 113 / 114 | Over / under-voltage trip, under below over | f32 V (unit 18) | 3–24 / 22, 5 |
+| 115 | Over-speed trip, 0 automatic or at least ID 72 | f32 rad/s | 0–1000 / 0 |
+| 116 | Sustained-current window, 0 off | u32 ms (unit 20) | 0–60000 / 1000 |
+| 117 / 118 | Stall / tracking-divergence window, 0 off | u32 ms (unit 20) | 0–10000 / 200, 300 |
+
+IDs 112–118 follow the tuning rules above (H0 applies them; ID 61 is the receipt).
+They are RAM values in this release: a stored record does not carry them and a
+restart restores the initial values. The initial values come from Board1 facts:
+the 2.5 A control limit and the ±3.3 A current-sense span, the 5.25–20 V VM input
+of the schematic and the 24 V DRV8311 absolute maximum. They await confirmation on
+the target board.
 
 The command lease is how long a setpoint, or a lifecycle request, stays valid.
 Without a fresh setpoint within it, H0 latches COMMAND_TIMEOUT and inhibits.

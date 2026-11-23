@@ -478,8 +478,13 @@ void foc_board_persistence_restore(
     struct foc_runtime_tuning boot_tuning;
     if (!serial_caps_valid(&settings) ||
         !(settings.tuning.current_limit_a <= serial->current_limit_ceiling_a) ||
-        foc_runtime_read_tuning(runtime, &boot_tuning) != FOC_RUNTIME_OK ||
-        foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
+        foc_runtime_read_tuning(runtime, &boot_tuning) != FOC_RUNTIME_OK) {
+        persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
+        return;
+    }
+    /* The record does not carry the protection thresholds yet: keep the boot values. */
+    settings.tuning.trips = boot_tuning.trips;
+    if (foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
     }

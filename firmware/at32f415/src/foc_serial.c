@@ -19,6 +19,13 @@
 
 /* Private Constants ------------------------------------------------------------ */
 
+/* Board1 facts bounding the protection thresholds: the ±3.3 A current-sense span,
+ * the 24 V DRV8311 VM absolute maximum and its 3 V recommended minimum. */
+#define FOC_SERIAL_TRIP_CURRENT_MAX_A 3.2f
+#define FOC_SERIAL_TRIP_VBUS_MAX_V    24.0f
+#define FOC_SERIAL_TRIP_VBUS_MIN_V    3.0f
+#define FOC_SERIAL_TRIP_SPEED_MAX     1000.0f
+
 enum {
     PARAM_RX_BUDGET = 1,
     PARAM_CURRENT_LIMIT = 2,
@@ -62,6 +69,14 @@ enum {
     PARAM_VELOCITY_REFERENCE_LIMIT = 72,
     PARAM_IQ_LIMIT = 73,
     PARAM_COMMAND_LEASE = 74,
+    /* Motor-protection thresholds, writable while DISABLED; applied by H0. */
+    PARAM_TRIP_OVERCURRENT = 112,
+    PARAM_TRIP_OVERVOLTAGE = 113,
+    PARAM_TRIP_UNDERVOLTAGE = 114,
+    PARAM_TRIP_OVERSPEED = 115,
+    PARAM_TRIP_SUSTAINED = 116,
+    PARAM_TRIP_STALL = 117,
+    PARAM_TRIP_DIVERGENCE = 118,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
@@ -75,6 +90,8 @@ enum {
     UNIT_A_PER_RAD_S = 8,
     UNIT_A_PER_RAD = 9,
     UNIT_PER_SECOND = 10,
+    UNIT_VOLT = 18,
+    UNIT_MILLISECOND = 20,
     /* Direction codes on the wire: none, +1 and -1. */
     DIRECTION_NONE = 0,
     DIRECTION_POSITIVE = 1,
@@ -313,7 +330,9 @@ static bool foc_serial_tuning_parameter(
 {
     struct foc_runtime_tuning tuning;
     struct foc_runtime_tuning_result receipt;
-    if (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE ||
+    const bool trip = id >= PARAM_TRIP_OVERCURRENT && id <= PARAM_TRIP_DIVERGENCE;
+    if ((trip ? !runtime->config.trip_enabled
+              : (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
         foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
         foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) != FOC_RUNTIME_OK) {
         return false;
@@ -408,6 +427,52 @@ static bool foc_serial_tuning_parameter(
             .tuning = true,
         };
         return true;
+    case PARAM_TRIP_OVERCURRENT:
+        /* H0 also requires it strictly above the current-vector limit. */
+        foc_serial_tuning_float(
+            parameter,
+            tuning.trips.overcurrent_a,
+            tuning.current_limit_a,
+            FOC_SERIAL_TRIP_CURRENT_MAX_A,
+            UNIT_AMPERE
+        );
+        return true;
+    case PARAM_TRIP_OVERVOLTAGE:
+    case PARAM_TRIP_UNDERVOLTAGE:
+        /* H0 also requires under-voltage below over-voltage. */
+        foc_serial_tuning_float(
+            parameter,
+            id == PARAM_TRIP_OVERVOLTAGE ? tuning.trips.overvoltage_v : tuning.trips.undervoltage_v,
+            FOC_SERIAL_TRIP_VBUS_MIN_V,
+            FOC_SERIAL_TRIP_VBUS_MAX_V,
+            UNIT_VOLT
+        );
+        return true;
+    case PARAM_TRIP_OVERSPEED:
+        /* 0 follows 1.25 x ID 72; otherwise H0 requires at least ID 72. */
+        foc_serial_tuning_float(
+            parameter,
+            tuning.trips.overspeed_rad_s,
+            0.0f,
+            FOC_SERIAL_TRIP_SPEED_MAX,
+            UNIT_RAD_S
+        );
+        return true;
+    case PARAM_TRIP_SUSTAINED:
+    case PARAM_TRIP_STALL:
+    case PARAM_TRIP_DIVERGENCE:
+        *parameter = (struct foc_serial_parameter){
+            .value = id == PARAM_TRIP_SUSTAINED ? tuning.trips.sustained_ms
+                : id == PARAM_TRIP_STALL        ? tuning.trips.stall_ms
+                                                : tuning.trips.divergence_ms,
+            .minimum = 0U,
+            .maximum = id == PARAM_TRIP_SUSTAINED ? FOC_RUNTIME_TRIP_WINDOW_MAX_MS : 10000U,
+            .type = PARAM_U32,
+            .unit = UNIT_MILLISECOND,
+            .writable = true,
+            .tuning = true,
+        };
+        return true;
     default:
         return false;
     }
@@ -466,6 +531,27 @@ static int foc_serial_tuning_write(
         break;
     case PARAM_COMMAND_LEASE:
         tuning.command_timeout_us = value;
+        break;
+    case PARAM_TRIP_OVERCURRENT:
+        tuning.trips.overcurrent_a = floating;
+        break;
+    case PARAM_TRIP_OVERVOLTAGE:
+        tuning.trips.overvoltage_v = floating;
+        break;
+    case PARAM_TRIP_UNDERVOLTAGE:
+        tuning.trips.undervoltage_v = floating;
+        break;
+    case PARAM_TRIP_OVERSPEED:
+        tuning.trips.overspeed_rad_s = floating;
+        break;
+    case PARAM_TRIP_SUSTAINED:
+        tuning.trips.sustained_ms = value;
+        break;
+    case PARAM_TRIP_STALL:
+        tuning.trips.stall_ms = value;
+        break;
+    case PARAM_TRIP_DIVERGENCE:
+        tuning.trips.divergence_ms = value;
         break;
     default:
         return FOC_PROTO_INTERNAL_ERROR;
@@ -800,6 +886,35 @@ static int foc_serial_store(
     return result;
 }
 
+/* The measurements latched at the first protection trip (39 bytes). */
+static int
+foc_serial_fault_snapshot(struct foc_runtime *runtime, struct foc_protocol_frame *response)
+{
+    struct foc_runtime_fault_snapshot snapshot;
+    if (foc_runtime_read_fault_snapshot(runtime, &snapshot) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    uint8_t *body = response->payload;
+    body[1] = snapshot.valid ? 1U : 0U;
+    body[2] = (uint8_t)snapshot.mode;
+    foc_protocol_write_u32(body + 3, snapshot.faults);
+    foc_protocol_write_u32(body + 7, snapshot.h0_us);
+    const float values[] = {
+        snapshot.speed_rad_s,
+        snapshot.speed_ref_rad_s,
+        snapshot.measured_id_a,
+        snapshot.measured_iq_a,
+        snapshot.iq_ref_a,
+        snapshot.phase_peak_a,
+        snapshot.vbus_v,
+    };
+    for (unsigned int index = 0U; index < sizeof values / sizeof values[0]; ++index) {
+        foc_protocol_write_u32(body + 11 + 4U * index, foc_serial_float_bits(values[index]));
+    }
+    response->length = 39;
+    return FOC_PROTO_OK;
+}
+
 static bool foc_serial_calibrating(const struct foc_serial *serial)
 {
     return serial->calibration.busy != NULL &&
@@ -928,6 +1043,8 @@ static int foc_serial_dispatch(
     case FOC_MSG_FAULT_READ:
     case FOC_MSG_TELEMETRY_READ:
         return foc_serial_status(serial, uart, runtime, now_us, response);
+    case FOC_MSG_FAULT_SNAPSHOT_READ:
+        return foc_serial_fault_snapshot(runtime, response);
     case FOC_MSG_STOP:
         if (serial->calibration.abort != NULL) {
             serial->calibration.abort(serial->calibration.context);

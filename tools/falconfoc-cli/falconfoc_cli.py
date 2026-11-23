@@ -21,7 +21,7 @@ MESSAGES = {
     "hello": 1, "capability": 2, "status": 3, "setpoint": 0x10,
     "stop": 0x11, "arm": 0x12, "start": 0x13, "set-mode": 0x14, "lifecycle": 0x15,
     "fault": 0x20,
-    "clear": 0x21, "param-read": 0x30, "param-write": 0x31,
+    "clear": 0x21, "fault-snapshot": 0x22, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
     "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
 }
@@ -45,8 +45,21 @@ PARAMETERS = {
     "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
     "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
     "velocity-limit": 72, "iq-limit": 73, "command-lease-us": 74,
+    "trip-overcurrent": 112, "trip-overvoltage": 113, "trip-undervoltage": 114,
+    "trip-overspeed": 115, "trip-sustained-ms": 116, "trip-stall-ms": 117,
+    "trip-divergence-ms": 118,
 }
-PARAMETER_TYPES = {74: "u32", 1: "u32"}
+PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32"}
+# Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection.
+FAULT_BITS = ["COMMAND_TIMEOUT", "SAMPLE_TIMEOUT", "SAMPLE_INVALID", "FAST_HEARTBEAT",
+              "FOREGROUND_HEARTBEAT", "INVALID_STATE", "WDT", "FLASH", "FATAL_RESET_REQUIRED",
+              "OVER_CURRENT", "OVER_VOLTAGE", "UNDER_VOLTAGE", "OVER_SPEED",
+              "SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE"]
+
+
+def fault_names(mask):
+    return [name for bit, name in enumerate(FAULT_BITS) if mask & (1 << bit)] + [
+        bit for bit in range(len(FAULT_BITS), 32) if mask & (1 << bit)]
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
               "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
@@ -230,6 +243,7 @@ def describe(frame):
             command_us=struct.unpack_from("<I", body, 22)[0],
             publication_sequence=struct.unpack_from("<I", body, 26)[0], physical_applied=False,
         )
+        result["fault_names"] = fault_names(result["faults"])
         if frame.type == 0x40:
             result.update(
                 id_a=struct.unpack_from("<f", body, 30)[0], iq_a=struct.unpack_from("<f", body, 34)[0],
@@ -297,6 +311,15 @@ def describe(frame):
                 active_electrical_offset_rad=struct.unpack_from("<f", body, 77)[0],
                 active_adc_offset_count=list(struct.unpack_from("<3f", body, 81)),
             )
+    elif frame.type == 0x22 and body[0] == 0:
+        if len(body) != 39:
+            raise ValueError("BAD_RESPONSE")
+        faults = struct.unpack_from("<I", body, 3)[0]
+        result.update(dict(
+            snapshot_valid=bool(body[1]), snapshot_mode=body[2], snapshot_faults=faults,
+            snapshot_fault_names=fault_names(faults), snapshot_h0_us=struct.unpack_from("<I", body, 7)[0],
+            **dict(zip(("speed_rad_s", "speed_ref_rad_s", "measured_id_a", "measured_iq_a",
+                        "iq_ref_a", "phase_peak_a", "vbus_v"), struct.unpack_from("<7f", body, 11)))))
     elif frame.type == 0x32 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -836,7 +859,7 @@ def run_virtual_demo(
 
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
-                 "calibrate-persist", "calibrate-faults")
+                 "calibrate-persist", "calibrate-faults", "protect")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1587,6 +1610,163 @@ def run_sil_calibrate_faults(simulator, base_arguments, flash_path, json_path=No
     return summary
 
 
+def run_sil_protect(simulator, base_arguments, json_path=None):
+    """Motor protection (first step of the parameter contract, section 12): commutation
+    mismatches, one injection per rule, fault clear and a deliberate reversal. The
+    nominal placeholder (7 pole pairs, offset 0) driving a different SIL motor is the
+    same commutation error as a stored profile on a replaced motor. Nothing here is
+    physical evidence."""
+
+    checks, metrics = {}, {}
+
+    def boot(arguments):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def outcome(session, samples):
+        status = session.status()
+        snapshot = session.call("fault-snapshot", quiet=True)
+        last = samples[-1] if samples else {}
+        result = {"ran_us": last.get("elapsed_us"), "faults": status["fault_names"],
+                  "state": status["state"],
+                  "snapshot": {key: snapshot.get(key) for key in (
+                      "snapshot_valid", "snapshot_fault_names", "snapshot_mode", "speed_rad_s",
+                      "speed_ref_rad_s", "measured_id_a", "measured_iq_a", "iq_ref_a",
+                      "phase_peak_a", "vbus_v")}}
+        print(json.dumps(result, allow_nan=False))
+        return result
+
+    def snapshot_complete(result, expected):
+        snapshot = result["snapshot"]
+        return (snapshot["snapshot_valid"] and snapshot["snapshot_fault_names"] == result["faults"]
+                and result["faults"] == [expected] and snapshot["vbus_v"] > 0.0)
+
+    # 1. Commutation mismatches in VELOCITY mode, 1.5 s each.
+    matrix = {
+        "same_motor": ((7, 0.0), set()),
+        "offset_17deg": ((7, 0.3), set()),
+        "offset_86deg": ((7, 1.5), {"SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE"}),
+        "offset_172deg": ((7, 3.0), {"OVER_SPEED", "TRACKING_DIVERGENCE"}),
+        "pole_pairs_11": ((11, 0.0), {"TRACKING_DIVERGENCE", "SUSTAINED_CURRENT", "STALL"}),
+        "pole_pairs_14": ((14, 0.0), {"TRACKING_DIVERGENCE", "SUSTAINED_CURRENT", "STALL"}),
+    }
+    for name, ((pole_pairs, offset), allowed) in matrix.items():
+        transport, session = boot(["--motor-pole-pairs", str(pole_pairs),
+                                   "--motor-offset-rad", str(offset)])
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, samples = session.run("velocity", 5.0, 1500000)
+        result = metrics[f"mismatch_{name}"] = outcome(session, samples)
+        tripped = set(result["faults"])
+        checks[f"mismatch_{name}"] = (steps == {"arm": "APPLIED", "start": "APPLIED"} and (
+            not tripped if not allowed else (len(tripped) == 1 and tripped <= allowed
+                                              and result["snapshot"]["snapshot_valid"])))
+        session.stop()
+        transport.__exit__()
+
+    # 2. One injection per rule, CURRENT mode unless stated.
+    def inject(name, arguments, expected, prepare=(), mode="current", reference=0.3,
+               duration_us=800000):
+        transport, session = boot(arguments)
+        for parameter, value in prepare:
+            assert session.tune(parameter, value) == "APPLIED", (name, parameter)
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode=mode)
+        steps, samples = session.run(mode, reference, duration_us)
+        result = metrics[f"inject_{name}"] = outcome(session, samples)
+        checks[f"inject_{name}"] = snapshot_complete(result, expected)
+        return transport, session, result
+
+    transport, session, result = inject("overcurrent", ["--adc-step", "100000,2000"],
+                                        "OVER_CURRENT")
+    checks["overcurrent_snapshot_peak"] = result["snapshot"]["phase_peak_a"] > 3.0
+    transport.__exit__()
+    transport, session, result = inject("overvoltage", ["--vbus-v", "23"], "OVER_VOLTAGE")
+    transport.__exit__()
+    transport, session, result = inject("undervoltage", ["--vbus-v", "4.5"], "UNDER_VOLTAGE")
+    # The bus is still low: FAULT_CLEAR is refused.
+    clear = session.call("clear")
+    for _ in range(100):
+        after = session.status()
+    checks["undervoltage_clear_refused"] = (after["state"] == SIL_STATE_FAULT
+                                            and "UNDER_VOLTAGE" in after["fault_names"])
+    metrics["undervoltage_clear"] = clear["result"]
+    transport.__exit__()
+    transport, session, result = inject(
+        "overspeed", [], "OVER_SPEED",
+        prepare=(("velocity-limit", 2.0), ("trip-overspeed", 2.5)), reference=0.4,
+        duration_us=1500000)
+    # A protection latch clears: snapshot gone, the drive runs again.
+    clear = session.call("clear")
+    recovered = None
+    for _ in range(200):
+        recovered = session.status()
+        if recovered["state"] == SIL_STATE_DISABLED and recovered["faults"] == 0:
+            break
+    snapshot = session.call("fault-snapshot", quiet=True)
+    checks["protection_fault_clears"] = (clear["result"] == "ACCEPTED"
+                                         and recovered["state"] == SIL_STATE_DISABLED
+                                         and recovered["faults"] == 0
+                                         and not snapshot["snapshot_valid"])
+    steps, samples = session.run("current", 0.2, 20000)
+    checks["runs_after_clear"] = steps == {"arm": "APPLIED", "start": "APPLIED"}
+    session.stop()
+    transport.__exit__()
+    transport, session, result = inject(
+        "sustained_current", [], "SUSTAINED_CURRENT",
+        prepare=(("iq-limit", 0.5), ("current-limit", 0.6), ("trip-sustained-ms", 100)),
+        reference=0.6)
+    transport.__exit__()
+    transport, session, result = inject(
+        "stall", ["--motor-damping", "10"], "STALL", mode="velocity", reference=5.0)
+    transport.__exit__()
+
+    # 3. Ordering is enforced on write.
+    transport, session = boot([])
+    checks["overcurrent_above_limit_required"] = session.call(
+        "param-write", parameter_write(PARAMETERS["trip-overcurrent"], "f32", 2.5))[
+            "result"] == "INVALID_ARGUMENT"
+    checks["undervoltage_below_overvoltage_required"] = session.call(
+        "param-write", parameter_write(PARAMETERS["trip-undervoltage"], "f32", 23.0))[
+            "result"] == "INVALID_ARGUMENT"
+    transport.__exit__()
+
+    # 4. No false trip: +5 rad/s, then a deliberate reversal to -5 rad/s.
+    transport, session = boot([])
+    session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+    steps, samples = session.run("velocity", 5.0, 600000)
+    reversal = setpoint("velocity", -5.0)
+    started = None
+    while samples and samples[-1]["state"] == SIL_STATE_RUNNING:
+        session.call("setpoint", reversal, quiet=True)
+        telemetry = session.call("telemetry", quiet=True)
+        started = telemetry["uptime_us_mod32"] if started is None else started
+        samples.append({key: telemetry[key] for key in ("state", "faults", "velocity_rad_s")})
+        if ((telemetry["uptime_us_mod32"] - started) & 0xFFFFFFFF) >= 1000000 or \
+                telemetry["state"] != SIL_STATE_RUNNING:
+            break
+    metrics["reversal_final_rad_s"] = samples[-1]["velocity_rad_s"]
+    checks["reversal_no_trip"] = (samples[-1]["state"] == SIL_STATE_RUNNING
+                                  and samples[-1]["faults"] == 0
+                                  and abs(samples[-1]["velocity_rad_s"] + 5.0) < 0.5)
+    session.stop()
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-protect",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -1868,6 +2048,10 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "protect":
+                summary = run_sil_protect(os.path.abspath(args.simulator), simulator_arguments,
+                                          args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "calibrate-faults":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-faults-flash.bin"))

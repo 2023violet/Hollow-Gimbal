@@ -34,6 +34,7 @@
 #include "foc_motion.h"
 #include "foc_motion_limits.h"
 #include "foc_pipeline.h"
+#include "foc_protect.h"
 #include "foc_trajectory.h"
 
 #include <stdatomic.h>
@@ -151,6 +152,26 @@ enum foc_runtime_request_result {
  * only while DISABLED with INHIBIT confirmed, after the same checks that
  * foc_runtime_init() applies to these fields.
  */
+/**
+ * Motor-protection thresholds as configured. Effective foc_protect values are
+ * derived from these and the tuning limits: the over-speed trip of 0 follows
+ * 1.25 x velocity_limit_rad_s; sustained current is 0.95 x current_limit_a;
+ * stall and divergence use 0.95 x iq_limit_a and 0.05 x velocity_limit_rad_s.
+ */
+struct foc_runtime_trip_limits {
+    /** Phase over-current trip in A, above the current-vector limit. */
+    float overcurrent_a;
+    /** Bus voltage window in V, under-voltage below over-voltage. */
+    float overvoltage_v;
+    float undervoltage_v;
+    /** Mechanical over-speed in rad/s, 0 for automatic, otherwise at least the speed limit. */
+    float overspeed_rad_s;
+    /** Sustained-current, stall and divergence windows in ms; 0 disables a rule. */
+    uint32_t sustained_ms;
+    uint32_t stall_ms;
+    uint32_t divergence_ms;
+};
+
 struct foc_runtime_tuning {
     /** d/q current PI gains in V/A and V/(A s). */
     struct foc_vector_dq current_kp_v_per_a;
@@ -167,12 +188,16 @@ struct foc_runtime_tuning {
     float iq_limit_a;
     /** Command and lifecycle freshness lease in µs. */
     uint32_t command_timeout_us;
+    /** Protection thresholds, checked only when the instance enables protection. */
+    struct foc_runtime_trip_limits trips;
 };
 
 /** Inclusive bounds of the command lease a tuning candidate may select, in µs. */
 enum foc_runtime_tuning_limits {
     FOC_RUNTIME_LEASE_MIN_US = 2500,
     FOC_RUNTIME_LEASE_MAX_US = 500000,
+    /** Largest protection window in ms. */
+    FOC_RUNTIME_TRIP_WINDOW_MAX_MS = 60000,
 };
 
 /** Latest tuning request result. revision counts applied candidates since init. */
@@ -392,6 +417,29 @@ struct foc_runtime_config {
     void *hook_arg;
     /** Optional sensed motion configuration. Zero initialization preserves SW01B. */
     struct foc_runtime_motion_config motion;
+    /** Enables motor protection (foc_protect); false preserves the unprotected instance. */
+    bool trip_enabled;
+    /** Initial protection thresholds, used only when trip_enabled. */
+    struct foc_runtime_trip_limits trips;
+};
+
+/** Measurements latched at the first protection trip, cleared by an applied fault clear. */
+struct foc_runtime_fault_snapshot {
+    /** Protection bits of the trip and the H0 time in µs. */
+    uint32_t faults;
+    uint32_t h0_us;
+    enum foc_runtime_mode mode;
+    /** Mechanical speed and the outer speed reference in rad/s (reference 0 without one). */
+    float speed_rad_s;
+    float speed_ref_rad_s;
+    /** Measured d/q current, outer q-current reference and largest phase current in A. */
+    float measured_id_a;
+    float measured_iq_a;
+    float iq_ref_a;
+    float phase_peak_a;
+    /** Bus voltage in V. */
+    float vbus_v;
+    bool valid;
 };
 
 /** Coherent H1 snapshot. */
@@ -446,6 +494,10 @@ struct foc_runtime_sensor_slot {
     struct foc_motion_limits_request motion_request;
     /** H1 refusal for this sensor, mode and session. */
     enum foc_motion_rejection motion_rejection;
+    /** Speed reference in rad/s fed to the velocity loop for this target. */
+    float velocity_ref_rad_s;
+    /** True when velocity_ref_rad_s belongs to this publication's target. */
+    bool velocity_ref_valid;
 };
 
 /** Caller snapshot of one H0 trigger. */
@@ -686,6 +738,12 @@ struct foc_runtime {
     atomic_uint tuning_result_slot;
     /** H0-owned count of applied candidates. */
     uint32_t tuning_revision;
+    /** H0-owned effective protection thresholds and timed-rule state. */
+    struct foc_protect_config protect;
+    struct foc_protect_state protect_state;
+    /** H0-written fault snapshot slots and the published slot index. */
+    struct foc_runtime_fault_snapshot fault_snapshots[2];
+    atomic_uint fault_snapshot_slot;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -785,13 +843,19 @@ void foc_runtime_request_inhibit(struct foc_runtime *runtime, uint32_t fault_bit
 void foc_runtime_revoke_command(struct foc_runtime *runtime);
 
 /**
- * Foreground only. Request recovery of an isolated command-timeout latch.
- * H0 rechecks fresh sensing, Foreground progress and software inhibition.
- * Other fault types cannot be cleared here. Query clear_result for completion.
+ * Foreground only. Request recovery of a latch holding only command-timeout and
+ * motor-protection causes (FOC_SAFE_FAULT_PROTECTION_MASK). H0 rechecks fresh
+ * sensing, Foreground progress and software inhibition, and for a bus-voltage
+ * cause a bus voltage back inside the protection window. Other fault types
+ * cannot be cleared here. Query clear_result for completion.
  */
 int foc_runtime_request_timeout_clear(struct foc_runtime *runtime, uint32_t now_us);
 
 /** Copy coherent telemetry once, leaving the caller's output unchanged on ERR_BUSY. */
 int foc_runtime_read_snapshot(struct foc_runtime *runtime, struct foc_runtime_snapshot *snapshot);
+
+/** Copy the latest published protection-trip snapshot; valid is false when none is held. */
+int foc_runtime_read_fault_snapshot(struct foc_runtime *runtime,
+                                    struct foc_runtime_fault_snapshot *snapshot);
 
 /* ---------------------------------------- end of file ----------------------------------------- */

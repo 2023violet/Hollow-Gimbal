@@ -3141,3 +3141,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 ## 2026-11-22 · V2 参数契约设计稿
 
 - 新增 `docs/superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md`：参数按电机模型、换相组、用户档案、控制设置、保护阈值、通信、机械零点分组，规定 ID、范围、写入状态、写后统一刷新、存盘与命令；门禁为换相组有效且 ADC 零点就绪。`protocol/README.md` 参数节加指向说明。仅设计，固件未改。
+
+## 2026-11-22 · V2 保护故障层（参数契约第一步）
+
+- 新增可移植模块 `g3/safe/foc_protect`：过流、过压/欠压、过速、持续大电流、堵转、跟踪发散（分窗统计）。Runtime 在 H0 每个接受的运行周期后评估，跳闸经既有 stop 路径锁存故障位 9–15 并 INHIBIT，同时锁存快照（0x22 FAULT_SNAPSHOT_READ）。FAULT_CLEAR 扩展到保护类故障（电压类要求 VBUS 回到窗口内）。阈值为 tuning ID 112–118，暂只在 RAM。初始值依据原理图（VM 5.25–20 V）与 DRV8311 数据手册（VM 绝对最大 24 V），待实物确认。
+- SIL 新增 `--adc-step` 注入与 `sil-demo --sil-scenario protect`：换相错配 6 例、逐规则注入、清除、反向不误报，全部通过；物理输出、目标板阈值与 WCET 未验证。
+- 资源基线（arm-none-eabi-size）：默认镜像 text 77,768 B（此前 75,200 B，约占 128 KB Flash 59%），data+bss 12,340 B（约占 32 KB RAM 38%，另有 4 KB 栈余量断言）；持久化镜像 text 81,112 B。回归 fwinteg 126×3 VERDICT PASS，protect 场景 lockstep 与 free-run 均 SIL_PASS。

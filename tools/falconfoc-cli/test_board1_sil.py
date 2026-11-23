@@ -140,6 +140,18 @@ class Board1SilTest(unittest.TestCase):
         self.assertEqual(summary["metrics"]["rl_failure_after_rotor"]["committed_stages"],
                          ["rotor"])
 
+    def test_protection_trips_wrong_commutation_and_each_rule(self):
+        """A wrong commutation (the nominal profile on another motor) trips sustained
+        current, over-speed or tracking divergence and the same motor runs on; each rule
+        trips on its own injection with a complete snapshot; a protection latch clears;
+        a deliberate reversal does not trip."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_protect(SIL, ["--lockstep-us", "500"])
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+        self.assertEqual(summary["metrics"]["mismatch_offset_172deg"]["faults"], ["OVER_SPEED"])
+        self.assertEqual(summary["metrics"]["mismatch_pole_pairs_11"]["faults"],
+                         ["TRACKING_DIVERGENCE"])
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

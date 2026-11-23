@@ -60,6 +60,8 @@ enum foc_protocol_message {
     FOC_MSG_LIFECYCLE_READ = 0x15,
     FOC_MSG_FAULT_READ = 0x20,
     FOC_MSG_FAULT_CLEAR = 0x21,
+    /** Read the snapshot latched at the first protection trip (appended). */
+    FOC_MSG_FAULT_SNAPSHOT_READ = 0x22,
     FOC_MSG_PARAM_READ = 0x30,
     FOC_MSG_PARAM_WRITE = 0x31,
     FOC_MSG_PARAM_SAVE = 0x32,

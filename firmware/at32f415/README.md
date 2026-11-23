@@ -320,6 +320,20 @@ failing after CAL-1/2 (save and restore of the committed phase), and an abort
 in CAL-3 followed by Host control. Motor identity is still the boot
 configuration (see the protocol README).
 
+### Motor protection
+
+H0 evaluates `g3/safe/foc_protect` after every accepted running cycle:
+over-current, bus over/under-voltage, over-speed, sustained current, stall and
+tracking divergence (protocol README, Motor protection). A trip latches fault bits
+9–15 with INHIBIT and a snapshot (FAULT_SNAPSHOT_READ, 0x22); FAULT_CLEAR clears
+protection latches. Thresholds are tuning IDs 112–118, RAM-only until the
+parameter record grows (contract format 3). `sil-demo --sil-scenario protect`
+drives the nominal profile against six SIL motors (same, 17°, 86°, 172° offset,
+11 and 14 pole pairs), injects each rule (`--adc-step us,counts`, `--vbus-v`,
+lowered limits, `--motor-damping`), clears a latch and checks that a deliberate
++5 → −5 rad/s reversal does not trip. Torque-mode reversal from a wrong offset is
+not detected.
+
 ## Locked Board1 capture
 
 Optional `FALCONFOC_BOARD_CAPTURE=ON` records ADC ranks, SPI words and

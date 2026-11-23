@@ -170,6 +170,7 @@ static enum foc_pipeline_status foc_pipeline_observe_sample(
         FOC_SAFE_STATUS_OK) {
         return FOC_PIPELINE_ERR_SAMPLE;
     }
+    pipeline->measurement = *measurement;
     return FOC_PIPELINE_OK;
 }
 

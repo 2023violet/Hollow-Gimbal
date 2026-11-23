@@ -3157,3 +3157,7 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - ARM/START 需有效换相组（来源 RUN/STORAGE/HOST/SUPPLY，NOMINAL 占位无效）与本次上电测得的 ADC 零点：无效返回新结果码 15 NOT_CALIBRATED，零点未就绪返回 BUSY。校准管理器在换相组有效时自动执行只测零点的 CAL-1（阶段 4，不驱动电机）并重新初始化；新增 COMMUTATION_WRITE（0x53）整组写入、ID 17 组内微调、只读 ID 88–90；CONFIG_ERASE 同时把 RAM 恢复为启动配置与启动 tuning。Runtime 增加传感器预热期：重新初始化后、首个传感器发布前，DISABLED 的 H0 不计入无效采样锁存。协议层登记 0x22、0x53。
 - CLI 新增 `motor-setup`（校准 → 档案 → 保存）与 `commission()`；SIL 场景改为先经串口导入启动换相组；新增 `swap` 场景（lockstep 与 free-run 通过），SIL 单元测试 14 项通过。已知局限：CAL-3 对 0.35 Ω/0.7 mH 电机拟合失败。资源：默认镜像 text 81,000 B，bss 12,584 B。
+
+## 2026-11-22 · CAL-3/CAL-4 适用范围修复
+
+- `foc_motor_id`：R/L 分辨率约束由配置边界乘积改为对拟合结果检查（间隔 × Rs / L ≤ 0.3），Board1 CAL-3 边界放宽为 Rs 0.03–10 Ω、L 0.05–50 mH；原先 L < 0.8 mH 或 Rs > 1.15 Ω 一律 RANGE。CAL-4 电压档位按 CAL-3 Rs 缩放，避免低电阻电机反向切档过流导致驱动停止。SIL 下 0.1–2.0 Ω、0.3–2.0 mH、Ψ 至 0.02 Wb 的电机均校准成功；calibrate-faults 改用 Rs/L = 2600 /s 的电机作失败用例。

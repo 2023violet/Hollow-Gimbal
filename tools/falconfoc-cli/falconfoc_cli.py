@@ -1597,20 +1597,21 @@ def run_sil_calibrate_faults(simulator, base_arguments, flash_path, json_path=No
                                            and session.read("pole-pairs") == 7)
     transport.__exit__()
 
-    # 2. CAL-1/2 pass, CAL-3 fails (Rs above the fit bound): the rotor phase stays
+    # 2. CAL-1/2 pass, CAL-3 fails (Rs / L = 2600 /s: the 200 us interval does not resolve
+    #    the pole, so the R/L fit is refused): the rotor phase stays
     #    committed and reported, the Runtime is back in CURRENT mode, PARAM_SAVE stores
     #    the committed rotor calibration and a power cycle restores it.
     if flash_path.exists():
         flash_path.unlink()
-    arguments = plant_arguments(rs_ohm=1.3) + ["--flash", str(flash_path)]
+    arguments = plant_arguments(rs_ohm=1.3, ld_h=0.0005, lq_h=0.0007) + ["--flash", str(flash_path)]
     transport, session = boot(arguments)
     session.call("calibrate")
     view, seen = _calibrate_wait(session)
     partial = metrics["rl_failure_after_rotor"] = outcome(session, view)
-    checks["high_rs_rotor_phase_committed"] = (partial["committed_stages"] == ["rotor"]
+    checks["unresolved_rl_rotor_phase_committed"] = (partial["committed_stages"] == ["rotor"]
                                                and partial["active_source"] == "RUN"
                                                and partial["active_pole_pairs"] == 11)
-    checks["high_rs_fails_in_rl"] = (partial["calibration_failure"] == "RL"
+    checks["unresolved_rl_fails_in_rl"] = (partial["calibration_failure"] == "RL"
                                      and partial["failed_state"] in ("RL_D", "RL_Q"))
     checks["mode_current_after_failure"] = partial["runtime_mode"] == "current"
     checks["pi_not_applied_after_failure"] = (

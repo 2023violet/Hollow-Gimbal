@@ -75,9 +75,10 @@ enum foc_motor_id_status {
 
 /**
  * Caller-selected limits and quality policy for one axis.
- * The maximum allowed interval in seconds times max_rs_ohm / min_inductance_h
- * must not exceed 0.3. Current must be smooth enough for endpoint quadrature
- * with the supplied held or appropriately averaged voltage.
+ * A fit is refused (RANGE) when the maximum allowed interval in seconds times
+ * the fitted Rs / L exceeds 0.3, whatever the configured bounds. Current must
+ * be smooth enough for endpoint quadrature with the supplied held or
+ * appropriately averaged voltage.
  */
 struct foc_motor_id_config {
     enum foc_motor_id_axis axis;

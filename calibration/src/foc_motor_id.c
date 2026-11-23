@@ -63,10 +63,7 @@ static bool foc_motor_id_config_valid(const struct foc_motor_id_config *config)
         foc_motor_id_positive(config->min_slew_rms_a_per_s) &&
         foc_motor_id_positive(config->max_residual_rms_v) &&
         foc_motor_id_bounds(config->min_rs_ohm, config->max_rs_ohm) &&
-        foc_motor_id_bounds(config->min_inductance_h, config->max_inductance_h) &&
-        /* Constrain quadrature bias even when a slow capture fits with low residual. */
-        ((double)config->max_interval_us * 1.0e-6) * config->max_rs_ohm <=
-        FOC_MOTOR_ID_MAX_RL_STEP * config->min_inductance_h;
+        foc_motor_id_bounds(config->min_inductance_h, config->max_inductance_h);
 }
 
 static int foc_motor_id_invalidate(
@@ -138,6 +135,12 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     }
     if (rs < config->min_rs_ohm || rs > config->max_rs_ohm || l < config->min_inductance_h ||
         l > config->max_inductance_h) {
+        return FOC_CALIBRATION_FAILURE_RANGE;
+    }
+    /* Endpoint quadrature holds while the identified pole is resolved by the longest
+     * admitted interval (interval x Rs / L at most 0.3). The bound applies to the fitted
+     * pair, so a range wide in both Rs and L stays usable for any resolvable motor. */
+    if (((double)config->max_interval_us * 1.0e-6) * rs > FOC_MOTOR_ID_MAX_RL_STEP * l) {
         return FOC_CALIBRATION_FAILURE_RANGE;
     }
     /* Evaluate the published Float32 pair, allowing for accumulated roundoff

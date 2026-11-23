@@ -314,10 +314,13 @@ CALIBRATE_START runs CAL-1 and CAL-2 in the firmware:
 4. CAL-3 Rs, Ld, Lq: voltage-mode FOC commutated by the calibrated sensor angle
    applies d-axis pulses (no torque) and a zero-mean q-axis pulse train (the free
    shaft only dithers), 768 H0 intervals each, fitted by `foc_motor_id`.
-5. CAL-4 flux and Kt: q-axis voltage at ±15 % and ±30 % of the voltage limit;
-   each level settles for 400 ms and its steady part (4 windows of 32
-   intervals) is one segment for `foc_flux_id`. Kt = 1.5 x pole pairs x flux.
-6. CAL-5: `foc_motor_pi_design` (150 Hz, 200 µs period, 160 µs update delay)
+5. CAL-4 flux and Kt: q-axis voltage levels a, 2a, −a, −2a with
+   a = min(15 % of the voltage limit, 0.2 × current limit × the CAL-3 Rs), so the
+   reversal step (about 3a / Rs against the running back-EMF) stays within 60 % of
+   the current limit on low-resistance motors; each level settles for 400 ms and
+   its steady part (4 windows of 32 intervals) is one segment for `foc_flux_id`.
+   Kt = 1.5 x pole pairs x flux.
+6. CAL-5: `foc_motor_pi_design` (ID 104 bandwidth, 200 µs period)
    designs the current PI; H0 applies it through the tuning mailbox and the
    Runtime returns to CURRENT mode.
 
@@ -325,7 +328,9 @@ The electrical stages run at the H0 rate on the logical slot clock. The
 interval voltage is reconstructed from the applied duties and bus voltage
 (0.8 V(k-2) + 0.2 V(k-1) for the TMR1 preload) and declared `COMMANDED`: on
 hardware it includes dead-time and switch-drop error, which biases Rs. With
-200 µs intervals the R/L fit accepts Rs up to 1.15 Ω for L down to 0.8 mH.
+200 µs intervals the R/L fit accepts Rs 0.03–10 Ω and L 0.05–50 mH, and refuses a
+fitted pair whose pole the interval does not resolve (interval × Rs / L above
+0.3, i.e. Rs / L above 1500 /s).
 
 While a run is active, SETPOINT, ARM, START, SET_MODE, PARAM_WRITE, PARAM_SAVE,
 CONFIG_ERASE, FAULT_CLEAR and CALIBRATE_START return BUSY. STOP or

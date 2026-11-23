@@ -151,14 +151,21 @@ expect_failure(struct foc_motor_id_context *context, enum foc_calibration_failur
 
 static int test_acquisition_resolution(void)
 {
+    /* Wide bounds are accepted; resolution is judged on the fitted pair. */
     struct foc_motor_id_context context = {0};
-    CHECK(foc_motor_id_init(&context, &config, 1U) == FOC_MOTOR_ID_OK);
-    struct foc_motor_id_config underresolved = config;
-    underresolved.max_interval_us = 8000U;
-    CHECK(foc_motor_id_init(&context, &underresolved, 2U) == FOC_MOTOR_ID_ERR_CONFIG);
-    CHECK(
-        context.result.capture_id == 1U && context.config.max_interval_us == config.max_interval_us
-    );
+    struct foc_motor_id_config wide = config;
+    wide.min_inductance_h = 1.0e-6f;
+    wide.max_rs_ohm = 10.0f;
+    CHECK(foc_motor_id_init(&context, &wide, 1U) == FOC_MOTOR_ID_OK);
+    /* 50 us x 1.0 Ohm / 0.5 mH = 0.1: resolved, the fit passes. */
+    CHECK(collect(&context, 1.0f, 0.0005f, false) == 0);
+    struct foc_motor_id_result result;
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && result.usable);
+    /* 50 us x 2.0 Ohm / 0.2 mH = 0.5: the pole is not resolved, the fit is refused. */
+    CHECK(foc_motor_id_init(&context, &wide, 2U) == FOC_MOTOR_ID_OK);
+    CHECK(collect(&context, 2.0f, 0.0002f, false) == 0);
+    CHECK(foc_motor_id_finish(&context, &result) != FOC_MOTOR_ID_OK);
+    CHECK(result.failure == FOC_CALIBRATION_FAILURE_RANGE);
     return 0;
 }
 

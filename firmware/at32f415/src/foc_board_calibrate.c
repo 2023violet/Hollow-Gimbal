@@ -520,11 +520,11 @@ static bool cal_rl_begin(struct foc_board_calibration *cal, enum foc_motor_id_ax
         .min_slew_rms_a_per_s = 5.0f,
         .min_voltage_rms_v = 0.05f,
         .max_residual_rms_v = 0.05f,
-        /* 200 us intervals: interval x max Rs / min L must stay at or below 0.3,
-         * with headroom for float rounding (1.2 Ohm sits exactly on the bound). */
+        /* Wide bounds: the fit itself refuses a motor whose pole the 200 us interval
+         * does not resolve (interval x Rs / L above 0.3, i.e. Rs / L above 1500 /s). */
         .min_rs_ohm = 0.03f,
-        .max_rs_ohm = 1.15f,
-        .min_inductance_h = 0.0008f,
+        .max_rs_ohm = 10.0f,
+        .min_inductance_h = 0.00005f,
         .max_inductance_h = 0.05f,
     };
     cal_capture_begin(cal);
@@ -767,9 +767,16 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         return;
     }
     /* CAL-4: four speed levels, two in each direction, voltage-mode FOC on the rotor angle.
-     * Each level settles first; only its steady part is captured, as one segment. */
+     * Each level settles first; only its steady part is captured, as one segment.
+     * Levels a, 2a, -a, -2a: the reversal from 2a to -a meets a back-EMF of about 2a, so the
+     * current steps by about 3a / Rs. With the CAL-3 Rs, a keeps that step within 60% of
+     * the current limit (a <= 0.2 x limit x Rs), and never above 0.15 x the voltage limit. */
     const float limit = cal_voltage_limit(cal);
-    const float levels[4] = {0.15f * limit, 0.3f * limit, -0.15f * limit, -0.3f * limit};
+    const float base = fminf(
+        0.15f * limit,
+        0.2f * cal->runtime->pipeline.current.config.current_limit_a * cal->rl_model.rs_ohm
+    );
+    const float levels[4] = {base, 2.0f * base, -base, -2.0f * base};
     cal_drive_dq(cal, 0.0f, levels[cal->level], 0.0f, true, now_us);
     if (!cal->capturing && cal->pushed >= CAL_FLUX_WINDOW * CAL_FLUX_WINDOWS) {
         /* Level complete: move on, or finish after the fourth. */

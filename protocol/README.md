@@ -97,7 +97,7 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 33 | CONFIG_ERASE | Empty | APPLIED; storage is erased and the running instance returns to the boot configuration, boot tuning and default RAM policies at once (commutation group invalid). NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 83-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
-| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive) | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
+| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive), 8 inertia (CAL-7) alone or added to 1–3 (9–11); 8 without 2 needs Rs, Ld, Lq and flux in the profile | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
 | 51 | CALIBRATE_READ | Empty | 93-byte calibration progress, results and active configuration (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 | 53 | COMMUTATION_WRITE | pole pairs u16 (1–64) + encoder direction i8 (+1/−1) + electrical offset f32 rad [0, 2π) | APPLIED (group source HOST); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY during a run or pending tuning; INVALID_ARGUMENT out of range |
@@ -345,6 +345,8 @@ A run commits in two phases, and only these:
 - Electrical phase (CAL-3/4/5) commits at TUNE, when H0 has applied the
   designed current PI. R/L and flux results are reported, never applied on
   their own.
+- Inertia phase (CAL-7) commits at the same TUNE: J and B join the profile and
+  the refresh derives the outer gains in the same candidate.
 
 A run that ends FAILED after it selected the CALIBRATION mode first passes
 through RESTORE: it waits for the stop and returns the Runtime to CURRENT mode
@@ -381,11 +383,23 @@ that is running, including a calibration restored at boot.
 
 States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
 SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10, RL_D 11, RL_Q 12, FLUX 13,
-TUNE 14, RESTORE 15. Failures: none 0, state 1, ADC 2, lifecycle 3, drive 4,
-current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted 11,
-timeout 12, R/L 13, flux 14, tune 15, capture 16. Byte 4 carries the admission
-failure, or for R/L and flux failures the estimator's `foc_calibration_failure`.
-After DONE, IDs 16, 17, 38–42, 64–67 and 80–84 read the applied values.
+TUNE 14, RESTORE 15, INERTIA 16. Failures: none 0, state 1, ADC 2, lifecycle 3,
+drive 4, current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted
+11, timeout 12, R/L 13, flux 14, tune 15, capture 16, inertia 17. Byte 4 carries
+the admission failure, or for R/L, flux and inertia failures the estimator's
+`foc_calibration_failure`. Byte 71 adds bit 8 (CAL-7 committed), byte 72 bit 16
+(inertia result present). After DONE, IDs 16, 17, 38–42, 64–67, 69–71 and 80–86
+read the applied values.
+
+CAL-7 drives a q voltage of the CAL-4 magnitude on the rotor angle and reverses it
+when the rotor passes half of ID 109 from where it started, or 80 % of ID 72, so
+the rotor accelerates and brakes in turn within ID 109 (the reversal brakes at
+least as hard as the start accelerated). A probe of three reversals sets the fit
+window to a tenth of the time between reversals (5–500 H0 periods); the capture
+then spans four more reversals and at least 40 windows (at most 12 s). Each H0
+period's speed and Kt × iq feed `foc_mechanical_id`; TUNE writes J and B (IDs
+85/86) and the unified refresh derives IDs 69–71. Without three reversals in
+10 s (a very heavy or damped load at 20 % current) the run ends TIMEOUT.
 
 ### Persistent settings
 
@@ -416,10 +430,11 @@ pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
 motor profile (IDs 80–83, 85, 86, 96–99, 104), the protection thresholds (IDs
 112–118), the RAM policies (IDs 1–3), the output zero (ID 124) and, when one is
 applied, the on-MCU calibration result (ADC zero, direction, pole pairs,
-electrical offset) in one record (format 5, 224 bytes: the format-2 bytes 0–135,
+electrical offset) in one record (format 6, 232 bytes: the format-2 bytes 0–135,
 then the profile at 136–179, the thresholds at 180–207, the output zero at 208,
-acceleration and deceleration (IDs 106/107) at 212/216 and the CRC at 220).
-Format-4 (216 bytes, no acceleration limits), format-3 (212 bytes, no output
+acceleration and deceleration (IDs 106/107) at 212/216, IDs 108/109 at 220/224
+and the CRC at 228). Format-5 (224 bytes, boot IDs 108/109), format-4 (216 bytes,
+no acceleration limits), format-3 (212 bytes, no output
 zero), format-2 (140 bytes) and format-1 records still load; formats 1 and 2 keep
 the boot profile and thresholds. The
 record is bound to the image's boot motor configuration. A restore applies the
@@ -470,12 +485,23 @@ identifies 1–30 pole pairs; COMMUTATION_WRITE accepts 1–64.
 | 81 / 82 | d / q inductance | f32 H (unit 12) | 0 unset, or 1e-6–1 / 0 |
 | 83 | Flux linkage | f32 Wb (unit 13) | 0 unset, or 1e-5–1 / 0 |
 | 84 | Torque constant Kt = 1.5 × pole pairs × flux | f32 N·m/A (unit 14), read only | derived |
-| 85 / 86 | Inertia / viscous damping, stored only | f32 kg·m² (unit 15) / N·m·s/rad (unit 16) | 0–1 / 0; 0–10 / 0 |
+| 85 / 86 | Inertia / viscous damping, rotor-side (CAL-7 or written) | f32 kg·m² (unit 15) / N·m·s/rad (unit 16) | 0–1 / 0; 0–10 / 0 |
 | 96 / 97 | Rated / peak current, rated at most peak | f32 A | 0 unset, or 0.05–1000 / 0 |
 | 98 | Maximum mechanical speed | f32 rad/s | 0 unset, or 0.1–1000 / 0 |
 | 99 | Gear ratio (rotor turns per output turn): the output frame below | f32 | 1–1000 / 1 |
 | 104 | Current-loop bandwidth | f32 Hz (unit 17) | 10–235 / 150 |
 | 106 / 107 | Acceleration / deceleration, rotor-side, 0 unlimited | f32 rad/s² (unit 21) | 0, or 0.1–100000 / 0 |
+| 108 | Velocity-loop bandwidth for the derived outer gains, 0 manual | f32 Hz (unit 17) | 0, or 0.5–100 and at most ID 104 / 5 / 10 |
+| 109 | CAL-7 travel: largest rotor excursion from the start | f32 rad (unit 2) | 0.5–1000 / π |
+
+With inertia (ID 85) and flux (ID 83) set, the unified refresh derives the outer
+gains at ID 108 (ω = 2π × ID 108, Kt = 1.5 × pole pairs × flux): velocity Kp
+(ID 69) = J·ω / Kt, Ki (ID 70) = Kp·ω / 4, position Kp (ID 71) = ω / 4. Writing
+IDs 83, 85, 104 or 108, or a CAL-7 run, re-derives them; a bandwidth above
+ID 104 / 5 or 100 Hz is INVALID_ARGUMENT. IDs 69–71 stay writable as a manual
+override until the next derivation. While the planner shapes a reference, H1
+adds (J × planned acceleration + B × planned velocity) / Kt to the velocity PI
+output, clamped to ID 73.
 
 IDs 106/107 shape the outer references: speeding up is limited by the
 acceleration, slowing down and reversing by the deceleration, and either nonzero
@@ -514,7 +540,7 @@ that cap to match. CAL-3/4/5 write the identified Rs, Ld, Lq and flux into IDs
 | 64 / 65 | Current Kp d / q | f32 V/A (unit 6) | 0–20 / 1.08, 1.35 |
 | 66 / 67 | Current Ki d / q | f32 V/(A·s) (unit 7) | 0–20000 / 540 |
 | 68 | Current-vector limit | f32 A | 0.05–boot value / 2.5 |
-| 69 / 70 | Velocity Kp / Ki | f32 A/(rad/s) (unit 8) / A/rad (unit 9) | 0–10 / 0.18; 0–1000 / 1.4 |
+| 69 / 70 | Velocity Kp / Ki | f32 A/(rad/s) (unit 8) / A/rad (unit 9) | 0–1000 / 0.18; 0–100000 / 1.4 |
 | 71 | Position Kp | f32 1/s (unit 10) | 0–1000 / 4 |
 | 72 | Speed reference limit (also bounds VELOCITY setpoints) | f32 rad/s | 0.1–1000 / 12 |
 | 73 | Outer-loop q-current limit | f32 A | 0.05–current limit / 2.5 |

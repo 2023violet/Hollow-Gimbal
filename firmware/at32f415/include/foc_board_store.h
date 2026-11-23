@@ -44,7 +44,7 @@ enum foc_board_store_limits {
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
     /** Encoded record size and programming unit. */
     /** Format 3 record; formats 1 (108 bytes) and 2 (140 bytes) still decode. */
-    FOC_BOARD_STORE_RECORD_BYTES = 224,
+    FOC_BOARD_STORE_RECORD_BYTES = 232,
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 
@@ -85,6 +85,9 @@ struct foc_board_settings {
     /** Format 3 or 4: tuning.profile and tuning.trips came from the record. Otherwise the
      * restore keeps their boot values. */
     bool extended;
+    /** Format 6: velocity bandwidth (ID 108) and inertia travel (ID 109) came from the
+     * record; otherwise the restore keeps their boot values. */
+    bool mechanical;
 };
 
 /** Wire values of UART PARAM_READ ID 48. */

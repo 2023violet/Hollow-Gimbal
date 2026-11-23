@@ -191,6 +191,16 @@ class Board1SilTest(unittest.TestCase):
                                              Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_inertia_identification_and_derived_control(self):
+        """CAL-7 identifies J and B of unknown light, nominal and heavy rotors within the
+        travel, the refresh derives the outer gains, feedforward removes the trajectory
+        overshoot, and the result survives a power cycle."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_inertia(SIL, ["--lockstep-us", "500"],
+                                          Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

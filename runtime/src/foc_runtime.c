@@ -658,6 +658,8 @@ static bool foc_runtime_profile_valid(
         foc_runtime_unset_or(profile->max_speed_rad_s, 0.1f, 100000.0f) &&
         foc_runtime_unset_or(profile->gear_ratio, 1.0f, 1000.0f) &&
         foc_runtime_unset_or(profile->current_bandwidth_hz, 10.0f, 1000.0f) &&
+        foc_runtime_unset_or(profile->velocity_bandwidth_hz, 0.5f, 1000.0f) &&
+        foc_runtime_unset_or(profile->inertia_travel_rad, 0.5f, 1000.0f) &&
         (profile->rated_current_a == 0.0f || profile->peak_current_a == 0.0f ||
          profile->rated_current_a <= profile->peak_current_a) &&
         (profile->peak_current_a == 0.0f || current_limit_a <= profile->peak_current_a) &&
@@ -1289,6 +1291,8 @@ static void foc_runtime_prepare_outer(
     } else if (running) {
         const float speed_limit = policy->position.velocity_limit_rad_s;
         float speed = fmaxf(-speed_limit, fminf(command->target.motion_ref, speed_limit));
+        /* Planned torque in N·m, applied as q current after the velocity PI. */
+        float planned_torque_nm = 0.0f;
         const float dt_s =
             (float)(candidate->sample.captured_us - previous->sample.captured_us) * 1.0e-6f;
         if (trajectory_enabled) {
@@ -1313,6 +1317,9 @@ static void foc_runtime_prepare_outer(
             }
             runtime->trajectory_trial = trajectory_trial;
             speed = trajectory_output.velocity_ref_rad_s;
+            planned_torque_nm =
+                runtime->config.profile.inertia_kg_m2 * trajectory_output.acceleration_rad_s2 +
+                runtime->config.profile.damping_nm_s_per_rad * trajectory_output.velocity_ref_rad_s;
             if (trajectory_output.position_valid) {
                 /* Position tracks the planned reference with its velocity as feedforward. */
                 speed += policy->position.kp_per_s *
@@ -1346,6 +1353,12 @@ static void foc_runtime_prepare_outer(
         runtime->outer_trial_a = trial.integral_a;
         runtime->outer_trial_seen = true;
         iq = output.iq_ref_a;
+        /* Contract 18: with a mechanical model the plan's torque (J·a + B·v) is fed forward
+         * through Kt, so the PI only corrects the residual. */
+        const float kt = 1.5f * (float)policy->rotor.pole_pairs * runtime->config.profile.flux_wb;
+        if (planned_torque_nm != 0.0f && kt > 0.0f && isfinite(planned_torque_nm / kt)) {
+            iq = fmaxf(-policy->iq_limit_a, fminf(iq + planned_torque_nm / kt, policy->iq_limit_a));
+        }
         candidate->velocity_ref_rad_s = speed;
         candidate->velocity_ref_valid = true;
         if (protection) {

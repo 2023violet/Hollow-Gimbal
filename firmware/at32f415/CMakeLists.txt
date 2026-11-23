@@ -85,6 +85,7 @@ add_library(
   "${repo}/calibration/src/foc_calibration.c"
   "${repo}/calibration/src/foc_motor_id.c"
   "${repo}/calibration/src/foc_flux_id.c"
+  "${repo}/calibration/src/foc_mechanical_id.c"
   "${repo}/sensors/src/foc_encoder.c"
   "${repo}/g3/np/src/foc_device.c"
   "${repo}/g3/np/src/foc_device_sim.c"

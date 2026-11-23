@@ -71,6 +71,11 @@ the speed reference is the planned velocity plus the position P on the planned
 position minus the measurement, clamped to the speed limit. It does not create
 another PI or replace the existing position P and velocity PI when disabled.
 
+With a profile inertia and flux, H1 adds the planned torque
+`(J * planned acceleration + B * planned velocity) / Kt` (Kt = 1.5 x pole pairs x
+flux) to the velocity PI output, clamped to the outer q-current limit, so the PI
+only corrects the residual.
+
 Tuning IDs 106/107 (`accel_rad_s2`, `decel_rad_s2`, rotor-side, 0 unlimited)
 derive the policy: either nonzero enables it with the position speed limit, both
 zero disable it; a configuration that sets none keeps an explicit `trajectory`

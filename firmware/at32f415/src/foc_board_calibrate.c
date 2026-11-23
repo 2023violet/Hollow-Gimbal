@@ -19,6 +19,12 @@
  *
  * Apply: with the drive stopped and DISABLED, producers are held, the instance is
  * re-initialized from the snapshot, and the previous controller tuning re-applied.
+ *
+ * CAL-7 (stage mask 8): q voltage of fixed magnitude on the rotor angle, reversed
+ * when the rotor passes half the ID 109 travel from where it started or nears the
+ * speed limit, so it accelerates and brakes in turn within the travel. Each H0
+ * record's speed and Kt x iq feed the inertia/damping fit; TUNE writes J and B,
+ * and the unified refresh derives the outer gains at the velocity bandwidth.
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -32,44 +38,55 @@
 /* Private Macros --------------------------------------------------------------- */
 
 /* Estimator success code (0), private to foc_calibration.c. */
-#define CAL_OK                   0
-#define CAL_TWO_PI               6.2831853f
-#define CAL_ADC_SAMPLES          256U
-#define CAL_ADC_TIMEOUT_US       500000U
-#define CAL_ADC_MAX_NOISE_COUNTS 4.0f
-#define CAL_STILL_RAD_S          0.5f
-#define CAL_LIFECYCLE_TIMEOUT_US 20000U
-#define CAL_LIFECYCLE_ATTEMPTS   50U
+#define CAL_OK                      0
+#define CAL_TWO_PI                  6.2831853f
+#define CAL_ADC_SAMPLES             256U
+#define CAL_ADC_TIMEOUT_US          500000U
+#define CAL_ADC_MAX_NOISE_COUNTS    4.0f
+#define CAL_STILL_RAD_S             0.5f
+#define CAL_LIFECYCLE_TIMEOUT_US    20000U
+#define CAL_LIFECYCLE_ATTEMPTS      50U
 /* H0 rejects ARM/START until fresh sensing follows a STOP: space the retries. */
-#define CAL_RETRY_US             2000U
-#define CAL_ALIGN_CURRENT_A      0.5f
-#define CAL_MIN_CURRENT_A        0.1f
-#define CAL_RAMP_V_PER_S         2.0f
-#define CAL_SETTLE_US            300000U
-#define CAL_SWEEP_TURNS          2.0f
+#define CAL_RETRY_US                2000U
+#define CAL_ALIGN_CURRENT_A         0.5f
+#define CAL_MIN_CURRENT_A           0.1f
+#define CAL_RAMP_V_PER_S            2.0f
+#define CAL_SETTLE_US               300000U
+#define CAL_SWEEP_TURNS             2.0f
 /* Half an electrical turn per second: under voltage drive the only damping is the back-EMF
  * current (~ flux^2 / Rs), so a faster sweep rings at the reversal on high-Rs motors
  * (SIL: max residual 0.22 rad at 1.3 Ohm at one turn/s, <= 0.07 rad at half). */
-#define CAL_SWEEP_RAD_PER_S      (0.5f * CAL_TWO_PI)
-#define CAL_SAMPLES_PER_TURN     12U
-#define CAL_SENSOR_AGE_US        2000U
-#define CAL_STOP_TIMEOUT_US      20000U
-#define CAL_FAIL_QUIET_US        1000000U
+#define CAL_SWEEP_RAD_PER_S         (0.5f * CAL_TWO_PI)
+#define CAL_SAMPLES_PER_TURN        12U
+#define CAL_SENSOR_AGE_US           2000U
+#define CAL_STOP_TIMEOUT_US         20000U
+#define CAL_FAIL_QUIET_US           1000000U
 /* A refused automatic ADC zero is retried after this interval. */
-#define CAL_ZERO_RETRY_US        1000000U
+#define CAL_ZERO_RETRY_US           1000000U
 /* Settling time of the encoder speed after a re-initialization, before a zero run. */
-#define CAL_ZERO_SETTLE_US       100000U
+#define CAL_ZERO_SETTLE_US          100000U
 /* M3b: H0 slot clock and preload. A command computed in slot k takes effect at the
  * next update, so an aperture interval sees 80 % of V(k-2) and 20 % of V(k-1). */
-#define CAL_SLOT_US              ((uint32_t)FOC_BOARD_H0_US)
-#define CAL_PRELOAD_NEW          ((float)FOC_BOARD_ADC_COMPARE_US / (float)FOC_BOARD_H0_US)
-#define CAL_RL_LEVEL_SLOTS       24U
-#define CAL_RL_INTERVALS         768U
-#define CAL_RL_STILL_RAD_S       1.0f
-#define CAL_FLUX_SETTLE_US       400000U
-#define CAL_FLUX_WINDOW          32U
-#define CAL_FLUX_WINDOWS         4U
-#define CAL_TUNE_TIMEOUT_US      50000U
+#define CAL_SLOT_US                 ((uint32_t)FOC_BOARD_H0_US)
+#define CAL_PRELOAD_NEW             ((float)FOC_BOARD_ADC_COMPARE_US / (float)FOC_BOARD_H0_US)
+#define CAL_RL_LEVEL_SLOTS          24U
+#define CAL_RL_INTERVALS            768U
+#define CAL_RL_STILL_RAD_S          1.0f
+#define CAL_FLUX_SETTLE_US          400000U
+#define CAL_FLUX_WINDOW             32U
+#define CAL_FLUX_WINDOWS            4U
+#define CAL_TUNE_TIMEOUT_US         50000U
+/* CAL-7 windows adapt to the motion: a probe measures the time between reversals and a
+ * window is a tenth of it, so each window sees a speed change well above the speed noise
+ * on a heavy rotor and a switching transient stays short on a light one. The capture then
+ * spans at least four more reversals and 40 windows, at most 60000 samples (12 s). */
+#define CAL_INERTIA_PROBE_REVERSALS 3U
+#define CAL_INERTIA_PROBE_US        10000000U
+#define CAL_INERTIA_MIN_WINDOW      5U
+#define CAL_INERTIA_MAX_WINDOW      500U
+#define CAL_INERTIA_WINDOWS         40U
+#define CAL_INERTIA_MAX_SAMPLES     60000U
+#define CAL_INERTIA_REVERSALS       4U
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -97,7 +114,8 @@ cal_fail(struct foc_board_calibration *cal, enum foc_board_cal_failure failure, 
     atomic_store(&cal->adc_active, 0U);
     atomic_store(&cal->record_active, 0U);
     if ((cal->state >= FOC_BOARD_CAL_DRIVE_MODE && cal->state <= FOC_BOARD_CAL_SWEEP) ||
-        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX)) {
+        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
+        cal->state == FOC_BOARD_CAL_INERTIA) {
         foc_runtime_revoke_command(cal->runtime);
     }
     if (cal->failing) {
@@ -394,7 +412,7 @@ static void cal_apply(struct foc_board_calibration *cal, uint32_t now_us)
     cal->mode_claimed = false;
     cal->zero_ready = true;
     cal->zero_refused = false;
-    if ((cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U) {
+    if ((cal->stages & (FOC_BOARD_CAL_STAGE_ELECTRICAL | FOC_BOARD_CAL_STAGE_MECHANICAL)) != 0U) {
         cal->electrical_phase = true;
         cal_enter(cal, FOC_BOARD_CAL_DRIVE_MODE, now_us);
         return;
@@ -590,6 +608,44 @@ static bool cal_record(struct foc_board_calibration *cal, const struct foc_board
         record->slot != cal->history[cal->history_count - 1U].slot + 1U) {
         return false;
     }
+    if (cal->state == FOC_BOARD_CAL_INERTIA) {
+        /* One endpoint per H0 slot: speed and Kt x iq of the same aperture. */
+        const uint32_t begin =
+            cal->history_count == 0U ? record->slot : cal->history[cal->history_count - 1U].slot;
+        const struct foc_mechanical_id_sample sample = {
+            .setup_id = 1U,
+            .torque_model_id = 1U,
+            .capture_id = cal->capture_serial,
+            .torque_source = FOC_MECHANICAL_ID_TORQUE_OBSERVED_DQ,
+            .load_source = FOC_MECHANICAL_ID_LOAD_NEGLIGIBLE,
+            .sequence = record->slot,
+            .speed_us = record->slot * CAL_SLOT_US,
+            .torque_us = record->slot * CAL_SLOT_US,
+            .interval_begin_us = begin * CAL_SLOT_US,
+            .speed_rad_s = record->mechanical_rad_s,
+            .id_a = record->current_a.d,
+            .iq_a = record->current_a.q,
+            .speed_valid = true,
+            .torque_valid = true,
+            /* follow_rotor keeps the frame on the calibrated rotor angle. */
+            .frame_confirmed = true,
+            .interval_confirmed = record->accepted,
+        };
+        cal->history[0] = *record;
+        cal->history_count = 1U;
+        cal->pushed++;
+        if (foc_mechanical_id_push(&cal->mech_id, &sample) != FOC_MECHANICAL_ID_OK) {
+            return false;
+        }
+        /* Stop only on a window boundary, once the run is long and varied enough. */
+        const uint32_t windows = (cal->pushed - 1U) / cal->inertia_window;
+        if ((cal->pushed - 1U) % cal->inertia_window == 0U &&
+            ((windows >= CAL_INERTIA_WINDOWS && cal->inertia_reversals >= CAL_INERTIA_REVERSALS) ||
+             cal->pushed + cal->inertia_window > CAL_INERTIA_MAX_SAMPLES)) {
+            cal->capturing = false;
+        }
+        return true;
+    }
     if (cal->history_count < 2U) {
         cal->history[cal->history_count++] = *record;
         return true;
@@ -692,6 +748,150 @@ static bool cal_drain(struct foc_board_calibration *cal)
     return ok;
 }
 
+/* Kt for CAL-7: this run's flux when CAL-4 ran, otherwise the profile's. */
+static float cal_inertia_kt(const struct foc_board_calibration *cal)
+{
+    const float flux = cal->flux_result.state == FOC_CALIBRATION_STATE_VALID
+        ? (float)cal->flux_result.flux_wb
+        : cal->tuning.profile.flux_wb;
+    return 1.5f * (float)cal->runtime->config.motion.rotor.pole_pairs * flux;
+}
+
+/* Rs for the CAL-7 voltage: this run's CAL-3 model, otherwise the profile's. */
+static float cal_inertia_rs(const struct foc_board_calibration *cal)
+{
+    return cal->rl_model.rs_ohm > 0.0f ? cal->rl_model.rs_ohm : cal->tuning.profile.rs_ohm;
+}
+
+/* After the probe: the fit with the window the reversal period selects. */
+static bool cal_inertia_capture(struct foc_board_calibration *cal, uint32_t window)
+{
+    const float kt = cal_inertia_kt(cal);
+    const float current_limit = cal->runtime->pipeline.current.config.current_limit_a;
+    const float speed_limit = cal->runtime->config.motion.position.velocity_limit_rad_s;
+    const struct foc_mechanical_id_config config = {
+        .setup_id = 1U,
+        .torque_model_id = 1U,
+        .torque_source = FOC_MECHANICAL_ID_TORQUE_OBSERVED_DQ,
+        .load_source = FOC_MECHANICAL_ID_LOAD_NEGLIGIBLE,
+        .min_interval_us = CAL_SLOT_US,
+        .max_interval_us = CAL_SLOT_US,
+        .intervals_per_window = window,
+        .min_windows = CAL_INERTIA_WINDOWS,
+        .torque_constant_nm_per_a = kt,
+        /* Voltage drive at speed leaves some d current; the surface-magnet Kt x iq
+         * approximation holds while it stays within the current limit. */
+        .max_abs_id_a = current_limit,
+        /* Filtered encoder speed: a window counts as accelerating or braking above
+         * 0.01 rad/s of change, i.e. 1 rad/s² over 10 ms. */
+        .speed_resolution_rad_s = 0.005f,
+        .max_abs_speed_rad_s = 2.0f * speed_limit,
+        .max_abs_torque_nm = 2.0f * kt * current_limit,
+        .min_accel_rms_rad_s2 = 0.2f,
+        .min_speed_rms_rad_s = 0.5f,
+        .min_excitation = 0.2f,
+        .max_residual_rms_nm = 0.1f * kt * current_limit,
+        .min_inertia_kg_m2 = 1.0e-7f,
+        .max_inertia_kg_m2 = 1.0f,
+        .max_damping_nm_s = 10.0f,
+    };
+    cal->inertia_window = window;
+    cal->inertia_reversals = 0U;
+    cal_capture_begin(cal);
+    return foc_mechanical_id_init(&cal->mech_id, &config, ++cal->capture_serial) ==
+        FOC_MECHANICAL_ID_OK;
+}
+
+/* Start the drive and the probe around the present position. */
+static bool cal_inertia_begin(struct foc_board_calibration *cal)
+{
+    const float current_limit = cal->runtime->pipeline.current.config.current_limit_a;
+    /* The CAL-4 level: at most 60 % of the current limit at a reversal. */
+    cal->inertia_voltage_v =
+        fminf(0.15f * cal_voltage_limit(cal), 0.2f * current_limit * cal_inertia_rs(cal));
+    struct foc_runtime_snapshot view;
+    if (!(cal_inertia_kt(cal) > 0.0f) || !(cal->inertia_voltage_v > 0.0f) ||
+        !(cal->tuning.profile.inertia_travel_rad > 0.0f) ||
+        foc_runtime_read_snapshot(cal->runtime, &view) != FOC_RUNTIME_OK) {
+        return false;
+    }
+    cal->inertia_origin_rad = view.mechanical_rad;
+    cal->inertia_direction = 1.0f;
+    cal->inertia_reversals = 0U;
+    cal->inertia_probing = true;
+    cal->inertia_reversal_us = 0U;
+    cal->mech_result = (struct foc_mechanical_id_result){0};
+    cal->capturing = false;
+    return true;
+}
+
+/* CAL-7 drive and capture. */
+static void cal_inertia(
+    struct foc_board_calibration *cal,
+    const struct foc_runtime_snapshot *view,
+    uint32_t now_us
+)
+{
+    if (!cal_drain(cal)) {
+        cal->admission_failure =
+            (enum foc_calibration_admission_failure)cal->mech_id.result.failure;
+        cal_fail(
+            cal,
+            atomic_load(&cal->ring_overflow) != 0U ? FOC_BOARD_CAL_FAILURE_CAPTURE
+                                                   : FOC_BOARD_CAL_FAILURE_INERTIA,
+            now_us
+        );
+        return;
+    }
+    /* Reverse past half the travel, or near the speed limit: the reversal brakes at least
+     * as hard as the start accelerated (back-EMF helps), so the rotor stops within it. */
+    const float half_travel = 0.5f * cal->tuning.profile.inertia_travel_rad;
+    const float offset = view->mechanical_rad - cal->inertia_origin_rad;
+    const float speed_limit = 0.8f * cal->runtime->config.motion.position.velocity_limit_rad_s;
+    if ((cal->inertia_direction > 0.0f &&
+         (offset > half_travel || view->mechanical_rad_s > speed_limit)) ||
+        (cal->inertia_direction < 0.0f &&
+         (offset < -half_travel || view->mechanical_rad_s < -speed_limit))) {
+        cal->inertia_direction = -cal->inertia_direction;
+        cal->inertia_reversals++;
+        if (cal->inertia_probing && cal->inertia_reversals == 1U) {
+            cal->inertia_reversal_us = now_us;
+        } else if (cal->inertia_probing && cal->inertia_reversals == CAL_INERTIA_PROBE_REVERSALS) {
+            /* Two steady half periods after the first reversal; a tenth of one per window. */
+            const uint32_t half_slots = (now_us - cal->inertia_reversal_us) /
+                ((CAL_INERTIA_PROBE_REVERSALS - 1U) * CAL_SLOT_US);
+            uint32_t window = half_slots / 10U;
+            window = window < CAL_INERTIA_MIN_WINDOW ? CAL_INERTIA_MIN_WINDOW
+                : window > CAL_INERTIA_MAX_WINDOW    ? CAL_INERTIA_MAX_WINDOW
+                                                     : window;
+            cal->inertia_probing = false;
+            if (!cal_inertia_capture(cal, window)) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_INERTIA, now_us);
+                return;
+            }
+        }
+    }
+    cal_drive_dq(cal, 0.0f, cal->inertia_direction * cal->inertia_voltage_v, 0.0f, true, now_us);
+    if (cal->inertia_probing) {
+        if (now_us - cal->state_us > CAL_INERTIA_PROBE_US) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+        }
+        return;
+    }
+    if (cal->capturing) {
+        return;
+    }
+    atomic_store(&cal->record_active, 0U);
+    foc_runtime_revoke_command(cal->runtime);
+    if (foc_mechanical_id_finish(&cal->mech_id, &cal->mech_result) != FOC_MECHANICAL_ID_OK ||
+        !cal->mech_result.usable) {
+        cal->admission_failure = (enum foc_calibration_admission_failure)cal->mech_result.failure;
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_INERTIA, now_us);
+        return;
+    }
+    cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
+}
+
 /* CAL-3/CAL-4 drive and capture, one state per call. */
 static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
 {
@@ -792,6 +992,15 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_FLUX, now_us);
             return;
         }
+        if ((cal->stages & FOC_BOARD_CAL_STAGE_MECHANICAL) != 0U) {
+            /* The drive keeps running: CAL-7 starts from this level's speed. */
+            if (!cal_inertia_begin(cal)) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_INERTIA, now_us);
+                return;
+            }
+            cal_enter(cal, FOC_BOARD_CAL_INERTIA, now_us);
+            return;
+        }
         atomic_store(&cal->record_active, 0U);
         foc_runtime_revoke_command(cal->runtime);
         cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
@@ -825,7 +1034,10 @@ static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
             return;
         }
         cal->tuning_sequence = 0U;
-        cal->committed |= FOC_BOARD_CAL_STAGE_ELECTRICAL;
+        cal->committed |=
+            (uint8_t)(cal->stages &
+                      (FOC_BOARD_CAL_STAGE_ELECTRICAL |
+                       (cal->mech_result.usable ? FOC_BOARD_CAL_STAGE_MECHANICAL : 0U)));
         cal_enter(cal, FOC_BOARD_CAL_RESTORE, now_us);
         return;
     }
@@ -836,18 +1048,27 @@ static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
         return;
     }
-    tuning.profile.rs_ohm = cal->rl_model.rs_ohm;
-    tuning.profile.ld_h = cal->rl_model.ld_h;
-    tuning.profile.lq_h = cal->rl_model.lq_h;
-    if (cal->flux_result.state == FOC_CALIBRATION_STATE_VALID) {
-        tuning.profile.flux_wb = cal->flux_result.flux_wb;
+    const bool electrical = (cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U;
+    if (electrical) {
+        tuning.profile.rs_ohm = cal->rl_model.rs_ohm;
+        tuning.profile.ld_h = cal->rl_model.ld_h;
+        tuning.profile.lq_h = cal->rl_model.lq_h;
+        if (cal->flux_result.state == FOC_CALIBRATION_STATE_VALID) {
+            tuning.profile.flux_wb = cal->flux_result.flux_wb;
+        }
+    }
+    if (cal->mech_result.usable) {
+        tuning.profile.inertia_kg_m2 = cal->mech_result.inertia_kg_m2;
+        tuning.profile.damping_nm_s_per_rad = cal->mech_result.damping_nm_s;
     }
     if (!foc_board_profile_refresh(
             cal->runtime->config.h0.period_us,
             cal_voltage_limit(cal),
+            cal->runtime->config.motion.rotor.pole_pairs,
             &tuning,
+            electrical,
             true,
-            &cal->pi
+            electrical ? &cal->pi : NULL
         ) ||
         !foc_board_profile_model_complete(&tuning.profile)) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
@@ -910,7 +1131,10 @@ int foc_board_calibration_start(
 )
 {
     const bool zero_only = stages == FOC_BOARD_CAL_STAGE_ZERO;
-    if (!zero_only && (stages < FOC_BOARD_CAL_STAGE_ROTOR || stages > FOC_BOARD_CAL_STAGE_ALL)) {
+    const unsigned int drive_stages = stages & ~(unsigned int)FOC_BOARD_CAL_STAGE_MECHANICAL;
+    const bool mechanical = (stages & FOC_BOARD_CAL_STAGE_MECHANICAL) != 0U;
+    if (!zero_only &&
+        (drive_stages > FOC_BOARD_CAL_STAGE_ALL || (drive_stages == 0U && !mechanical))) {
         return FOC_PROTO_INVALID_ARGUMENT;
     }
     if (!zero_only && cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
@@ -979,6 +1203,13 @@ int foc_board_calibration_start(
     cal->rl_model = (struct foc_motor_rl_model){0};
     cal->flux_result = (struct foc_flux_id_result){0};
     cal->pi = (struct foc_motor_pi_candidate){0};
+    cal->mech_result = (struct foc_mechanical_id_result){0};
+    /* CAL-7 without CAL-3/4 takes Rs and Kt from the profile; TUNE needs the full model. */
+    if (mechanical && (stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) == 0U &&
+        (!foc_board_profile_model_complete(&cal->tuning.profile) ||
+         !(cal->tuning.profile.flux_wb > 0.0f))) {
+        return FOC_PROTO_BAD_STATE;
+    }
     atomic_store(&cal->ring_overflow, 0U);
     atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
     cal->committed = 0U;
@@ -1155,7 +1386,8 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         return;
     }
     const bool driving = (cal->state >= FOC_BOARD_CAL_ALIGN && cal->state <= FOC_BOARD_CAL_SWEEP) ||
-        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX);
+        (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
+        cal->state == FOC_BOARD_CAL_INERTIA;
     if (driving && view.state != FOC_SAFE_STATE_RUNNING) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_DRIVE, now_us);
         return;
@@ -1222,9 +1454,18 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
             cal,
             FOC_RUNTIME_ACTION_START,
             FOC_RUNTIME_MODE_CALIBRATION,
-            cal->electrical_phase ? FOC_BOARD_CAL_RL_D : FOC_BOARD_CAL_ALIGN,
+            !cal->electrical_phase                               ? FOC_BOARD_CAL_ALIGN
+                : (cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) ? FOC_BOARD_CAL_RL_D
+                                                                 : FOC_BOARD_CAL_INERTIA,
             now_us
         );
+        if (cal->state == FOC_BOARD_CAL_INERTIA) {
+            atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
+            atomic_store(&cal->record_active, 1U);
+            if (!cal_inertia_begin(cal)) {
+                cal_fail(cal, FOC_BOARD_CAL_FAILURE_INERTIA, now_us);
+            }
+        }
         if (cal->state == FOC_BOARD_CAL_RL_D) {
             atomic_store(&cal->ring_tail, atomic_load(&cal->ring_head));
             atomic_store(&cal->record_active, 1U);
@@ -1301,6 +1542,9 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         break;
     case FOC_BOARD_CAL_TUNE:
         cal_tune(cal, now_us);
+        break;
+    case FOC_BOARD_CAL_INERTIA:
+        cal_inertia(cal, &view, now_us);
         break;
     case FOC_BOARD_CAL_RESTORE:
         if (cal->failing && !cal_quiet(&view)) {
@@ -1382,7 +1626,8 @@ static bool cal_serial_read(const void *context, struct foc_serial_calibration_v
                                       : 0U) |
                                  ((cal->committed & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U
                                       ? FOC_BOARD_CAL_RESULT_PI
-                                      : 0U)),
+                                      : 0U) |
+                                 (cal->mech_result.usable ? FOC_BOARD_CAL_RESULT_INERTIA : 0U)),
         .active_source = cal->active_source,
         .ring_high_water = cal->ring_high_water,
         .active_pole_pairs = (uint16_t)cal->runtime->config.motion.rotor.pole_pairs,

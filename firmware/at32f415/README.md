@@ -344,9 +344,21 @@ refresh: a model or bandwidth write re-derives the current PI with
 `foc_motor_pi_design()` at the H0 period, a peak current or maximum speed
 tightens the limits, and CAL-3/4/5 write the identified model through the same
 path. Store format 3 (212 bytes) adds the profile and IDs 112–118 after the
-format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124) and format 5
-(224 bytes) the acceleration limits (IDs 106/107); older records load with the
-boot profile.
+format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124), format 5
+(224 bytes) the acceleration limits (IDs 106/107) and format 6 (232 bytes) IDs
+108/109; older records load with the boot profile.
+
+### Inertia identification (CAL-7)
+
+`CALIBRATE_START` mask 8 (alone, or 9–11 with the rotor/electrical stages) runs
+CAL-7 on the MCU: a bang-bang q voltage keeps the rotor within ID 109 of its start
+while `foc_mechanical_id` fits J and B on windows a probe sizes to the motion. TUNE
+writes IDs 85/86 and `foc_board_profile` derives the velocity PI and position gain
+at ID 108; H1 feeds the planned torque forward. It is opt-in because the shaft
+turns with its load attached: `falconfoc_cli.py motor-setup --mechanical` or
+`request --message calibrate --cal-stages mechanical`. `sil-demo --sil-scenario
+inertia` identifies a 2e-5, a 0.002 and a 0.01 kg·m² rotor and shows the derived
+gains, the travel bound, the feedforward move and the power-cycle restore.
 
 ### Trajectory shaping
 

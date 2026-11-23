@@ -153,7 +153,13 @@ static const struct foc_runtime_config runtime_config = {
         },
     /* No motor is identified at boot: the model and the user profile are unset. The
      * 150 Hz bandwidth is the value CAL-5 has designed with since M3b. */
-    .profile = {.gear_ratio = 1.0f, .current_bandwidth_hz = 150.0f},
+    .profile = {
+        .gear_ratio = 1.0f,
+        .current_bandwidth_hz = 150.0f,
+        /* Outer gains follow an identified inertia at 10 Hz (contract section 18). */
+        .velocity_bandwidth_hz = 10.0f,
+        .inertia_travel_rad = 3.1415927f,
+    },
 };
 
 static const struct foc_encoder_config encoder_config = {

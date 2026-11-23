@@ -474,7 +474,7 @@ static int test_calibration_record(void)
     CHECK(out.tuning.profile.rs_ohm == 0.0f && out.tuning.trips.overcurrent_a == 0.0f);
     /* Unknown flag bits are refused. */
     record[104] = 3U;
-    put_word(record + 220, test_crc32(record + 4, 216U));
+    put_word(record + 228, test_crc32(record + 4, 224U));
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     return 0;
 }
@@ -510,9 +510,11 @@ static int test_profile_record(void)
     in.output_zero_rad = -2.5f;
     in.tuning.accel_rad_s2 = 40.0f;
     in.tuning.decel_rad_s2 = 120.0f;
+    in.tuning.profile.velocity_bandwidth_hz = 12.0f;
+    in.tuning.profile.inertia_travel_rad = 1.5f;
     foc_board_store_encode(&nominal, &in, 7U, record);
     put_word(record, UINT32_C(0xC35A4C7E));
-    CHECK(record[8] == 5U && record[10] == 224U);
+    CHECK(record[8] == 6U && record[10] == 232U);
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
@@ -523,6 +525,17 @@ static int test_profile_record(void)
     CHECK(out.tuning.trips.sustained_ms == 1500U && out.tuning.trips.divergence_ms == 400U);
     CHECK(out.output_zero_rad == -2.5f);
     CHECK(out.tuning.accel_rad_s2 == 40.0f && out.tuning.decel_rad_s2 == 120.0f);
+    CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
+    /* Format 5 (224 bytes, CRC at 220) keeps the acceleration limits, not IDs 108/109. */
+    uint8_t v5[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v5, 0xFF, sizeof v5);
+    memcpy(v5, record, 220U);
+    v5[8] = 5U;
+    v5[10] = 224U;
+    put_word(v5 + 220, test_crc32(v5 + 4, 216U));
+    CHECK(foc_board_store_decode(v5, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.extended && !out.mechanical && out.tuning.accel_rad_s2 == 40.0f);
+    CHECK(out.tuning.profile.velocity_bandwidth_hz == 0.0f);
     /* Format 4 (216 bytes, CRC at 212) keeps the output zero, no acceleration limits. */
     uint8_t v4[FOC_BOARD_STORE_RECORD_BYTES];
     memset(v4, 0xFF, sizeof v4);
@@ -540,8 +553,12 @@ static int test_profile_record(void)
     v3[10] = 212U;
     put_word(v3 + 208, test_crc32(v3 + 4, 204U));
     CHECK(foc_board_store_decode(v3, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.extended && out.output_zero_rad == 0.0f);
-    CHECK(memcmp(&out.tuning.profile, &in.tuning.profile, sizeof in.tuning.profile) == 0);
+    CHECK(out.extended && out.output_zero_rad == 0.0f && !out.mechanical);
+    /* Formats before 6 carry no IDs 108/109; the restore keeps their boot values. */
+    struct foc_runtime_profile expected = in.tuning.profile;
+    expected.velocity_bandwidth_hz = 0.0f;
+    expected.inertia_travel_rad = 0.0f;
+    CHECK(memcmp(&out.tuning.profile, &expected, sizeof expected) == 0);
     /* A flipped extension byte breaks the CRC. */
     record[150] ^= 1U;
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);

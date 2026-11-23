@@ -93,6 +93,9 @@ enum {
     /* Trajectory acceleration and deceleration (contract 3.4), rotor-side, 0 unlimited. */
     PARAM_ACCEL = 106,
     PARAM_DECEL = 107,
+    /* Velocity bandwidth for the J-derived outer gains and the CAL-7 travel (contract 18). */
+    PARAM_VELOCITY_BANDWIDTH = 108,
+    PARAM_INERTIA_TRAVEL = 109,
     /* Motor-protection thresholds, writable while DISABLED; applied by H0. */
     PARAM_TRIP_OVERCURRENT = 112,
     PARAM_TRIP_OVERVOLTAGE = 113,
@@ -382,7 +385,8 @@ static bool foc_serial_tuning_parameter(
     const bool trip = id >= PARAM_TRIP_OVERCURRENT && id <= PARAM_TRIP_DIVERGENCE;
     const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
         (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
-        id == PARAM_CURRENT_BANDWIDTH;
+        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH ||
+        id == PARAM_INERTIA_TRAVEL;
     const bool ramp = id == PARAM_ACCEL || id == PARAM_DECEL;
     if ((trip ? !runtime->config.trip_enabled
               : !profile && !ramp && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
@@ -435,7 +439,7 @@ static bool foc_serial_tuning_parameter(
             parameter,
             tuning.velocity_kp_a_per_rad_s,
             0.0f,
-            10.0f,
+            1000.0f,
             UNIT_A_PER_RAD_S
         );
         return true;
@@ -444,7 +448,7 @@ static bool foc_serial_tuning_parameter(
             parameter,
             tuning.velocity_ki_a_per_rad,
             0.0f,
-            1000.0f,
+            100000.0f,
             UNIT_A_PER_RAD
         );
         return true;
@@ -559,6 +563,25 @@ static bool foc_serial_tuning_parameter(
             (float)FOC_BOARD_PROFILE_BANDWIDTH_MIN_HZ,
             (float)FOC_BOARD_PROFILE_BANDWIDTH_MAX_HZ,
             UNIT_HERTZ
+        );
+        return true;
+    case PARAM_VELOCITY_BANDWIDTH:
+        /* 0 keeps manual outer gains; the refresh refuses more than 1/5 of ID 104. */
+        foc_serial_tuning_float(
+            parameter,
+            tuning.profile.velocity_bandwidth_hz,
+            0.0f,
+            (float)FOC_BOARD_PROFILE_VELOCITY_BANDWIDTH_MAX_HZ,
+            UNIT_HERTZ
+        );
+        return true;
+    case PARAM_INERTIA_TRAVEL:
+        foc_serial_tuning_float(
+            parameter,
+            tuning.profile.inertia_travel_rad,
+            0.5f,
+            1000.0f,
+            UNIT_RADIAN
         );
         return true;
     case PARAM_TRIP_OVERCURRENT:
@@ -726,6 +749,12 @@ static int foc_serial_tuning_write(
     case PARAM_CURRENT_BANDWIDTH:
         tuning.profile.current_bandwidth_hz = floating;
         break;
+    case PARAM_VELOCITY_BANDWIDTH:
+        tuning.profile.velocity_bandwidth_hz = floating;
+        break;
+    case PARAM_INERTIA_TRAVEL:
+        tuning.profile.inertia_travel_rad = floating;
+        break;
     default:
         return FOC_PROTO_INTERNAL_ERROR;
     }
@@ -734,15 +763,20 @@ static int foc_serial_tuning_write(
      * bounds. A written limit is never adjusted: H0 refuses one that breaks the ordering. */
     const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
         (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
-        id == PARAM_CURRENT_BANDWIDTH;
+        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH;
     const bool redesign = id == PARAM_MODEL_RS || id == PARAM_MODEL_LD || id == PARAM_MODEL_LQ ||
         id == PARAM_CURRENT_BANDWIDTH;
+    /* Kt, the inertia, the velocity bandwidth or its 1/5 bound re-derive the outer gains. */
+    const bool redesign_velocity = id == PARAM_MODEL_FLUX || id == PARAM_MODEL_INERTIA ||
+        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH;
     if (profile &&
         !foc_board_profile_refresh(
             runtime->config.h0.period_us,
             runtime->pipeline.current.config.pwm.voltage_limit_v,
+            runtime->config.motion.rotor.pole_pairs,
             &tuning,
             redesign,
+            redesign_velocity,
             NULL
         )) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -1300,7 +1334,8 @@ static int foc_serial_dispatch(
     if (request->type == FOC_MSG_CALIBRATE_START) {
         /* Optional stage mask: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5); empty means both. */
         const unsigned int stages = request->length == 0U ? 3U : request->payload[0];
-        if (request->length > 1U || stages < 1U || stages > 4U) {
+        /* 1-4 as before; 8 (CAL-7) alone or with the rotor/electrical bits (8-11). */
+        if (request->length > 1U || stages < 1U || (stages > 4U && (stages < 8U || stages > 11U))) {
             return FOC_PROTO_INVALID_ARGUMENT;
         }
         return serial->calibration.start == NULL

@@ -36,6 +36,7 @@
 #include "foc_board_boot.h"
 #include "foc_calibration.h"
 #include "foc_flux_id.h"
+#include "foc_mechanical_id.h"
 #include "foc_motor_id.h"
 #include "foc_serial.h"
 
@@ -63,6 +64,8 @@ enum foc_board_cal_state {
     FOC_BOARD_CAL_TUNE = 14,
     /** Hand the Runtime back in CURRENT mode after the electrical stages. */
     FOC_BOARD_CAL_RESTORE = 15,
+    /** CAL-7 inertia and damping identification (P1, appended). */
+    FOC_BOARD_CAL_INERTIA = 16,
 };
 
 /** CALIBRATE_START stage mask. */
@@ -74,6 +77,9 @@ enum foc_board_cal_stages {
     FOC_BOARD_CAL_STAGE_ALL = 3,
     /** CAL-1 only: measure the ADC zero and apply it to the valid group (no drive). */
     FOC_BOARD_CAL_STAGE_ZERO = 4,
+    /** CAL-7 inertia and damping; combines with ROTOR and ELECTRICAL. Without
+     * ELECTRICAL it needs Rs and flux in the profile. The shaft turns within ID 109. */
+    FOC_BOARD_CAL_STAGE_MECHANICAL = 8,
 };
 
 /** CALIBRATE_READ byte 73: where the active rotor calibration came from. */
@@ -100,6 +106,7 @@ enum foc_board_cal_result_bits {
     FOC_BOARD_CAL_RESULT_RL = 2,
     FOC_BOARD_CAL_RESULT_FLUX = 4,
     FOC_BOARD_CAL_RESULT_PI = 8,
+    FOC_BOARD_CAL_RESULT_INERTIA = 16,
 };
 
 /** Wire values of CALIBRATE_READ byte 2. */
@@ -137,6 +144,8 @@ enum foc_board_cal_failure {
     FOC_BOARD_CAL_FAILURE_TUNE = 15,
     /** H0 records were lost or not contiguous. */
     FOC_BOARD_CAL_FAILURE_CAPTURE = 16,
+    /** CAL-7 inertia/damping fit failed; see admission_failure (appended). */
+    FOC_BOARD_CAL_FAILURE_INERTIA = 17,
 };
 
 /** One H0 cycle as seen by the electrical stages (logical slot clock). */
@@ -242,6 +251,17 @@ struct foc_board_calibration {
     bool boot_calibrated;
     struct foc_calibration_snapshot boot_snapshot;
     struct foc_runtime_tuning boot_tuning;
+    /* P1 CAL-7: bang-bang q voltage around the start position. */
+    struct foc_mechanical_id_context mech_id;
+    struct foc_mechanical_id_result mech_result;
+    float inertia_origin_rad;
+    float inertia_voltage_v;
+    float inertia_direction;
+    uint32_t inertia_reversals;
+    /* Probe: the drive runs uncaptured until the reversal period sets the window. */
+    bool inertia_probing;
+    uint32_t inertia_reversal_us;
+    uint32_t inertia_window;
 };
 
 /* Public Functions ------------------------------------------------------------- */

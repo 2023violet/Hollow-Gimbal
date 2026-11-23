@@ -54,7 +54,7 @@ PARAMETERS = {
     "model-rs": 80, "model-ld": 81, "model-lq": 82, "model-flux": 83, "model-kt": 84,
     "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
     "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
-    "accel": 106, "decel": 107,
+    "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
@@ -73,13 +73,15 @@ def fault_names(mask):
     return [name for bit, name in enumerate(FAULT_BITS) if mask & (1 << bit)] + [
         bit for bit in range(len(FAULT_BITS), 32) if mask & (1 << bit)]
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
-              "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE"]
+              "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE",
+              "INERTIA"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
-                "CAPTURE"]
-CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2}
+                "CAPTURE", "INERTIA"]
+CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2, "zero": 4, "mechanical": 8,
+              "electrical-mechanical": 10, "all-mechanical": 11}
 CAL_SOURCES = ["BOOT", "RUN", "STORAGE", "HOST", "SUPPLY"]
-CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8))
+CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8), ("inertia", 16))
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
@@ -350,7 +352,8 @@ def describe(frame):
                  "kp_q_v_per_a", "ki_v_per_a_s"), struct.unpack_from("<8f", body, 39))))
         if len(body) == 93:
             result.update(
-                committed_stages=[stage for stage, bit in (("rotor", 1), ("electrical", 2))
+                committed_stages=[stage for stage, bit in (("rotor", 1), ("electrical", 2),
+                                                            ("mechanical", 8))
                                   if body[71] & bit],
                 results_present=[kind for kind, bit in CAL_RESULT_BITS if body[72] & bit],
                 active_source=name(CAL_SOURCES, body[73]), ring_high_water=body[74],
@@ -911,7 +914,7 @@ def run_virtual_demo(
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
-                 "trajectory")
+                 "trajectory", "inertia")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1970,7 +1973,7 @@ def _write_wait(client, name, value, polls=400):
 
 
 def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad_s=None,
-                bandwidth_hz=None, save=True, polls=200000):
+                bandwidth_hz=None, save=True, polls=200000, mechanical=False):
     """Host motor replacement workflow (parameter contract step 3): on-MCU calibration of
     the connected motor, the user profile from its datasheet, then PARAM_SAVE. Every step
     runs on the MCU; the Host only sequences them and reports."""
@@ -1978,7 +1981,9 @@ def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad
     steps = summary["steps"]
     started = "BUSY"
     for _ in range(2000):
-        started = describe(client.call("calibrate"))["result"]
+        # CAL-7 (mechanical) only on request: the shaft turns with its load attached.
+        started = describe(client.call(
+            "calibrate", bytes([CAL_STAGES["all-mechanical"]]) if mechanical else b""))["result"]
         if started != "BUSY":
             break
         describe(client.call("status"))
@@ -2005,6 +2010,126 @@ def motor_setup(client, rated_current_a=None, peak_current_a=None, max_speed_rad
     summary["status"] = "OK" if calibrated and all(
         result in ("APPLIED", "ACCEPTED", "DONE", "NONE")
         for key, result in steps.items() if key != "calibration_failure") else "FAILED"
+    return summary
+
+
+def run_sil_inertia(simulator, base_arguments, flash_path, json_path=None):
+    """CAL-7 inertia identification and J-derived control (parameter contract section 18):
+    the MCU identifies J and B of motors it does not know, the unified refresh derives the
+    outer gains at the velocity bandwidth (ID 108), the rotor stays within the travel
+    (ID 109), and J*a + B*v feedforward removes the trajectory overshoot; the result
+    survives a power cycle. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    kt = 1.5 * 7 * 0.01
+    model = (("model-rs", 0.6), ("model-ld", 0.0012), ("model-lq", 0.0015), ("model-flux", 0.01))
+
+    def boot(inertia, damping, flash=False):
+        arguments = list(base_arguments) + ["--motor-inertia", str(inertia),
+                                            "--motor-damping", str(damping)]
+        if flash:
+            arguments += ["--flash", str(flash_path)]
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def calibrate(session, stages):
+        _wait_still(session)
+        origin = session.call("telemetry", quiet=True)["position_rad"]
+        started = session.call("calibrate", bytes([stages]))["result"]
+        view, excursion = None, 0.0
+        for _ in range(600000):
+            view = session.call("calibrate-read", quiet=True)
+            if view["calibration_state"] in ("DONE", "FAILED"):
+                break
+            if view["calibration_state"] == "INERTIA":
+                position = session.call("telemetry", quiet=True)["position_rad"]
+                excursion = max(excursion, abs(position - origin))
+        values = {name: session.read(name) for name in (
+            "model-inertia", "model-damping", "velocity-kp", "velocity-ki", "position-kp")}
+        return {"started": started, "state": view["calibration_state"],
+                "failure": view["calibration_failure"], "detail": view["admission_failure"],
+                "results": view.get("results_present"), "excursion_rad": excursion, **values}
+
+    def identified(run, inertia, damping, travel=math.pi):
+        omega = 2.0 * math.pi * 10.0
+        kp = run["model-inertia"] * omega / kt
+        return (run["started"] == "ACCEPTED" and run["state"] == "DONE"
+                and abs(run["model-inertia"] / inertia - 1.0) < 0.1
+                and abs(run["model-damping"] / damping - 1.0) < 0.2
+                and abs(run["velocity-kp"] / kp - 1.0) < 1e-3
+                and abs(run["velocity-ki"] / (0.25 * kp * omega) - 1.0) < 1e-3
+                and abs(run["position-kp"] - 0.25 * omega) < 1e-3
+                and run["excursion_rad"] <= travel + 0.05)
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. The SIL motor (J 0.002, B 0.006): CAL-3/4/5 and CAL-7 in one run (mask 10).
+    transport, session = boot(0.002, 0.006, flash=True)
+    checks["commissioned"] = commission(session.client) == "APPLIED"
+    checks["mechanical_needs_a_model"] = session.call("calibrate", bytes([8]))["result"] == "BAD_STATE"
+    run = metrics["electrical_and_inertia"] = calibrate(session, 10)
+    checks["inertia_identified_with_electrical"] = identified(run, 0.002, 0.006)
+    checks["velocity_bandwidth_above_fifth_refused"] = (
+        session.tune("velocity-bandwidth", 40.0) == "INVALID_ARGUMENT")
+
+    # 2. Feedforward: the 6 rad trapezoid of the trajectory scenario now tracks the plan.
+    assert session.tune("accel", 20.0) == "APPLIED" and session.tune("decel", 40.0) == "APPLIED"
+    start = session.call("telemetry", quiet=True)["position_rad"]
+    target = start + 6.0
+    session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="position")
+    steps, samples = session.run("position", target, 2000000)
+    status = session.status()
+    session.stop()
+    _wait_still(session)
+    tail = samples[-len(samples) // 10:] if samples else []
+    move = metrics["feedforward_move"] = {
+        "overshoot_rad": max((s["position_rad"] - target for s in samples), default=None),
+        "final_error_rad": (sum(abs(target - s["position_rad"]) for s in tail) / len(tail)
+                            if tail else None)}
+    checks["feedforward_removes_overshoot"] = (
+        steps == {"arm": "APPLIED", "start": "APPLIED"} and not status["fault_names"]
+        and move["overshoot_rad"] < 0.005 and move["final_error_rad"] < 0.001)
+    checks["saved"] = session.call("save")["result"] == "APPLIED"
+    saved = {name: run[name] for name in ("model-inertia", "model-damping", "velocity-kp")}
+    transport.__exit__()
+
+    # 3. Power cycle: J, B and the derived gains restore.
+    transport, session = boot(0.002, 0.006, flash=True)
+    restored = {name: session.read(name) for name in saved}
+    metrics["restored"] = restored
+    checks["inertia_restored"] = all(abs(restored[name] - saved[name]) < 1e-9 for name in saved)
+    transport.__exit__()
+
+    # 4. A light gimbal rotor (J 2e-5) and a heavy one (J 0.01) with a 1 rad travel: CAL-7
+    # alone (mask 8) on the model written from a previous electrical calibration.
+    for name, inertia, damping, travel in (("light", 2e-5, 5e-5, math.pi),
+                                           ("heavy", 0.01, 0.02, 1.0)):
+        transport, session = boot(inertia, damping)
+        commission(session.client)
+        for parameter, value in model:
+            assert session.tune(parameter, value) == "APPLIED", parameter
+        if travel != math.pi:
+            assert session.tune("inertia-travel", travel) == "APPLIED"
+        run = metrics[f"{name}_rotor"] = calibrate(session, 8)
+        checks[f"{name}_rotor_identified"] = identified(run, inertia, damping, travel)
+        transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-inertia",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
     return summary
 
 
@@ -2573,6 +2698,11 @@ def main():
     parser.add_argument("--bandwidth", type=float, default=None,
                         help="motor-setup: current-loop bandwidth in Hz (ID 104)")
     parser.add_argument("--no-save", action="store_true", help="motor-setup: skip PARAM_SAVE")
+    parser.add_argument("--mechanical", action="store_true",
+                        help="motor-setup: also identify inertia and damping (CAL-7; the shaft "
+                             "turns within ID 109 with its load)")
+    parser.add_argument("--cal-stages", choices=sorted(CAL_STAGES),
+                        help="request calibrate: CALIBRATE_START stage mask")
     parser.add_argument("--sil-flash", default=None,
                         help="sil-demo persist: flash image file (recreated)")
     parser.add_argument("--sil-lockstep-us", type=int, default=0,
@@ -2645,6 +2775,8 @@ def main():
             payload = setpoint(args.mode, args.first, args.second)
         elif args.message == "set-mode":
             payload = set_mode(args.mode)
+        elif args.message == "calibrate" and args.cal_stages:
+            payload = bytes([CAL_STAGES[args.cal_stages]])
         if args.param is not None:
             args.id = PARAMETERS[args.param]
             args.type = PARAMETER_TYPES.get(args.id, "f32")
@@ -2725,6 +2857,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "inertia":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-inertia-flash.bin"))
+                summary = run_sil_inertia(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "trajectory":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-trajectory-flash.bin"))
@@ -2784,7 +2922,8 @@ def main():
                 hello = client.hello()
                 if args.action == "motor-setup":
                     summary = motor_setup(client, args.rated_current, args.peak_current,
-                                          args.max_speed, args.bandwidth, not args.no_save)
+                                          args.max_speed, args.bandwidth, not args.no_save,
+                                          mechanical=args.mechanical)
                     print(json.dumps(summary, allow_nan=False))
                     return 0 if summary["status"] == "OK" else 3
                 if args.action == "virtual-demo":

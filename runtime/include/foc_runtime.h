@@ -198,6 +198,11 @@ struct foc_runtime_profile {
     float gear_ratio;
     /** Current-loop bandwidth in Hz used to derive the current PI. */
     float current_bandwidth_hz;
+    /** Velocity-loop bandwidth in Hz used to derive the outer gains from inertia and Kt;
+     * 0 keeps manual gains. */
+    float velocity_bandwidth_hz;
+    /** Largest rotor excursion of the inertia identification, in rad; 0 not set. */
+    float inertia_travel_rad;
 };
 
 struct foc_runtime_tuning {

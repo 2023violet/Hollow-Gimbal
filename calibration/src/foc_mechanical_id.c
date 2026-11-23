@@ -54,9 +54,7 @@ static bool foc_mechanical_id_config_valid(const struct foc_mechanical_id_config
         foc_mechanical_id_positive(cfg->max_residual_rms_nm) &&
         foc_mechanical_id_positive(cfg->min_inertia_kg_m2) && isfinite(cfg->max_inertia_kg_m2) &&
         cfg->max_inertia_kg_m2 >= cfg->min_inertia_kg_m2 && isfinite(cfg->max_damping_nm_s) &&
-        cfg->max_damping_nm_s >= 0.0f &&
-        (double)cfg->max_damping_nm_s * (double)cfg->max_interval_us * 1e-6 <=
-        0.3 * (double)cfg->min_inertia_kg_m2;
+        cfg->max_damping_nm_s >= 0.0f;
 }
 
 static int foc_mechanical_id_invalidate(
@@ -178,8 +176,12 @@ static enum foc_calibration_failure foc_mechanical_id_fit(struct foc_mechanical_
     if (!isfinite(inertia) || !isfinite(damping)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
+    /* The trapezoidal speed integral resolves the mechanical pole only while B x interval / J
+     * stays at or below 0.3; checked on the fitted pair, not the configured bounds, so wide
+     * bounds still admit every plant the interval resolves. */
     if (inertia < cfg->min_inertia_kg_m2 || inertia > cfg->max_inertia_kg_m2 || damping < 0.0 ||
-        damping > cfg->max_damping_nm_s) {
+        damping > cfg->max_damping_nm_s ||
+        damping * (double)cfg->max_interval_us * 1e-6 > 0.3 * inertia) {
         return FOC_CALIBRATION_FAILURE_RANGE;
     }
     const float j_out = (float)inertia;

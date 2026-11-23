@@ -112,6 +112,8 @@ struct foc_trajectory_output {
     /** Tracking planner only: planned mechanical position in rad. */
     float position_ref_rad;
     bool position_valid;
+    /** Planned acceleration of this step in rad/s², for torque feedforward. */
+    float acceleration_rad_s2;
 };
 
 /* Public Functions ------------------------------------------------------------- */

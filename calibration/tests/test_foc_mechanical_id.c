@@ -240,15 +240,20 @@ static int test_excitation_and_overflow(void)
     struct foc_mechanical_id_config short_window = config;
     short_window.intervals_per_window = 2U;
     short_window.min_windows = 3U;
-    /* Exact linear plant at J=.002, B=.01 and dt=.8 s can yield a
-     * near-perfect residual with J biased by >100% on triangular torque. */
-    struct foc_mechanical_id_config aliased = short_window;
-    aliased.max_interval_us = 800000U;
-    aliased.min_inertia_kg_m2 = 0.002f;
-    aliased.max_damping_nm_s = 0.01f;
-    struct foc_mechanical_id_context rejected = {0};
-    CHECK(foc_mechanical_id_init(&rejected, &aliased, 99U) < 0);
-    CHECK(!rejected.result.usable);
+    /* A fitted pair the interval does not resolve (B x 1.1 ms / J above 0.3) is RANGE, even
+     * inside wide bounds: exact plants at J=.002 with B=.5 (0.275) and B=.6 (0.33). */
+    struct foc_mechanical_id_config wide = config;
+    wide.max_damping_nm_s = 1.0f;
+    struct foc_mechanical_id_context resolved, unresolved;
+    CHECK(foc_mechanical_id_init(&resolved, &wide, 98U) == 0);
+    CHECK(foc_mechanical_id_init(&unresolved, &wide, 99U) == 0);
+    CHECK(analytic(&resolved, 0.002, 0.5, false) == 0);
+    CHECK(analytic(&unresolved, 0.002, 0.6, false) == 0);
+    struct foc_mechanical_id_result fitted;
+    CHECK(foc_mechanical_id_finish(&resolved, &fitted) == 0 && fitted.usable);
+    CHECK(fabs(fitted.damping_nm_s - 0.5) < 1e-4);
+    CHECK(foc_mechanical_id_finish(&unresolved, &fitted) == FOC_MECHANICAL_ID_ERR_QUALITY);
+    CHECK(fitted.failure == FOC_CALIBRATION_FAILURE_RANGE && !fitted.usable);
     for (unsigned variant = 0U; variant < 4U; ++variant) {
         struct foc_mechanical_id_context context;
         CHECK(foc_mechanical_id_init(&context, &short_window, 77U) == 0);

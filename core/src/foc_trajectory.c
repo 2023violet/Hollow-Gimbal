@@ -94,6 +94,7 @@ static int foc_trajectory_prepare(
 static int foc_trajectory_commit(
     struct foc_trajectory_context *context,
     float next_velocity_rad_s,
+    float dt_s,
     struct foc_trajectory_output *output
 )
 {
@@ -104,6 +105,9 @@ static int foc_trajectory_commit(
         next_velocity_rad_s =
             foc_trajectory_clamp(next_velocity_rad_s, context->config.max_velocity_rad_s);
     }
+    output->acceleration_rad_s2 = context->state == FOC_TRAJECTORY_STATE_ACTIVE && dt_s > 0.0f
+        ? (next_velocity_rad_s - context->planned_velocity_rad_s) / dt_s
+        : 0.0f;
     context->planned_velocity_rad_s = next_velocity_rad_s;
     context->state = FOC_TRAJECTORY_STATE_ACTIVE;
     output->velocity_ref_rad_s = next_velocity_rad_s;
@@ -188,6 +192,7 @@ int foc_trajectory_velocity_step(
     return foc_trajectory_commit(
         context,
         foc_trajectory_slew(context, context->planned_velocity_rad_s, target, dt_s),
+        dt_s,
         output
     );
 }
@@ -225,6 +230,7 @@ int foc_trajectory_position_step(
     return foc_trajectory_commit(
         context,
         foc_trajectory_slew(context, context->planned_velocity_rad_s, target_velocity, dt_s),
+        dt_s,
         output
     );
 }
@@ -281,6 +287,7 @@ int foc_trajectory_track_step(
         .active = true,
         .position_ref_rad = next_position,
         .position_valid = true,
+        .acceleration_rad_s2 = (next_velocity - velocity) / dt_s,
     };
     return 0;
 }

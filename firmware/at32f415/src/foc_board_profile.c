@@ -19,7 +19,7 @@
 
 /* Private Helpers -------------------------------------------------------------- */
 
-/* None: the refresh is two pure steps over caller-owned values. */
+/* None: the refresh is pure steps over caller-owned values. */
 
 /* Public Functions ------------------------------------------------------------- */
 
@@ -55,11 +55,41 @@ bool foc_board_profile_design_pi(
     return foc_motor_pi_design(&model, &request, pi) == FOC_MOTOR_ID_OK;
 }
 
+float foc_board_profile_kt(uint32_t pole_pairs, const struct foc_runtime_profile *profile)
+{
+    return profile != NULL ? 1.5f * (float)pole_pairs * profile->flux_wb : 0.0f;
+}
+
+bool foc_board_profile_design_velocity(
+    uint32_t pole_pairs,
+    const struct foc_runtime_profile *profile,
+    struct foc_board_velocity_gains *gains
+)
+{
+    const float kt = foc_board_profile_kt(pole_pairs, profile);
+    if (profile == NULL || gains == NULL || !(kt > 0.0f) || !(profile->inertia_kg_m2 > 0.0f) ||
+        !(profile->velocity_bandwidth_hz > 0.0f) ||
+        profile->velocity_bandwidth_hz > (float)FOC_BOARD_PROFILE_VELOCITY_BANDWIDTH_MAX_HZ ||
+        profile->velocity_bandwidth_hz > 0.2f * profile->current_bandwidth_hz) {
+        return false;
+    }
+    const float omega = 6.2831853f * profile->velocity_bandwidth_hz;
+    const float kp = profile->inertia_kg_m2 * omega / kt;
+    *gains = (struct foc_board_velocity_gains){
+        .velocity_kp_a_per_rad_s = kp,
+        .velocity_ki_a_per_rad = 0.25f * kp * omega,
+        .position_kp_per_s = 0.25f * omega,
+    };
+    return isfinite(gains->velocity_kp_a_per_rad_s) && isfinite(gains->velocity_ki_a_per_rad);
+}
+
 bool foc_board_profile_refresh(
     uint32_t period_us,
     float voltage_limit_v,
+    uint32_t pole_pairs,
     struct foc_runtime_tuning *tuning,
     bool redesign_pi,
+    bool redesign_velocity,
     struct foc_motor_pi_candidate *pi
 )
 {
@@ -67,6 +97,18 @@ bool foc_board_profile_refresh(
         return false;
     }
     const struct foc_runtime_profile *profile = &tuning->profile;
+    /* Outer gains: only with a mechanical model; a bandwidth the loop cannot reach is
+     * refused rather than clipped. */
+    if (redesign_velocity && profile->inertia_kg_m2 > 0.0f &&
+        foc_board_profile_kt(pole_pairs, profile) > 0.0f && profile->velocity_bandwidth_hz > 0.0f) {
+        struct foc_board_velocity_gains gains;
+        if (!foc_board_profile_design_velocity(pole_pairs, profile, &gains)) {
+            return false;
+        }
+        tuning->velocity_kp_a_per_rad_s = gains.velocity_kp_a_per_rad_s;
+        tuning->velocity_ki_a_per_rad = gains.velocity_ki_a_per_rad;
+        tuning->position_kp_per_s = gains.position_kp_per_s;
+    }
     if (redesign_pi && foc_board_profile_model_complete(profile)) {
         struct foc_motor_pi_candidate designed;
         if (!foc_board_profile_design_pi(period_us, voltage_limit_v, profile, &designed)) {

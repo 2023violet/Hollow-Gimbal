@@ -179,10 +179,11 @@ LPF lag, acquisition delay, or the output and current association. Confirm a
 negligible load or supply measured load. Undeclared friction, unobserved load
 and incorrect Kt can bias the model. The acquisition owner must keep speed and
 torque sufficiently resolved across every interval, including variation faster
-than the mechanical time constant. Configuration bounds require
-`max_B * max_interval_s / min_J <= 0.3`. For fixed-step trapezoidal
-quadrature on the linear model this limits the integration error associated
-with that pole. It does not guarantee accuracy for arbitrary intersample
+than the mechanical time constant. The fitted pair must satisfy
+`B * max_interval_s / J <= 0.3` (RANGE otherwise); the check runs on the fit,
+not on the configured bounds, so wide bounds still admit every plant the
+interval resolves. For fixed-step trapezoidal quadrature on the linear model
+this limits the integration error associated with that pole. It does not guarantee accuracy for arbitrary intersample
 waveforms or timing errors.
 
 Complete windows use

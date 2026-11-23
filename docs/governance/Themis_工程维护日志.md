@@ -3171,3 +3171,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - `foc_trajectory` 增加减速度与基于计划参考的 `foc_trajectory_track_step`（离散刹车公式，无死区）；Runtime 位置模式改为跟踪计划位置并以计划速度作前馈。ID 106/107 加速度/减速度（电机侧，0 不限）进入 tuning，任一非 0 启用规划；存储升为 format 5（224 字节）。
 - SIL 增加 `--load-torque-nm t,on_us`：恒定负载下速度积分已消除位置稳态误差（Ki=0 时 0.53 rad），删除 ID 105。CLI 新增 `accel`/`decel` 参数与 SIL `trajectory` 场景（lockstep、free-run 通过），SIL 单元测试 16 项；fwinteg `arm_static.py` 登记 `foc_trajectory_position_step` 从 ARM 镜像中移除（Runtime 改用跟踪规划器）。资源：默认镜像 text 82,524 B，bss 12,648 B。
+
+## 2026-11-23 · V2 惯量辨识 CAL-7、由 J 推导增益与前馈（P1 第 C 步）
+
+- 校准管理器新增 CAL-7（掩码 8，可与 1–3 组合）：q 轴电压 bang-bang，行程受 ID 109 约束，窗口由探测到的换向间隔自适应；TUNE 写入 ID 85/86。`foc_mechanical_id` 的阻尼预检查改为拟合后检查。`foc_board_profile` 按 ID 108 由 J、Kt 推导 ID 69–71；Runtime 在轨迹启用时加 (J·a+B·v)/Kt 前馈。存储升为 format 6（232 字节）。固件 CMake 加入 `foc_mechanical_id.c`。
+- CLI 新增 `velocity-bandwidth`/`inertia-travel` 参数、`--cal-stages`、`motor-setup --mechanical` 与 SIL `inertia` 场景（lockstep、free-run 通过）。SIL：J 2e-5–0.01 误差 ≤1.8%，前馈后梯形移动过冲 0.026 → 0.00007 rad。资源：默认镜像 text 88,024 B，bss 13,112 B。

@@ -57,6 +57,24 @@ REVIEWED_ADAPTERS = {
 BACKEND_ATTACH = "foc_board_output_attach"
 
 
+# Reviewed locked main() prologues (up to system_core_clock_update) that intentionally differ
+# from the baseline, by digest of the normalized instructions and first ten literals (RAM
+# addresses masked), each with its reason. Every one still starts with the output lock.
+REVIEWED_PROLOGUES = {
+    "ebd5ef22d8738811e4851bde41ac5f635db9b69825b4086e889ab88e0a0ff6fc":
+        "New Board1 pinout (2026-11-23): after the unchanged output lock (TMR1 reset, PA7-PA10 "
+        "and PB0/PB1 analog) the board pins are set (PA1-PA3 phase-voltage analog, NFAULT PB2 "
+        "input, PB8 pull-down) and the PLL runs from the 8 MHz crystal (x75/4) with a HICK "
+        "fallback recorded in clock_from_crystal",
+}
+
+
+def prologue_digest(main_text):
+    lines = rename_callee_saved(normalize(main_text, True))
+    words = ["RAM" if value.startswith("0x2000") else value for value in literals(main_text)[:10]]
+    return hashlib.sha256(chr(10).join(lines + words).encode()).hexdigest()
+
+
 def adapter_digest(text):
     lines = [re.sub(r"^\.word\s+\S+", ".word LIT", line) for line in normalize(text)]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
@@ -156,7 +174,9 @@ for name, elf in IMAGES.items():
     (out / "main-call-order.txt").write_text("\n".join(calls) + "\n")
     pro_base = rename_callee_saved(normalize(base_main, True))
     pro_new = rename_callee_saved(normalize(main, True))
-    prologue_ok = pro_base == pro_new and literals(base_main)[:10] == literals(main)[:10]
+    prologue_ok = (pro_base == pro_new and literals(base_main)[:10] == literals(main)[:10]) or (
+        prologue_digest(main) in REVIEWED_PROLOGUES
+    )
     try:
         i = calls.index("system_core_clock_update")
         order_ok = calls[i + 1 : i + 4] == [
@@ -166,7 +186,12 @@ for name, elf in IMAGES.items():
         ] and "adc_reset" in calls[i + 4 :] and "foc_board_init" not in calls
     except ValueError:
         order_ok = False
-    after = main.split("<foc_board_boot_select>", 1)[1].splitlines()[1:3] if "<foc_board_boot_select>" in main else []
+    after = main.split("<foc_board_boot_select>", 1)[1].splitlines()[1:4] if "<foc_board_boot_select>" in main else []
+    # The compiler may first copy the status to a callee-saved register; the test and branch
+    # on r0 must follow directly.
+    if after and re.search(r"(^|\s)mov\s+r\d+, r0$", after[0]):
+        after = after[1:]
+    after = after[:2]
     target = re.search(r"b\w*\.n?\s+([0-9a-f]+)", after[1]) if len(after) == 2 else None
     wfi_ok = bool(target) and "cmp\tr0, #0" in after[0] and re.search(rf"^\s*{target.group(1)}:\s*wfi", main, re.M) is not None
     adapter_diff = [

@@ -3186,3 +3186,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 根因：CAL-4 每档固定等 400 ms，重转子（τ ≈ J·Rs/(ke·Kt)，J 0.02 约 1.6 s）在反向档仍沿原方向转，负方向窗口不足，报 FLUX / SAMPLE_COUNT。改为每 100 ms 用编码器角度差求平均转速，方向一致、电气转速 ≥ 2 rad/s 且由连续两次变化估计的距稳态 ≤ 5% 时开始采样；每档最多 10 s，超时报 TIMEOUT。估计器、协议与参数不变。
 - SIL `light-rotor` 场景改名 `rotor-range`，增加 J 0.02、0.05（完成，Ψ 误差 ≤0.04%）与 0.2（TIMEOUT）；CAL-4 时长 J 2e-5 不变、0.02 为 12 s。参数契约第 20 节。资源：默认镜像 text 90,744 B，bss 14,368 B。
+
+## 2026-11-23 · V2 固件按新版 Board1 引脚表调整
+
+- 对照新版引脚表：PWM（TMR1 PA8/PA9/PA10 + PA7/PB0/PB1）、相电流（PA4/PA5/PA6 = IC/IB/IA）、SPI1 编码器、USART1、SWD 与现有映射一致；DRV8311H GAIN 47 kΩ 经数据手册确认为 0.5 V/A，CSAREF 3.3 V 零点 2048 码，VBUS 11:1，均不变。
+- 修改：VBUS 由 PA1/IN1 改为 PA0/IN0；PA1–PA3 相电压分压输入设为模拟（暂不采样）；NFAULT PB2 设为无内部上拉输入（暂不读取）；未接的 PB8 下拉；时钟改为 8 MHz 晶振 PLL × 75 / 4 = 150 MHz，晶振不起振时退回 HICK 同频并记录于 `clock_from_crystal`。README Board1 映射表同步。引脚与时钟只有上板才能验证（SIL 按 ADC 序位仿真）。fwinteg `arm_static.py` 增加已审查 prologue 摘要（锁定输出之后的新引脚与晶振时钟），WFI 检查允许编译器先把选择结果复制到被调用者保存寄存器。待办：NFAULT 故障锁存、三路相电压采样（可用作 CAL-3 实测端电压）、CAN。资源：默认镜像 text 90,880 B，bss 14,368 B。

@@ -71,6 +71,8 @@ static struct foc_board_adc adc;
 static struct foc_board_encoder encoder;
 static struct foc_board_boot boot;
 static enum foc_spi_phase spi_phase;
+/* True when the PLL runs from the 8 MHz crystal, false on the HICK fallback (debugger view). */
+static volatile bool clock_from_crystal;
 static uint16_t spi_word;
 static uint32_t spi_rx_us;
 static struct foc_uart_buffer uart;
@@ -425,13 +427,46 @@ static void foc_at32_lock_output(void)
     gpio_init(GPIOB, &pins);
 }
 
+/* Board facts that are not producers: phase-voltage dividers (VC PA1, VB PA2, VA PA3) stay
+ * analog until they are sampled; NFAULT (PB2) is an input with the board's 10 kOhm pull-up to
+ * DRV_3V3; unconnected PB8 is pulled down. VBUS and phase currents are set in ADC init. */
+static void foc_at32_board_pins_init(void)
+{
+    gpio_init_type pins;
+    gpio_default_para_init(&pins);
+    pins.gpio_mode = GPIO_MODE_ANALOG;
+    pins.gpio_pins = GPIO_PINS_1 | GPIO_PINS_2 | GPIO_PINS_3;
+    gpio_init(GPIOA, &pins);
+    pins.gpio_mode = GPIO_MODE_INPUT;
+    pins.gpio_pull = GPIO_PULL_NONE;
+    pins.gpio_pins = GPIO_PINS_2;
+    gpio_init(GPIOB, &pins);
+    pins.gpio_pull = GPIO_PULL_DOWN;
+    pins.gpio_pins = GPIO_PINS_8;
+    gpio_init(GPIOB, &pins);
+}
+
+/* PLL from the board's 8 MHz crystal: 8 MHz x 75 / 4 = 150 MHz. If the crystal does not
+ * start, HICK / 2 (4 MHz x 150 / 4) gives the same 150 MHz so the board still boots and
+ * answers on USART1; clock_from_crystal records which source runs. */
 static bool foc_at32_clock_init(void)
 {
     /* Flash access wait states only. This path never erases or programs Flash. */
     flash_psr_set(FLASH_WAIT_CYCLE_4);
-    crm_pll_config2(CRM_PLL_SOURCE_HICK, 150, 1, CRM_PLL_FR_4);
-    crm_clock_source_enable(CRM_CLOCK_SOURCE_PLL, TRUE);
+    crm_clock_source_enable(CRM_CLOCK_SOURCE_HEXT, TRUE);
     uint32_t remaining = FOC_STARTUP_POLL_LIMIT;
+    while (crm_flag_get(CRM_HEXT_STABLE_FLAG) != SET && remaining != 0U) {
+        remaining--;
+    }
+    clock_from_crystal = remaining != 0U;
+    if (clock_from_crystal) {
+        crm_pll_config2(CRM_PLL_SOURCE_HEXT, 75, 1, CRM_PLL_FR_4);
+    } else {
+        crm_clock_source_enable(CRM_CLOCK_SOURCE_HEXT, FALSE);
+        crm_pll_config2(CRM_PLL_SOURCE_HICK, 150, 1, CRM_PLL_FR_4);
+    }
+    crm_clock_source_enable(CRM_CLOCK_SOURCE_PLL, TRUE);
+    remaining = FOC_STARTUP_POLL_LIMIT;
     while (crm_flag_get(CRM_PLL_STABLE_FLAG) != SET && remaining != 0U) {
         remaining--;
     }
@@ -472,7 +507,7 @@ static bool foc_at32_adc_init(void)
     gpio_init_type pins;
     gpio_default_para_init(&pins);
     pins.gpio_mode = GPIO_MODE_ANALOG;
-    pins.gpio_pins = GPIO_PINS_1 | GPIO_PINS_4 | GPIO_PINS_5 | GPIO_PINS_6;
+    pins.gpio_pins = GPIO_PINS_0 | GPIO_PINS_4 | GPIO_PINS_5 | GPIO_PINS_6;
     gpio_init(GPIOA, &pins);
 
     crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
@@ -483,8 +518,8 @@ static bool foc_at32_adc_init(void)
     config.sequence_mode = TRUE;
     adc_base_config(ADC1, &config);
     adc_preempt_channel_length_set(ADC1, 4);
-    /* VBUS, IC, IB, IA in physical driver phase order. */
-    adc_preempt_channel_set(ADC1, ADC_CHANNEL_1, 1, ADC_SAMPLETIME_7_5);
+    /* VBUS (PA0), IC (PA4), IB (PA5), IA (PA6) in physical driver phase order. */
+    adc_preempt_channel_set(ADC1, ADC_CHANNEL_0, 1, ADC_SAMPLETIME_7_5);
     adc_preempt_channel_set(ADC1, ADC_CHANNEL_4, 2, ADC_SAMPLETIME_7_5);
     adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 3, ADC_SAMPLETIME_7_5);
     adc_preempt_channel_set(ADC1, ADC_CHANNEL_6, 4, ADC_SAMPLETIME_7_5);
@@ -632,6 +667,7 @@ int main(void)
 {
     __disable_irq();
     foc_at32_lock_output();
+    foc_at32_board_pins_init();
     if (foc_at32_clock_init() && foc_at32_boot() && foc_at32_adc_init()) {
         foc_at32_spi_init();
         foc_at32_timers_init();

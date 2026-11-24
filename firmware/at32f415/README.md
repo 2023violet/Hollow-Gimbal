@@ -134,16 +134,19 @@ SPI, Safety, UART V1 or locked output admission changes accompany this mapping.
 | Resource | V2 binding |
 | --- | --- |
 | U3 | AT32F415KBU7-4, QFN32, 128 KiB Flash and 32 KiB SRAM. Uses the vendor xB script and startup vector at `0x08000000`. |
-| Clocks | HICK 8 MHz → PLL 150 MHz, AHB 150 MHz, APB1/2 75 MHz. Prescaled APB timers receive 150 MHz. |
+| Clocks | 8 MHz crystal (HEXT, 20 pF load) → PLL × 75 / 4 = 150 MHz, AHB 150 MHz, APB1/2 75 MHz. Prescaled APB timers receive 150 MHz. If the crystal does not start within the startup poll, HICK / 2 × 150 / 4 gives the same 150 MHz so the board still boots; `clock_from_crystal` records the source for a debugger. |
 | TMR2 | 32-bit plus mode, divider 150, 1 µs per count, free-running with no IRQ. All domains share this epoch. |
 | TMR1 / ADC1 | TMR1 CH4 internal compare at nominal +40 µs in a 200 µs slot. Its IRQ launches one software-triggered injected conversion and timestamps it. ADC1 group completion is H0. No PWM GPIO mux or active channel is configured. |
-| ADC injected group | Rank 1 PA1 / ADC1_IN1 = VBUS. Rank 2 PA4 / IN4 = driver IC → logical A. Rank 3 PA5 / IN5 = driver IB → logical B. Rank 4 PA6 / IN6 = driver IA → logical C. ADCCLK 12.5 MHz. |
-| Nominal scaling | 12-bit raw. VBUS = count × 3.3 × 11 / 4095 V. I = (count − 2048) × 3.3 / (4095 × 0.5) A. Gains, offsets and valid CSA conduction windows need measurement. |
+| ADC injected group | Rank 1 PA0 / ADC1_IN0 = VBUS. Rank 2 PA4 / IN4 = driver IC → logical A. Rank 3 PA5 / IN5 = driver IB → logical B. Rank 4 PA6 / IN6 = driver IA → logical C. ADCCLK 12.5 MHz. VDDA is the DRV8311 LDO (DRV_3V3). |
+| Nominal scaling | 12-bit raw. VBUS = count × 3.3 × 11 / 4095 V (10 kΩ / 1 kΩ). I = (count − 2048) × 3.3 / (4095 × 0.5) A: DRV8311H GAIN 47 kΩ to GND is 0.5 V/A, and CSAREF on DRV_3V3 puts zero current at VREF / 2 (SOx through 330 Ω and 22 pF). Gains, offsets and valid CSA conduction windows need measurement. |
 | Logical PWM requests | A → CH3 PA10/PB1 (driver C), B → CH2 PA9/PB0 (driver B), C → CH1 PA8/PA7 (driver A). Compare is truncated duty × 29999, inclusive, for diagnostics only. |
 | TMR5 / SPI1 | TMR5 overflow begins a nominal 500 µs slot and asserts PA15 CS. CH1 compare at +20 µs starts one SPI transfer and CH2 at +70 µs closes the bounded window. SPI1 RX/error IRQ captures the result. PB3 SCK, PB4 MISO, PB5 MOSI. |
 | Encoder | KTH7823-X-N-QN16, active-low CS, SPI mode 3, MSB first, APB2/16, one zero TX word and one 16-bit angle word. No wire CRC. Source time is the CS assertion proxy. `sensors/foc_encoder` owns direction, bounded uint32 timestamp arithmetic, integer-backed unwrapping, raw difference speed, variable-`dt` LPF speed, alpha-beta comparison speed, and quality classification. Board1 publishes the LPF speed into the existing `foc_runtime_sensor`; the raw and tracked estimates remain local diagnostics. The absolute sensor zero and seven pole pairs are nominal. Electrical offset zero is uncalibrated. |
 | IRQ priority | NVIC grouping 0, four preemption bits. ADC1 #18 and TMR1_CH #27 use priority 0. TMR5_GLOBAL #50 and SPI1 #35 use priority 1. Same-priority pairs serialize their own acquisition state. H0 may preempt H1. |
 | USART1 | PB6 TX, PB7 RX, 115200 8N1, byte IRQ priority 2. Bounded RX ring and single complete TX buffer. |
+| Phase voltage | PA1 / IN1 = VC, PA2 / IN2 = VB, PA3 / IN3 = VA through 10 kΩ / 1 kΩ (11:1). Configured analog and not sampled yet. |
+| Driver | DRV8311H: nSLEEP pulled up (always enabled, no GPIO), MODE 47 kΩ = 6x PWM with 5 A OCP, SLEW 47 kΩ = 75 V/µs. NFAULT on PB2 is an input with the board's 10 kΩ pull-up (and LED3); the firmware does not read it yet. |
+| Unused pins | PA11 CAN_RX / PA12 CAN_TX (SIT3051, no CAN software yet), PB8 not connected (pulled down), BOOT0 10 kΩ to GND. |
 | Other resources | DMA1/2, SysTick and both watchdogs are unused. No Flash persistence backend. |
 
 ADC consumes one outstanding trigger only. An overlapping trigger invalidates

@@ -65,6 +65,7 @@ enum {
     PARAM_COAST_FLUX = 92,
     PARAM_COAST_ANGLE_ERROR = 93,
     PARAM_DRIVEN_FLUX = 94,
+    PARAM_DEAD_TIME = 95,
     /* Controller tuning receipt, read only. */
     PARAM_TUNING_REVISION = 60,
     PARAM_TUNING_RESULT = 61,
@@ -813,17 +814,20 @@ static bool foc_serial_parameter_read(
         foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
-    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_DRIVEN_FLUX &&
+    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_DEAD_TIME &&
         serial->calibration.commission != NULL) {
         struct foc_serial_commission_view view = {0};
         (void)serial->calibration.commission(serial->calibration.context, &view);
         if (id >= PARAM_COAST_FLUX) {
             const float value = id == PARAM_COAST_FLUX ? view.coast_flux_wb
                 : id == PARAM_COAST_ANGLE_ERROR        ? view.coast_angle_error_rad
-                                                       : view.driven_flux_wb;
+                : id == PARAM_DRIVEN_FLUX              ? view.driven_flux_wb
+                                                       : view.dead_time_v;
             *parameter = (struct foc_serial_parameter){
                 .type = PARAM_F32,
-                .unit = id == PARAM_COAST_ANGLE_ERROR ? UNIT_RADIAN : UNIT_WEBER,
+                .unit = id == PARAM_COAST_ANGLE_ERROR ? UNIT_RADIAN
+                    : id == PARAM_DEAD_TIME           ? UNIT_VOLT
+                                                      : UNIT_WEBER,
                 .value = foc_serial_float_bits(value),
             };
         } else {

@@ -70,7 +70,8 @@ static bool foc_motor_id_config_valid(const struct foc_motor_id_config *config)
           foc_motor_id_positive(config->max_abs_speed_rad_s) &&
           config->min_speed_rms_rad_s < config->max_abs_speed_rad_s)) &&
         isfinite(config->known_rs_ohm) && config->known_rs_ohm >= 0.0f &&
-        (config->known_rs_ohm == 0.0f || config->fit_back_emf);
+        (config->known_rs_ohm == 0.0f || config->fit_back_emf) &&
+        !(config->fit_dead_time && config->fit_back_emf);
 }
 
 static int foc_motor_id_invalidate(
@@ -94,6 +95,14 @@ foc_motor_id_close_window(struct foc_motor_id_context *context, float current_a,
     const double i = context->current_as * inverse_s;
     const double slew = ((double)current_a - context->first_current_a) * inverse_s;
     const double v = context->voltage_vs * inverse_s;
+    if (context->config.fit_dead_time) {
+        const double u = context->dead_time_s * inverse_s;
+        context->u2 += u * u;
+        context->i_u += i * u;
+        context->slew_u += slew * u;
+        context->u_v += u * v;
+        context->dead_time_s = 0.0;
+    }
     if (context->config.fit_back_emf) {
         const double m = ((double)angle_rad - context->first_angle_rad) * inverse_s;
         if (!(fabs(m) <= context->config.max_abs_speed_rad_s)) {
@@ -118,6 +127,31 @@ foc_motor_id_close_window(struct foc_motor_id_context *context, float current_a,
     context->first_current_a = current_a;
     context->first_angle_rad = angle_rad;
     return true;
+}
+
+/* Solve a normalized 3x3 Gram system by its adjugate. Columns have norms n[k], pairwise
+ * correlations c01, c02, c12 and normalized projections y[k]; returns the excitation
+ * (Gram determinant) and writes the coefficients. */
+static double foc_motor_id_solve3(
+    const double n[3],
+    double c01,
+    double c02,
+    double c12,
+    const double y[3],
+    double x[3]
+)
+{
+    const double excitation = 1.0 + 2.0 * c01 * c02 * c12 - c01 * c01 - c02 * c02 - c12 * c12;
+    const double a00 = 1.0 - c12 * c12;
+    const double a11 = 1.0 - c02 * c02;
+    const double a22 = 1.0 - c01 * c01;
+    const double a01 = c02 * c12 - c01;
+    const double a02 = c01 * c12 - c02;
+    const double a12 = c01 * c02 - c12;
+    x[0] = (a00 * y[0] + a01 * y[1] + a02 * y[2]) / (excitation * n[0]);
+    x[1] = (a01 * y[0] + a11 * y[1] + a12 * y[2]) / (excitation * n[1]);
+    x[2] = (a02 * y[0] + a12 * y[1] + a22 * y[2]) / (excitation * n[2]);
+    return excitation;
 }
 
 static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context *context)
@@ -153,7 +187,9 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     double rs = 0.0;
     double l = 0.0;
     double ke = 0.0;
+    double vdt = 0.0;
     bool rs_fixed = false;
+    bool dead_time = false;
     if (motion && config->known_rs_ohm > 0.0f) {
         /* The shaft turns: R comes from the still d axis, the q data fit L and ke. On a light
          * rotor i follows di/dt within a long level, so a free R separates poorly from L. */
@@ -167,25 +203,47 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
         ke = (ym - sm * ys) / (excitation * m_norm);
         rs_fixed = true;
     } else if (motion) {
-        /* Three terms: solve the normalized 3x3 Gram system by its adjugate. */
+        /* Three terms R, L, ke. */
         const double m_norm = sqrt(context->m2);
-        const double im = context->i_m / (i_norm * m_norm);
-        const double sm = context->slew_m / (slew_norm * m_norm);
-        const double mv = context->m_v / m_norm;
-        excitation =
-            1.0 + 2.0 * correlation * im * sm - correlation * correlation - im * im - sm * sm;
-        const double a00 = 1.0 - sm * sm;
-        const double a11 = 1.0 - im * im;
-        const double a22 = 1.0 - correlation * correlation;
-        const double a01 = im * sm - correlation;
-        const double a02 = correlation * sm - im;
-        const double a12 = correlation * im - sm;
-        rs = (a00 * iv + a01 * sv + a02 * mv) / (excitation * i_norm);
-        l = (a01 * iv + a11 * sv + a12 * mv) / (excitation * slew_norm);
-        ke = (a02 * iv + a12 * sv + a22 * mv) / (excitation * m_norm);
+        const double norms[3] = {i_norm, slew_norm, m_norm};
+        const double y[3] = {iv, sv, context->m_v / m_norm};
+        double x[3];
+        excitation = foc_motor_id_solve3(
+            norms,
+            correlation,
+            context->i_m / (i_norm * m_norm),
+            context->slew_m / (slew_norm * m_norm),
+            y,
+            x
+        );
+        rs = x[0];
+        l = x[1];
+        ke = x[2];
     } else {
         rs = (iv - correlation * sv) / (excitation * i_norm);
         l = (sv - correlation * iv) / (excitation * slew_norm);
+        if (config->fit_dead_time && context->u2 > 0.0 && isfinite(context->u2)) {
+            /* Three terms R, L, Vdt; kept only when the columns are independent enough. */
+            const double u_norm = sqrt(context->u2);
+            const double norms[3] = {i_norm, slew_norm, u_norm};
+            const double y[3] = {iv, sv, context->u_v / u_norm};
+            double x[3];
+            const double three = foc_motor_id_solve3(
+                norms,
+                correlation,
+                context->i_u / (i_norm * u_norm),
+                context->slew_u / (slew_norm * u_norm),
+                y,
+                x
+            );
+            if (isfinite(three) && three >= FOC_MOTOR_ID_MIN_EXCITATION) {
+                excitation = three;
+                rs = x[0];
+                l = x[1];
+                vdt = x[2];
+                dead_time = true;
+            }
+        }
     }
     if (!isfinite(excitation)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
@@ -194,7 +252,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     if (excitation < FOC_MOTOR_ID_MIN_EXCITATION) {
         return FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE;
     }
-    if (!isfinite(rs) || !isfinite(l) || !isfinite(ke)) {
+    if (!isfinite(rs) || !isfinite(l) || !isfinite(ke) || !isfinite(vdt)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
     if (rs < config->min_rs_ohm || rs > config->max_rs_ohm || l < config->min_inductance_h ||
@@ -209,10 +267,11 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     }
     /* Evaluate the published Float32 values, allowing for accumulated roundoff
      * in the residual so an unresolved near-zero value cannot pass a tighter limit.
-     * Without motion the ke terms are exact zeros and the sums are unchanged. */
+     * Without motion or dead time those terms are exact zeros and the sums are unchanged. */
     const float published_rs = (float)rs;
     const float published_l = (float)l;
     const float published_ke = (float)ke;
+    const float published_vdt = (float)vdt;
     const double r_iv = 2.0 * published_rs * context->i_v;
     const double l_sv = 2.0 * published_l * context->slew_v;
     const double rr = (double)published_rs * published_rs * context->i2;
@@ -222,9 +281,14 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     const double kk = (double)published_ke * published_ke * context->m2;
     const double rk = 2.0 * published_rs * published_ke * context->i_m;
     const double lk = 2.0 * published_l * published_ke * context->slew_m;
-    const double residual2 = context->v2 - r_iv - l_sv + rr + ll + rl - k_mv + kk + rk + lk;
+    const double d_uv = 2.0 * published_vdt * context->u_v;
+    const double dd = (double)published_vdt * published_vdt * context->u2;
+    const double rd = 2.0 * published_rs * published_vdt * context->i_u;
+    const double ld = 2.0 * published_l * published_vdt * context->slew_u;
+    const double residual2 =
+        context->v2 - r_iv - l_sv + rr + ll + rl - k_mv + kk + rk + lk - d_uv + dd + rd + ld;
     const double scale = context->v2 + fabs(r_iv) + fabs(l_sv) + rr + ll + fabs(rl) + fabs(k_mv) +
-        kk + fabs(rk) + fabs(lk);
+        kk + fabs(rk) + fabs(lk) + fabs(d_uv) + dd + fabs(rd) + fabs(ld);
     const double roundoff = (8.0 * count + 64.0) * DBL_EPSILON * scale;
     if (!isfinite(residual2) || !isfinite(roundoff) || residual2 < -roundoff) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
@@ -239,6 +303,8 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     result->back_emf_v_s_per_rad = published_ke;
     result->back_emf_fitted = motion;
     result->rs_fixed = rs_fixed;
+    result->dead_time_v = published_vdt;
+    result->dead_time_fitted = dead_time;
     return FOC_CALIBRATION_FAILURE_NONE;
 }
 
@@ -307,6 +373,7 @@ int foc_motor_id_push(
     if (!sample->current_valid || !isfinite(sample->current_a) ||
         !isfinite(sample->omega_e_rad_s) ||
         (config->fit_back_emf && !isfinite(sample->rotor_angle_rad)) ||
+        (config->fit_dead_time && has_interval && !isfinite(sample->dead_time_basis)) ||
         (has_interval && (!sample->voltage_valid || !isfinite(sample->mean_voltage_v)))) {
         return foc_motor_id_invalidate(
             context,
@@ -358,6 +425,7 @@ int foc_motor_id_push(
         context->current_as +=
             0.5 * ((double)context->previous_current_a + sample->current_a) * elapsed_s;
         context->voltage_vs += (double)sample->mean_voltage_v * elapsed_s;
+        context->dead_time_s += (double)sample->dead_time_basis * elapsed_s;
         context->window_us += elapsed_us;
         context->intervals++;
         if (context->intervals == config->intervals_per_window &&

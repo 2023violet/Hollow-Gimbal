@@ -56,6 +56,7 @@ PARAMETERS = {
     "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
     "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
     "coast-status": 91, "coast-flux": 92, "coast-angle-error": 93, "driven-flux": 94,
+    "dead-time-v": 95,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
@@ -918,7 +919,8 @@ def run_virtual_demo(
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
-                 "trajectory", "inertia", "rotor-range", "driver-fault", "coast")
+                 "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
+                 "dead-time")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2367,9 +2369,10 @@ def run_sil_coast(simulator, base_arguments, json_path=None):
     run = metrics["ideal"] = calibrate([])
     checks["ideal_coast_used"] = used(run) and abs(run["driven-flux"] / flux - 1.0) < 0.01
 
-    # 2. A 0.08 V dead-time error per phase biases the driven CAL-4 flux, not the coast one.
+    # 2. A 0.08 V dead-time error per phase: the coast EMF does not see it, and CAL-4 now
+    # takes out the dead time CAL-3 identified (it read +15 % before, section 23).
     run = metrics["dead_time"] = calibrate(["--dead-time-v", "0.08"])
-    checks["dead_time_driven_biased"] = run["driven-flux"] / flux - 1.0 > 0.1
+    checks["dead_time_driven_corrected"] = abs(run["driven-flux"] / flux - 1.0) < 0.02
     checks["dead_time_coast_used"] = used(run)
 
     # 3. A commutation offset 0.1 rad off: the coast EMF reports the angle error.
@@ -2383,6 +2386,75 @@ def run_sil_coast(simulator, base_arguments, json_path=None):
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-coast",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_dead_time(simulator, base_arguments, json_path=None):
+    """Inverter dead-time error in CAL-3 (parameter contract section 23): each phase loses
+    Vdt x sign(i). CAL-3 fits Vdt on the still d axis next to R and L against the phase-current
+    sign vector, then takes it out of the q-axis and CAL-4 voltages, so Rs, the flux and the
+    J derived from it stay unbiased; ID 95 reports Vdt. Nothing here is physical evidence."""
+
+    checks, metrics = {}, {}
+    truth = {"rs": 0.6, "ld": 0.0012, "lq": 0.0015, "flux": 0.01, "inertia": 0.002}
+
+    def calibrate(arguments, stages):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        commissioned = commission(client)
+        _wait_still(session)
+        started = session.call("calibrate", bytes([stages]))["result"]
+        view = None
+        for _ in range(800000):
+            view = session.call("calibrate-read", quiet=True)
+            if view["calibration_state"] in ("DONE", "FAILED"):
+                break
+        values = {name: session.read(name) for name in (
+            "model-rs", "model-ld", "model-lq", "driven-flux", "model-inertia", "dead-time-v")}
+        transport.__exit__()
+        errors = {"rs": values["model-rs"] / truth["rs"] - 1.0,
+                  "ld": values["model-ld"] / truth["ld"] - 1.0,
+                  "lq": values["model-lq"] / truth["lq"] - 1.0,
+                  "flux": values["driven-flux"] / truth["flux"] - 1.0}
+        if stages & CAL_STAGES["mechanical"]:
+            errors["inertia"] = values["model-inertia"] / truth["inertia"] - 1.0
+        return {"commissioned": commissioned, "started": started,
+                "state": view["calibration_state"], "dead_time_v": values["dead-time-v"],
+                "relative_error": errors}
+
+    def identified(run):
+        errors = run["relative_error"]
+        return (run["started"] == "ACCEPTED" and run["state"] == "DONE"
+                and abs(errors["rs"]) < 0.03 and abs(errors["ld"]) < 0.05
+                and abs(errors["lq"]) < 0.05 and abs(errors["flux"]) < 0.02)
+
+    # 1. Ideal inverter: no dead time is found, nothing changes.
+    run = metrics["ideal"] = calibrate([], CAL_STAGES["electrical"])
+    checks["ideal_unchanged"] = identified(run) and abs(run["dead_time_v"]) < 0.005
+
+    # 2. 0.08 V per phase: Vdt identified, Rs and the CAL-4 flux unbiased (were +28 %, +15 %).
+    run = metrics["dead_time"] = calibrate(["--dead-time-v", "0.08"], CAL_STAGES["electrical"])
+    checks["dead_time_identified"] = identified(run) and abs(run["dead_time_v"] / 0.08 - 1.0) < 0.15
+
+    # 3. With CAL-7: J follows the corrected flux.
+    run = metrics["dead_time_inertia"] = calibrate(["--dead-time-v", "0.08"],
+                                                   CAL_STAGES["electrical-mechanical"])
+    checks["dead_time_inertia"] = (identified(run)
+                                   and abs(run["relative_error"]["inertia"]) < 0.1)
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-dead-time",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -3117,6 +3189,10 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "dead-time":
+                summary = run_sil_dead_time(os.path.abspath(args.simulator),
+                                            simulator_arguments, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "coast":
                 summary = run_sil_coast(os.path.abspath(args.simulator), simulator_arguments,
                                         args.json)

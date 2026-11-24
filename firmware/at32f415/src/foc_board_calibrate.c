@@ -75,6 +75,9 @@
 /* Below this window-mean speed RMS the q shaft is still: the two-term fit is published. */
 #define CAL_RL_MOTION_RAD_S         0.05f
 #define CAL_FLUX_SETTLE_US          400000U
+/* Dead time: each phase loses Vdt x sign(i_x); the sign is a clamp(i_x / 30 mA) so the basis
+ * stays continuous through zero (SIL: Rs within 5 % for a true knee 0.6x-1.7x of this). */
+#define CAL_DEAD_TIME_KNEE_A        0.03f
 /* A level is captured once its speed has the level's sign and is within 5 % of steady: a
  * heavy rotor (tau = J Rs / (ke Kt)) takes seconds, and after a reversal it still turns the
  * old way. Every 100 ms the mean speed of the interval is taken from the encoder angle and
@@ -541,6 +544,49 @@ static float cal_mean(float older, float newer)
     return (1.0f - CAL_PRELOAD_NEW) * older + CAL_PRELOAD_NEW * newer;
 }
 
+/* Dead-time basis of one record: the phase-current sign vector (clamped through zero) in the
+ * record's d/q frame, amplitude-invariant like the voltages. */
+static struct foc_vector_dq cal_dead_time_basis(
+    const struct foc_board_calibration *cal,
+    const struct foc_board_cal_record *record
+)
+{
+    struct foc_electrical_state electrical;
+    if (foc_rotor_electrical(
+            &cal->runtime->config.motion.rotor,
+            record->mechanical_rad,
+            0.0f,
+            &electrical
+        ) != FOC_STATUS_OK) {
+        return (struct foc_vector_dq){0};
+    }
+    const float c = cosf(electrical.angle_rad);
+    const float s = sinf(electrical.angle_rad);
+    const float alpha = c * record->current_a.d - s * record->current_a.q;
+    const float beta = s * record->current_a.d + c * record->current_a.q;
+    const float phase[3] = {
+        alpha,
+        -0.5f * alpha + 0.8660254f * beta,
+        -0.5f * alpha - 0.8660254f * beta,
+    };
+    float sign[3];
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        sign[index] = fmaxf(-1.0f, fminf(1.0f, phase[index] / CAL_DEAD_TIME_KNEE_A));
+    }
+    const float sign_alpha = (2.0f * sign[0] - sign[1] - sign[2]) / 3.0f;
+    const float sign_beta = (sign[1] - sign[2]) * 0.57735027f;
+    return (struct foc_vector_dq){
+        .d = c * sign_alpha + s * sign_beta,
+        .q = c * sign_beta - s * sign_alpha,
+    };
+}
+
+/* Vdt from this run's CAL-3 d-axis fit, else zero. */
+static float cal_dead_time_v(const struct foc_board_calibration *cal)
+{
+    return cal->rl_d.dead_time_fitted ? cal->rl_d.dead_time_v : 0.0f;
+}
+
 /* Begin a capture: clear the recorder history; the ring keeps running. */
 static void cal_capture_begin(struct foc_board_calibration *cal)
 {
@@ -579,6 +625,8 @@ static bool cal_rl_begin(struct foc_board_calibration *cal, enum foc_motor_id_ax
         /* q: the pulses turn a light shaft (speed ~ Kt i t / J); the back-EMF is fitted
          * from the position change, so no inertia is too small. Up to the speed limit. */
         .fit_back_emf = axis == FOC_MOTOR_ID_Q,
+        /* d: the still axis also fits the dead-time voltage; q subtracts it (cal_record). */
+        .fit_dead_time = axis == FOC_MOTOR_ID_D,
         .max_abs_speed_rad_s = cal->runtime->config.motion.position.velocity_limit_rad_s,
         .min_speed_rms_rad_s = CAL_RL_MOTION_RAD_S,
         /* The d-axis Rs: a turning q fit takes R from the still axis, fits L and ke. */
@@ -694,7 +742,13 @@ cal_record_estimate(struct foc_board_calibration *cal, const struct foc_board_ca
     const bool confirmed = older->accepted && begin->accepted && record->accepted;
     const float limit = cal_voltage_limit(cal);
     const float vd = cal_mean(older->voltage_v.d, begin->voltage_v.d);
-    const float vq = cal_mean(older->voltage_v.q, begin->voltage_v.q);
+    /* Interval dead-time basis; q and CAL-4 take out the d-fitted Vdt from the voltage. */
+    const struct foc_vector_dq basis_begin = cal_dead_time_basis(cal, begin);
+    const struct foc_vector_dq basis_end = cal_dead_time_basis(cal, record);
+    const float basis_d = 0.5f * (basis_begin.d + basis_end.d);
+    const float basis_q = 0.5f * (basis_begin.q + basis_end.q);
+    const float vq =
+        cal_mean(older->voltage_v.q, begin->voltage_v.q) - cal_dead_time_v(cal) * basis_q;
     const bool saturated = hypotf(begin->voltage_v.d, begin->voltage_v.q) >= 0.98f * limit;
     bool ok = true;
     if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
@@ -714,6 +768,7 @@ cal_record_estimate(struct foc_board_calibration *cal, const struct foc_board_ca
             .mean_voltage_v = d_axis ? vd : vq,
             .omega_e_rad_s = 0.0f,
             .rotor_angle_rad = record->mechanical_rad,
+            .dead_time_basis = basis_d,
             .current_valid = true,
             .voltage_valid = true,
             .output_confirmed = confirmed,
@@ -872,7 +927,6 @@ cal_coast_begin(struct foc_board_calibration *cal, const struct foc_runtime_snap
     cal->coast_last_us = cal->state_us;
     cal->coast_points_count = 0U;
     cal->coast_start_speed = fabsf(view->mechanical_rad_s);
-    cal->driven_flux_wb = (float)cal->flux_result.flux_wb;
 }
 
 /* Line-to-line voltage of logical phases x and y for a unit EMF on the given axis. */
@@ -1273,6 +1327,7 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_FLUX, now_us);
             return;
         }
+        cal->driven_flux_wb = (float)cal->flux_result.flux_wb;
         if ((cal->stages & FOC_BOARD_CAL_STAGE_MECHANICAL) != 0U) {
             /* The drive keeps running: CAL-7 starts from this level's speed. */
             if (!cal_inertia_begin(cal)) {
@@ -2042,6 +2097,7 @@ static bool cal_serial_commission(const void *context, struct foc_serial_commiss
             : cal->zero_refused       ? FOC_BOARD_CAL_ZERO_REFUSED
                                       : FOC_BOARD_CAL_ZERO_PENDING,
         .coast_status = cal->coast_status,
+        .dead_time_v = cal_dead_time_v(cal),
         .coast_flux_wb = cal->coast_flux_wb,
         .coast_angle_error_rad = cal->coast_angle_error_rad,
         .driven_flux_wb = cal->driven_flux_wb,

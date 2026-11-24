@@ -223,6 +223,13 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_coast(SIL, ["--lockstep-us", "500"])
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_dead_time_identified_in_cal3(self):
+        """CAL-3 identifies the inverter dead-time voltage and keeps Rs, the CAL-4 flux and
+        the derived J unbiased; an ideal inverter reads none."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_dead_time(SIL, ["--lockstep-us", "500"])
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

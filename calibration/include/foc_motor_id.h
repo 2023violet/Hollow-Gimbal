@@ -9,7 +9,8 @@
  * Identify one axis from window-integrated standstill voltage and current.
  * On the q axis the caller may let the shaft turn: the window integral of the
  * back-EMF is ke x the rotor angle change, fitted as a third term, or with a
- * supplied d-axis R in place of the free one.
+ * supplied d-axis R in place of the free one. A standstill capture may also fit
+ * the inverter dead-time voltage against a caller-supplied basis.
  * Build a two-axis model and design PI candidates for explicit caller review.
  *
  * Usage example
@@ -126,6 +127,13 @@ struct foc_motor_id_config {
      * free R separates poorly from L. Zero fits all three terms.
      */
     float known_rs_ohm;
+    /**
+     * Standstill only (not with fit_back_emf): also fit the inverter dead-time voltage Vdt
+     * against each interval's dead_time_basis, the mean of the frame's phase-current sign
+     * vector on this axis. Falls back to the two-term fit (dead_time_fitted false) when the
+     * three columns are not independent enough. Appended field.
+     */
+    bool fit_dead_time;
 };
 
 /**
@@ -151,6 +159,8 @@ struct foc_motor_id_sample {
     float omega_e_rad_s;
     /** Continuous mechanical rotor angle at capture in rad. Used with fit_back_emf. */
     float rotor_angle_rad;
+    /** Interval mean of the dead-time basis on this axis (about -1.2 to 1.2). fit_dead_time. */
+    float dead_time_basis;
     bool current_valid;
     bool voltage_valid;
     /** Acquisition evidence that output took effect over the entire interval. */
@@ -195,6 +205,10 @@ struct foc_motor_id_result {
     bool back_emf_fitted;
     /** True when rs_ohm is the supplied known_rs_ohm and only L and ke were fitted. */
     bool rs_fixed;
+    /** Fitted dead-time voltage in V per unit basis; zero unless dead_time_fitted. */
+    float dead_time_v;
+    /** True when the three-term standstill fit with the dead-time column was published. */
+    bool dead_time_fitted;
 };
 
 /** Caller-owned storage. The sums describe window-average regressors. */
@@ -219,6 +233,12 @@ struct foc_motor_id_context {
     double slew_m;
     double m_v;
     float first_angle_rad;
+    /* Window-mean dead-time regressor, fit_dead_time only. */
+    double dead_time_s;
+    double u2;
+    double i_u;
+    double slew_u;
+    double u_v;
 };
 
 /** Model values in the same electrical coordinate and units as Current Core. */

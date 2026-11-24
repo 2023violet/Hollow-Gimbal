@@ -99,6 +99,15 @@ excitation). `back_emf_v_s_per_rad` (pole pairs x flux) is a diagnostic.
 The angle must be the angle at the current's aperture: an angle older by d
 adds ke*Kt*d/J to the fitted R.
 
+A standstill capture may also fit the inverter dead-time voltage
+(`fit_dead_time`, not with `fit_back_emf`): each phase loses Vdt*sign(i_x),
+so the caller supplies per interval the mean of the phase-current sign vector
+in the capture's d/q frame (`dead_time_basis`), a fourth window column next to
+mean(i) and delta(i)/T. R, L and Vdt (`dead_time_v`) are fitted together; when
+the three columns are not independent enough the two-term fit is published
+(`dead_time_fitted` false). A zero basis leaves the two-term result bit for bit.
+Without it the loss reads as resistance (SIL: +28 % at 0.08 V).
+
 The model is the zero-speed reduction of the PMSM d/q equations. Correct
 voltage/current scaling, electrical alignment, sufficient excitation and
 sampling resolution are acquisition requirements. Assert the common, fixed

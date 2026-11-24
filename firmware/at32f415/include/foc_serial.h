@@ -129,6 +129,8 @@ struct foc_serial_commission_view {
     float coast_flux_wb;
     float coast_angle_error_rad;
     float driven_flux_wb;
+    /** CAL-3 inverter dead-time voltage of the latest run (ID 95), zero if not identified. */
+    float dead_time_v;
 };
 
 struct foc_serial_calibration {

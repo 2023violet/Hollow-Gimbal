@@ -420,6 +420,11 @@ electrical angle error. A usable fit replaces CAL-4's flux. Read-only results of
 the latest run: ID 91 u32 status (0 not run, 1 used, 2 too few samples, 3
 inconsistent), ID 92 f32 coast flux Wb, ID 93 f32 angle error rad (firmware angle
 minus true), ID 94 f32 the driven CAL-4 flux Wb. The check never fails a run.
+
+CAL-3 also identifies the inverter dead-time voltage on the still d axis (each
+phase loses Vdt × sign(i), with the sign clamped linearly within ±30 mA) and takes
+it out of the q-axis and CAL-4 voltages. ID 95 f32 reads Vdt of the latest run in
+V (zero when not identified). The running controller does not compensate it yet.
 CAL-4 also ends TIMEOUT when a speed level is not steady in its direction within
 10 s (SIL: J above about 0.05 kg·m² for the 0.105 N·m/A plant).
 

@@ -583,11 +583,118 @@ static int test_back_emf(void)
     return 0;
 }
 
+/* A d-axis standstill capture with the CAL-3 level train through an inverter that loses
+ * 0.08 V x tanh(i_x / 20 mA) on each phase (rotor at electrical zero: i_a = i, i_b = i_c =
+ * -i / 2). The basis is the caller's: the d component of clamp(i_x / 50 mA). */
+static double dead_time_basis_d(double current)
+{
+    const double a = fmax(-1.0, fmin(1.0, current / 0.05));
+    const double b = fmax(-1.0, fmin(1.0, -0.5 * current / 0.05));
+    return (2.0 / 3.0) * (a - b);
+}
+
+static int collect_dead_time(struct foc_motor_id_context *context, bool basis)
+{
+    static const float levels[8] = {1.0f, 1.0f, -0.75f, -0.75f, 0.33f, -1.0f, 0.65f, -0.26f};
+    const double rs = 0.6;
+    const double l = 0.0012;
+    const double vdt = 0.08;
+    double current = 0.0;
+    double previous_basis = 0.0;
+    /* CAL-3 timing: 200 us intervals, 24 per level, 768 in all. */
+    for (unsigned int k = 0U; k <= 768U; ++k) {
+        const float voltage = k == 0U ? 0.0f : 0.5f * levels[((k - 1U) / 24U) % 8U];
+        for (unsigned int step = 0U; k != 0U && step < 200U; ++step) {
+            const double loss =
+                (2.0 / 3.0) * vdt * (tanh(current / 0.02) - tanh(-0.5 * current / 0.02));
+            current += (voltage - loss - rs * current) / l * 1.0e-6;
+        }
+        const double now_basis = dead_time_basis_d(current);
+        struct foc_motor_id_sample sample = {
+            .setup_id = context->config.setup_id,
+            .capture_id = context->result.capture_id,
+            .source = context->config.source,
+            .sequence = k,
+            .captured_us = 200U * k,
+            .voltage_begin_us = k == 0U ? 0U : 200U * (k - 1U),
+            .voltage_end_us = 200U * k,
+            .voltage_source = context->config.voltage_source,
+            .output_confirmed = true,
+            .frame_confirmed = true,
+            .current_valid = true,
+            .voltage_valid = true,
+            .stationary_confirmed = true,
+        };
+        sample.current_a = (float)current;
+        sample.mean_voltage_v = voltage;
+        sample.dead_time_basis = basis ? (float)(0.5 * (previous_basis + now_basis)) : 0.0f;
+        previous_basis = now_basis;
+        const int status = foc_motor_id_push(context, &sample);
+        if (status != FOC_MOTOR_ID_OK) {
+            return status;
+        }
+    }
+    return FOC_MOTOR_ID_OK;
+}
+
+static int test_dead_time(void)
+{
+    struct foc_motor_id_config standstill = config;
+    standstill.min_interval_us = 200U;
+    standstill.max_interval_us = 200U;
+    standstill.intervals_per_window = 8U;
+    standstill.min_windows = 32U;
+    standstill.max_residual_rms_v = 1.0f;
+    struct foc_motor_id_config fitted = standstill;
+    fitted.fit_dead_time = true;
+    struct foc_motor_id_context context = {0};
+    struct foc_motor_id_result result;
+
+    /* Without the dead-time column the loss reads as resistance. */
+    CHECK(foc_motor_id_init(&context, &standstill, 41U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_dead_time(&context, true) == FOC_MOTOR_ID_OK);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && !result.dead_time_fitted);
+    CHECK(result.rs_ohm / 0.6f - 1.0f > 0.1f);
+
+    /* With it, R and Vdt separate. The basis knee (50 mA clamp) differs on purpose from the
+     * plant's 20 mA tanh: the mismatch costs a few percent, against +29 % without. */
+    CHECK(foc_motor_id_init(&context, &fitted, 42U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_dead_time(&context, true) == FOC_MOTOR_ID_OK);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && result.dead_time_fitted);
+    CHECK(fabsf(result.rs_ohm / 0.6f - 1.0f) < 0.06f);
+    CHECK(fabsf(result.inductance_h / 0.0012f - 1.0f) < 0.02f);
+    CHECK(fabsf(result.dead_time_v / 0.08f - 1.0f) < 0.15f);
+    CHECK(result.excitation >= 0.02);
+
+    /* A zero basis leaves the two-term fit, bit for bit. */
+    struct foc_motor_id_result reference;
+    struct foc_motor_id_config plain = config;
+    plain.fit_dead_time = true;
+    CHECK(foc_motor_id_init(&context, &config, 43U) == FOC_MOTOR_ID_OK);
+    CHECK(collect(&context, 0.6f, 0.0012f, false) == 0);
+    CHECK(foc_motor_id_finish(&context, &reference) == FOC_MOTOR_ID_OK);
+    CHECK(foc_motor_id_init(&context, &plain, 44U) == FOC_MOTOR_ID_OK);
+    CHECK(collect(&context, 0.6f, 0.0012f, false) == 0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && !result.dead_time_fitted);
+    CHECK(
+        result.rs_ohm == reference.rs_ohm && result.inductance_h == reference.inductance_h &&
+        result.residual_rms_v == reference.residual_rms_v && result.dead_time_v == 0.0f
+    );
+
+    /* Not together with the turning q-axis fit. */
+    struct foc_motor_id_config bad = fitted;
+    bad.axis = FOC_MOTOR_ID_Q;
+    bad.fit_back_emf = true;
+    bad.max_abs_speed_rad_s = 50.0f;
+    CHECK(foc_motor_id_init(&context, &bad, 45U) == FOC_MOTOR_ID_ERR_CONFIG);
+    return 0;
+}
+
 int main(void)
 {
     return test_observation_contract() || test_voltage_policy() || test_fit() ||
         test_acquisition_resolution() || test_invalid_samples() || test_fit_rejection() ||
-        test_pi() || test_commanded_voltage_policy() || test_back_emf();
+        test_pi() || test_commanded_voltage_policy() || test_back_emf() || test_dead_time();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

@@ -446,6 +446,13 @@ static void foc_at32_board_pins_init(void)
     gpio_init(GPIOB, &pins);
 }
 
+/* DRV8311 nFAULT (PB2, open drain with the board pull-up): asserted when low. */
+static bool foc_at32_nfault_asserted(void *argument)
+{
+    (void)argument;
+    return gpio_input_data_bit_read(GPIOB, GPIO_PINS_2) == RESET;
+}
+
 /* PLL from the board's 8 MHz crystal: 8 MHz x 75 / 4 = 150 MHz. If the crystal does not
  * start, HICK / 2 (4 MHz x 150 / 4) gives the same 150 MHz so the board still boots and
  * answers on USART1; clock_from_crystal records which source runs. */
@@ -669,6 +676,7 @@ int main(void)
     foc_at32_lock_output();
     foc_at32_board_pins_init();
     if (foc_at32_clock_init() && foc_at32_boot() && foc_at32_adc_init()) {
+        adc.driver_fault_line = foc_at32_nfault_asserted;
         foc_at32_spi_init();
         foc_at32_timers_init();
         foc_serial_init(&serial, &runtime);

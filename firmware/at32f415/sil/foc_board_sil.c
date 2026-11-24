@@ -135,6 +135,9 @@ struct sil_device {
     /* Optional phase-rank noise in counts rms (deterministic xorshift32). */
     double adc_noise_counts;
     uint32_t noise_state;
+    /* Fault injection: the DRV8311 nFAULT line is low in [driver_fault_on_us, _off_us). */
+    uint32_t driver_fault_on_us;
+    uint32_t driver_fault_off_us;
     /* Fault injection: from adc_step_us on, add adc_step_counts to the first current rank. */
     uint32_t adc_step_us;
     double adc_step_counts;
@@ -512,6 +515,14 @@ static void sil_report(struct sil_device *device)
     );
 }
 
+/* main.c foc_at32_nfault_asserted(): the injected nFAULT window on virtual time. */
+static bool sil_driver_fault_line(void *argument)
+{
+    const struct sil_device *device = argument;
+    return device->now_us >= device->driver_fault_on_us &&
+        device->now_us < device->driver_fault_off_us;
+}
+
 /* main.c foreground loop body. */
 static void sil_foreground(struct sil_device *device)
 {
@@ -670,7 +681,7 @@ static void sil_usage(const char *name)
         "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
-        "          [--load-torque-nm t[,on_us]]\n",
+        "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n",
         name
     );
 }
@@ -819,6 +830,12 @@ int main(int argc, char **argv)
             motor.inertia_kg_m2 = strtod(value, NULL);
         } else if (strcmp(option, "--motor-damping") == 0) {
             motor.damping_nm_s = strtod(value, NULL);
+        } else if (strcmp(option, "--driver-fault-us") == 0) {
+            /* DRV8311 nFAULT held low from on_us until off_us (default: never released). */
+            char *rest = NULL;
+            device.driver_fault_on_us = (uint32_t)strtoul(value, &rest, 0);
+            device.driver_fault_off_us =
+                rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, NULL, 0) : UINT32_MAX;
         } else if (strcmp(option, "--load-torque-nm") == 0) {
             /* Constant external load torque at the rotor, opposing positive motor torque,
              * applied from plant time on_us (default 0). */
@@ -883,6 +900,10 @@ int main(int argc, char **argv)
     }
     foc_serial_init_with_policy(&device.serial, &device.runtime, FOC_SERIAL_TARGET_VIRTUAL_ONLY);
     foc_serial_attach_boot(&device.serial, foc_board_boot_serial_readback, &device.boot);
+    if (device.driver_fault_on_us != 0U) {
+        device.adc.driver_fault_line = sil_driver_fault_line;
+        device.adc.driver_fault_argument = &device;
+    }
     /* Single-threaded SIL: no producer runs while the manager reconfigures. */
     foc_board_calibration_bind(
         &device.calibration,

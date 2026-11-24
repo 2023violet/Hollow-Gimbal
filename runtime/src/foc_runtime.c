@@ -405,11 +405,14 @@ static bool foc_runtime_admit_update(void *argument)
     return !admission->following_denied;
 }
 
-/* FAULT_CLEAR recovers command timeout and motor protection only, never other causes. */
+/* FAULT_CLEAR recovers command timeout, motor protection and a recovered gate driver only,
+ * never other causes. */
 static bool foc_runtime_clearable_faults(uint32_t faults)
 {
     return faults != FOC_SAFE_FAULT_NONE &&
-        (faults & ~(FOC_SAFE_FAULT_COMMAND_TIMEOUT | FOC_SAFE_FAULT_PROTECTION_MASK)) == 0U;
+        (faults &
+         ~(FOC_SAFE_FAULT_COMMAND_TIMEOUT | FOC_SAFE_FAULT_PROTECTION_MASK |
+           FOC_SAFE_FAULT_DRIVER)) == 0U;
 }
 
 static bool foc_runtime_timeout_clear_ready(
@@ -448,7 +451,7 @@ static bool foc_runtime_timeout_clear_ready(
         (!voltage ||
          (measurement.core.vbus_v >= runtime->protect.undervoltage_v &&
           measurement.core.vbus_v <= runtime->protect.overvoltage_v)) &&
-        sensor != FOC_RUNTIME_UNPUBLISHED &&
+        !input->driver_fault && sensor != FOC_RUNTIME_UNPUBLISHED &&
         isfinite(foc_runtime_align_angle(runtime, &runtime->sensor_slots[sensor], input));
 }
 
@@ -2219,6 +2222,13 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
     if (input == NULL) {
         foc_runtime_request_inhibit(runtime, 0U);
         return FOC_RUNTIME_ERR_INPUT;
+    }
+    if (input->driver_fault &&
+        (runtime->pipeline.safety.latched_faults & FOC_SAFE_FAULT_DRIVER) == 0U) {
+        /* The driver has already disabled its bridge; latch so its automatic retry
+         * cannot resume output. Drained below in this same cycle. Once latched, H0 keeps
+         * its ordinary cycle (and heartbeat) while the line stays low. */
+        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_DRIVER);
     }
     const int schedule =
         foc_runtime_schedule(&runtime->h0, &runtime->config.h0, input->now_us, input->cost_us);

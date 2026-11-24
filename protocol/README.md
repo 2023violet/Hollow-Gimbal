@@ -135,11 +135,11 @@ command-observed set establishes H0 command observation. Fault and pipeline
 results describe subsequent admission. Physical applied remains false.
 
 STOP revokes the reference before asking H0 to acknowledge INHIBIT. FAULT_CLEAR
-requests recovery of a latch that holds only COMMAND_TIMEOUT and motor-protection
-causes (bits 9–15, below). H0 rechecks the fault mask, fresh ADC/angle data,
+requests recovery of a latch that holds only COMMAND_TIMEOUT, motor-protection
+causes (bits 9–15, below) and DRIVER_FAULT (bit 16). H0 rechecks the fault mask, fresh ADC/angle data,
 Foreground progress, request age and software inhibition, and for OVER_VOLTAGE or
-UNDER_VOLTAGE a fresh bus voltage back inside IDs 114–113, before invoking its
-existing clear operation. The clear result is queryable. Other fault masks return
+UNDER_VOLTAGE a fresh bus voltage back inside IDs 114–113, and for DRIVER_FAULT the
+nFAULT line released, before invoking its existing clear operation. The clear result is queryable. Other fault masks return
 BAD_STATE. Recovery ends in DISABLED with old command and sample validity cleared
 and the protection snapshot cleared.
 
@@ -148,7 +148,15 @@ and the protection snapshot cleared.
 Fault bits: COMMAND_TIMEOUT 0, SAMPLE_TIMEOUT 1, SAMPLE_INVALID 2, FAST_HEARTBEAT 3,
 FOREGROUND_HEARTBEAT 4, INVALID_STATE 5, WDT 6, FLASH 7, FATAL_RESET_REQUIRED 8,
 and the motor-protection causes OVER_CURRENT 9, OVER_VOLTAGE 10, UNDER_VOLTAGE 11,
-OVER_SPEED 12, SUSTAINED_CURRENT 13, STALL 14, TRACKING_DIVERGENCE 15.
+OVER_SPEED 12, SUSTAINED_CURRENT 13, STALL 14, TRACKING_DIVERGENCE 15, and the gate
+driver cause DRIVER_FAULT 16.
+
+DRIVER_FAULT: the Board reads the DRV8311 nFAULT line (PB2) once per H0 cycle; two
+samples in a row with the line low latch DRIVER_FAULT with INHIBIT in any state,
+including DISABLED and calibration. The DRV8311H disables its bridge itself on
+over-current, supply under-voltage or thermal shutdown and retries after 5 ms; the
+latch keeps the output inhibited until FAULT_CLEAR after the line is released. It
+carries no FAULT_SNAPSHOT_READ record.
 
 H0 evaluates the rules after every accepted running cycle and latches a trip with
 INHIBIT (at most one 200 µs cycle late; the DRV8311 over-current protection is the

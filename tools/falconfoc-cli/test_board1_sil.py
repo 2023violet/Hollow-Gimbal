@@ -209,6 +209,13 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_rotor_range(SIL, ["--lockstep-us", "500"])
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_driver_fault_latch_and_recovery(self):
+        """A low DRV8311 nFAULT latches DRIVER_FAULT and inhibits; FAULT_CLEAR is refused
+        while it stays low and recovers after release; a one-sample glitch is ignored."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_driver_fault(SIL, ["--lockstep-us", "500"])
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

@@ -670,3 +670,11 @@ Board1 编码器是单圈绝对式，上电时电机位置从单圈角度 [0, 2�
 - 能完成的最大惯量取决于 τ：SIL 电机（Kt 0.105 N·m/A、0.6 Ω）约 0.05 kg·m²。更重的负载需要在 CAL-4 前卸载，或把电机参数手填。
 - 实板速度来自 14 位编码器，100 ms 平均的分辨率约 0.004 rad/s；噪声对稳定判据的影响要上台架验证。
 - 资源：默认镜像 text 90,744 B（+400 B），bss 14,368 B（+32 B）。
+
+## 21. 驱动器故障锁存（NFAULT，故障位 16）
+
+- DRV8311H（硬件版本）在过流（5 A，MODE 47 kΩ）、VIN_AVDD/AVDD/电荷泵欠压和过温关断时把桥臂置高阻、拉低 nFAULT，5 ms 后自动重试；nSLEEP 硬接上拉，固件无法关断驱动器，所以由 MCU 锁存，防止持续短路时每 5 ms 冲击一次。VM 欠压不报告到 nFAULT，过温预警默认不报告。
+- 板级 H0 每周期读一次 PB2（`foc_board_adc.driver_fault_line`，ARM 读 GPIO，SIL 用虚拟线），连续 2 次为低时 Runtime 输入 `driver_fault` 为真；H0 在本周期请求 INHIBIT 并锁存 DRIVER_FAULT（任何状态）。已锁存后不再重复请求，H0 照常运行，心跳不受影响。
+- FAULT_CLEAR：DRIVER_FAULT 加入可清除集合，条件同其他保护故障，另需 nFAULT 已释放；仍为低时清除被拒绝（clear_result REJECTED）。
+- SIL `driver-fault` 场景：运行中 nFAULT 拉低 → 只锁存 DRIVER_FAULT；仍为低时清除被拒绝；释放后清除生效并可重新运行；100 µs 毛刺（最多 1 次采样）不锁存。
+- 局限：走停机请求通路，不产生 FAULT_SNAPSHOT_READ 快照；实板 nFAULT 波形与毛刺需上台架确认。资源：默认镜像 text 91,028 B（+148 B），bss 14,376 B（+8 B）。

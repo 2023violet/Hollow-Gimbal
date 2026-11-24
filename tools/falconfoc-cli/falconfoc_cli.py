@@ -62,11 +62,12 @@ PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-i
                       "gear-ratio", "current-bandwidth", "current-kp-q", "current-ki-q",
                       "current-limit", "velocity-limit", "trip-sustained-ms")
 PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32"}
-# Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection.
+# Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection, 16 the
+# gate driver nFAULT line.
 FAULT_BITS = ["COMMAND_TIMEOUT", "SAMPLE_TIMEOUT", "SAMPLE_INVALID", "FAST_HEARTBEAT",
               "FOREGROUND_HEARTBEAT", "INVALID_STATE", "WDT", "FLASH", "FATAL_RESET_REQUIRED",
               "OVER_CURRENT", "OVER_VOLTAGE", "UNDER_VOLTAGE", "OVER_SPEED",
-              "SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE"]
+              "SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE", "DRIVER_FAULT"]
 
 
 def fault_names(mask):
@@ -914,7 +915,7 @@ def run_virtual_demo(
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
-                 "trajectory", "inertia", "rotor-range")
+                 "trajectory", "inertia", "rotor-range", "driver-fault")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2212,6 +2213,106 @@ def run_sil_rotor_range(simulator, base_arguments, json_path=None):
     return summary
 
 
+def run_sil_driver_fault(simulator, base_arguments, json_path=None):
+    """DRV8311 nFAULT (PB2): two H0 samples in a row with the line low latch DRIVER_FAULT
+    (bit 16) and inhibit the output, also while the driver would retry on its own;
+    FAULT_CLEAR is refused while the line is low and recovers once it is released. A
+    one-sample glitch does not latch. Nothing here is physical evidence."""
+
+    checks, metrics = {}, {}
+    on_us, off_us = 1500000, 3000000
+
+    def boot(arguments):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        assert commission(client) == "APPLIED"
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        return transport, session
+
+    def wait_until(session, uptime_us):
+        status = session.status()
+        for _ in range(200000):
+            if status["uptime_us_mod32"] >= uptime_us:
+                break
+            status = session.status()
+        return status
+
+    # 1. A driver fault while running: latched, output inhibited.
+    transport, session = boot(["--driver-fault-us", f"{on_us},{off_us}"])
+    steps, samples = session.run("velocity", 5.0, 4000000)
+    status = session.status()
+    running = [sample for sample in samples if sample["state"] == SIL_STATE_RUNNING]
+    metrics["trip"] = {"steps": steps, "running_samples": len(running),
+                       "state": status["state"], "faults": status["fault_names"],
+                       "uptime_us": status["uptime_us_mod32"]}
+    checks["runs_before_fault"] = (steps == {"arm": "APPLIED", "start": "APPLIED"}
+                                   and len(running) > 0
+                                   and abs(running[-1]["velocity_rad_s"] - 5.0) < 1.0)
+    checks["driver_fault_latched"] = (status["state"] == SIL_STATE_FAULT
+                                      and status["fault_names"] == ["DRIVER_FAULT"]
+                                      and status["uptime_us_mod32"] >= on_us)
+
+    # 2. FAULT_CLEAR while nFAULT is still low: refused, the latch stays.
+    clear = session.call("clear")
+    for _ in range(100):
+        refused = session.status()
+    metrics["clear_while_low"] = {"result": clear["result"], "clear_result": refused["clear_result"],
+                                  "faults": refused["fault_names"]}
+    checks["clear_refused_while_low"] = (refused["state"] == SIL_STATE_FAULT
+                                         and refused["fault_names"] == ["DRIVER_FAULT"]
+                                         and refused["clear_result"] == 3)
+
+    # 3. After the driver releases nFAULT: the clear applies and the drive runs again.
+    wait_until(session, off_us + 10000)
+    clear = session.call("clear")
+    recovered = None
+    for _ in range(200):
+        recovered = session.status()
+        if recovered["state"] == SIL_STATE_DISABLED and recovered["faults"] == 0:
+            break
+    metrics["clear_after_release"] = {"result": clear["result"],
+                                      "clear_result": recovered["clear_result"],
+                                      "state": recovered["state"]}
+    checks["clear_applies_after_release"] = (clear["result"] == "ACCEPTED"
+                                             and recovered["state"] == SIL_STATE_DISABLED
+                                             and recovered["faults"] == 0
+                                             and recovered["clear_result"] == 2)
+    steps, samples = session.run("velocity", 5.0, 300000)
+    final = session.status()
+    checks["runs_after_clear"] = (steps == {"arm": "APPLIED", "start": "APPLIED"}
+                                  and final["faults"] == 0)
+    session.stop()
+    transport.__exit__()
+
+    # 4. A 100 us glitch (at most one H0 sample) does not latch.
+    transport, session = boot(["--driver-fault-us", f"{on_us},{on_us + 100}"])
+    steps, samples = session.run("velocity", 5.0, 2500000)
+    status = session.status()
+    metrics["glitch"] = {"steps": steps, "state": status["state"], "faults": status["fault_names"],
+                         "uptime_us": status["uptime_us_mod32"]}
+    checks["glitch_ignored"] = (steps == {"arm": "APPLIED", "start": "APPLIED"}
+                                and status["state"] == SIL_STATE_RUNNING
+                                and status["faults"] == 0
+                                and status["uptime_us_mod32"] > on_us + 100000)
+    session.stop()
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-driver-fault",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_trajectory(simulator, base_arguments, flash_path, json_path=None):
     """Trajectory shaping (parameter contract 3.4, P1 step B): acceleration (ID 106) and
     deceleration (ID 107) shape velocity references; in position mode the planner runs a
@@ -2936,6 +3037,10 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "driver-fault":
+                summary = run_sil_driver_fault(os.path.abspath(args.simulator),
+                                               simulator_arguments, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "rotor-range":
                 summary = run_sil_rotor_range(os.path.abspath(args.simulator),
                                               simulator_arguments, args.json)

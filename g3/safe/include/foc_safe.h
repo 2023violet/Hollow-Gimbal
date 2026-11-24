@@ -116,6 +116,8 @@ enum foc_safe_fault {
     FOC_SAFE_FAULT_STALL = 1U << 14,
     /** Saturated outer loop moving against its reference without converging (foc_protect). */
     FOC_SAFE_FAULT_TRACKING_DIVERGENCE = 1U << 15,
+    /** The gate driver reports a fault on its nFAULT line (board input). */
+    FOC_SAFE_FAULT_DRIVER = 1U << 16,
 };
 
 /** Motor-protection causes. FAULT_CLEAR may clear these, unlike the other latched causes. */

@@ -3191,3 +3191,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 对照新版引脚表：PWM（TMR1 PA8/PA9/PA10 + PA7/PB0/PB1）、相电流（PA4/PA5/PA6 = IC/IB/IA）、SPI1 编码器、USART1、SWD 与现有映射一致；DRV8311H GAIN 47 kΩ 经数据手册确认为 0.5 V/A，CSAREF 3.3 V 零点 2048 码，VBUS 11:1，均不变。
 - 修改：VBUS 由 PA1/IN1 改为 PA0/IN0；PA1–PA3 相电压分压输入设为模拟（暂不采样）；NFAULT PB2 设为无内部上拉输入（暂不读取）；未接的 PB8 下拉；时钟改为 8 MHz 晶振 PLL × 75 / 4 = 150 MHz，晶振不起振时退回 HICK 同频并记录于 `clock_from_crystal`。README Board1 映射表同步。引脚与时钟只有上板才能验证（SIL 按 ADC 序位仿真）。fwinteg `arm_static.py` 增加已审查 prologue 摘要（锁定输出之后的新引脚与晶振时钟），WFI 检查允许编译器先把选择结果复制到被调用者保存寄存器。待办：NFAULT 故障锁存、三路相电压采样（可用作 CAL-3 实测端电压）、CAN。资源：默认镜像 text 90,880 B，bss 14,368 B。
+
+## 2026-11-23 · DRV8311 nFAULT 故障锁存（故障位 16 DRIVER_FAULT）
+
+- `g3/safe` 新增 `FOC_SAFE_FAULT_DRIVER`（位 16）；Runtime 快速输入追加 `driver_fault`，H0 未锁存时请求 INHIBIT 并锁存，FAULT_CLEAR 可清除且要求线已释放。板级 ADC 适配增加 nFAULT 读取回调与 2 次采样去抖，ARM 读 PB2，SIL 增加 `--driver-fault-us on_us[,off_us]`。首版每周期重复请求停机会饿死 H0 心跳（同时锁存 FAST_HEARTBEAT），改为仅在未锁存时请求。
+- CLI 故障名加入 `DRIVER_FAULT`，新增 SIL `driver-fault` 场景与单元测试（19 项）；协议 README、firmware README 与参数契约第 21 节同步。资源：默认镜像 text 91,028 B，bss 14,376 B。

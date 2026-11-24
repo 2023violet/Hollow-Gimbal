@@ -658,6 +658,15 @@ int foc_board_adc_complete(
     if (valid && adc->tap != NULL) {
         adc->tap(adc->tap_argument, ranks, token->generation, token->requested_us);
     }
+    /* nFAULT: two samples in a row filter a glitch; the driver holds a fault for its 5 ms
+     * retry, so none is missed. */
+    if (adc->driver_fault_line != NULL && adc->driver_fault_line(adc->driver_fault_argument)) {
+        if (adc->driver_fault_samples < FOC_BOARD_DRIVER_FAULT_SAMPLES) {
+            adc->driver_fault_samples++;
+        }
+    } else {
+        adc->driver_fault_samples = 0U;
+    }
     const struct foc_runtime_fast_input input = {
         .adc =
             {ranks[0],
@@ -668,6 +677,7 @@ int foc_board_adc_complete(
              token->generation,
              token->requested_us},
         .now_us = event->now_us,
+        .driver_fault = adc->driver_fault_samples >= FOC_BOARD_DRIVER_FAULT_SAMPLES,
     };
     const uint32_t updates = runtime->pipeline.mock.updates;
     const uint32_t declined = output->declined_updates;

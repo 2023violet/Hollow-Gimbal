@@ -238,6 +238,12 @@ typedef void (*foc_board_h0_observer)(void *argument,
                                       uint32_t slot_id,
                                       int h0_result);
 
+/** Optional gate-driver fault line reader for H0: true while the line is asserted (low). */
+typedef bool (*foc_board_driver_fault_line)(void *argument);
+
+/** H0 samples in a row with the driver fault line asserted before Runtime latches it. */
+#define FOC_BOARD_DRIVER_FAULT_SAMPLES 2U
+
 /** Two non-preempting IRQs own the clock, token and live diagnostics.
  * A single foreground reader requests a coherent copy through snapshot_state. */
 struct foc_board_adc {
@@ -257,6 +263,10 @@ struct foc_board_adc {
     /** Optional post-H0 observer, set before producers start. */
     foc_board_h0_observer observer;
     void *observer_argument;
+    /** Optional DRV8311 nFAULT reader, set before producers start; debounced in H0. */
+    foc_board_driver_fault_line driver_fault_line;
+    void *driver_fault_argument;
+    uint32_t driver_fault_samples;
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
     foc_board_trace_clock trace_cycles;
 #endif

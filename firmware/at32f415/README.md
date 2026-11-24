@@ -145,7 +145,7 @@ SPI, Safety, UART V1 or locked output admission changes accompany this mapping.
 | IRQ priority | NVIC grouping 0, four preemption bits. ADC1 #18 and TMR1_CH #27 use priority 0. TMR5_GLOBAL #50 and SPI1 #35 use priority 1. Same-priority pairs serialize their own acquisition state. H0 may preempt H1. |
 | USART1 | PB6 TX, PB7 RX, 115200 8N1, byte IRQ priority 2. Bounded RX ring and single complete TX buffer. |
 | Phase voltage | PA1 / IN1 = VC, PA2 / IN2 = VB, PA3 / IN3 = VA through 10 kΩ / 1 kΩ (11:1). Configured analog and not sampled yet. |
-| Driver | DRV8311H: nSLEEP pulled up (always enabled, no GPIO), MODE 47 kΩ = 6x PWM with 5 A OCP, SLEW 47 kΩ = 75 V/µs. NFAULT on PB2 is an input with the board's 10 kΩ pull-up (and LED3); the firmware does not read it yet. |
+| Driver | DRV8311H: nSLEEP pulled up (always enabled, no GPIO), MODE 47 kΩ = 6x PWM with 5 A OCP, SLEW 47 kΩ = 75 V/µs. NFAULT on PB2 is an input with the board's 10 kΩ pull-up (and LED3); H0 reads it each cycle and two low samples in a row latch DRIVER_FAULT (fault bit 16), cleared by FAULT_CLEAR once the line is high. `sil-demo --sil-scenario driver-fault` injects it with `--driver-fault-us on_us[,off_us]`. |
 | Unused pins | PA11 CAN_RX / PA12 CAN_TX (SIT3051, no CAN software yet), PB8 not connected (pulled down), BOOT0 10 kΩ to GND. |
 | Other resources | DMA1/2, SysTick and both watchdogs are unused. No Flash persistence backend. |
 

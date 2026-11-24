@@ -564,6 +564,11 @@ struct foc_runtime_fast_input {
     enum foc_runtime_action action;
     /** Requested closed-loop mode for SET_MODE only. */
     enum foc_runtime_mode requested_mode;
+    /**
+     * True while the board's debounced gate-driver fault line is asserted. H0 latches
+     * FOC_SAFE_FAULT_DRIVER and FAULT_CLEAR waits until it is false. Appended field.
+     */
+    bool driver_fault;
 };
 
 /** Result of one Foreground poll. */

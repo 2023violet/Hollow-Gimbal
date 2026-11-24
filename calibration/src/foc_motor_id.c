@@ -1,8 +1,8 @@
 /**
  * @file    foc_motor_id.c
- * @brief   Window-integral least squares for standstill R/L and ideal PI design.
- * @version v0.2.0
- * @date    2026.11.17
+ * @brief   Window-integral least squares for R/L (q: optional back-EMF) and ideal PI design.
+ * @version v0.3.0
+ * @date    2026.11.23
  *
  * Implementation role
  * -------------------
@@ -63,7 +63,14 @@ static bool foc_motor_id_config_valid(const struct foc_motor_id_config *config)
         foc_motor_id_positive(config->min_slew_rms_a_per_s) &&
         foc_motor_id_positive(config->max_residual_rms_v) &&
         foc_motor_id_bounds(config->min_rs_ohm, config->max_rs_ohm) &&
-        foc_motor_id_bounds(config->min_inductance_h, config->max_inductance_h);
+        foc_motor_id_bounds(config->min_inductance_h, config->max_inductance_h) &&
+        (!config->fit_back_emf ||
+         (config->axis == FOC_MOTOR_ID_Q && isfinite(config->min_speed_rms_rad_s) &&
+          config->min_speed_rms_rad_s >= 0.0f &&
+          foc_motor_id_positive(config->max_abs_speed_rad_s) &&
+          config->min_speed_rms_rad_s < config->max_abs_speed_rad_s)) &&
+        isfinite(config->known_rs_ohm) && config->known_rs_ohm >= 0.0f &&
+        (config->known_rs_ohm == 0.0f || config->fit_back_emf);
 }
 
 static int foc_motor_id_invalidate(
@@ -77,13 +84,26 @@ static int foc_motor_id_invalidate(
     return status;
 }
 
-static void foc_motor_id_close_window(struct foc_motor_id_context *context, float current_a)
+/* False when the window's mean speed exceeds the configured bound. */
+static bool
+foc_motor_id_close_window(struct foc_motor_id_context *context, float current_a, float angle_rad)
 {
-    /* One row for the whole window: mean(v) = R mean(i) + L (i_end-i_start)/T. */
+    /* One row for the whole window: mean(v) = R mean(i) + L (i_end-i_start)/T, plus
+     * ke (angle_end-angle_start)/T when the shaft may turn (the back-EMF integral). */
     const double inverse_s = 1.0 / ((double)context->window_us * 1.0e-6);
     const double i = context->current_as * inverse_s;
     const double slew = ((double)current_a - context->first_current_a) * inverse_s;
     const double v = context->voltage_vs * inverse_s;
+    if (context->config.fit_back_emf) {
+        const double m = ((double)angle_rad - context->first_angle_rad) * inverse_s;
+        if (!(fabs(m) <= context->config.max_abs_speed_rad_s)) {
+            return false;
+        }
+        context->m2 += m * m;
+        context->i_m += i * m;
+        context->slew_m += slew * m;
+        context->m_v += m * v;
+    }
     context->i2 += i * i;
     context->slew2 += slew * slew;
     context->i_slew += i * slew;
@@ -96,6 +116,8 @@ static void foc_motor_id_close_window(struct foc_motor_id_context *context, floa
     context->current_as = 0.0;
     context->voltage_vs = 0.0;
     context->first_current_a = current_a;
+    context->first_angle_rad = angle_rad;
+    return true;
 }
 
 static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context *context)
@@ -114,11 +136,57 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
         return FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE;
     }
 
-    /* Normalize both columns before testing their mutual independence. */
+    const double m_floor = (double)config->min_speed_rms_rad_s;
+    const bool motion =
+        config->fit_back_emf && context->m2 > 0.0 && context->m2 >= count * m_floor * m_floor;
+    if (motion && !isfinite(context->m2)) {
+        return FOC_CALIBRATION_FAILURE_NUMERIC;
+    }
+
+    /* Normalize the columns before testing their mutual independence. */
     const double i_norm = sqrt(context->i2);
     const double slew_norm = sqrt(context->slew2);
     const double correlation = context->i_slew / (i_norm * slew_norm);
-    const double excitation = 1.0 - correlation * correlation;
+    const double iv = context->i_v / i_norm;
+    const double sv = context->slew_v / slew_norm;
+    double excitation = 1.0 - correlation * correlation;
+    double rs = 0.0;
+    double l = 0.0;
+    double ke = 0.0;
+    bool rs_fixed = false;
+    if (motion && config->known_rs_ohm > 0.0f) {
+        /* The shaft turns: R comes from the still d axis, the q data fit L and ke. On a light
+         * rotor i follows di/dt within a long level, so a free R separates poorly from L. */
+        const double m_norm = sqrt(context->m2);
+        const double sm = context->slew_m / (slew_norm * m_norm);
+        rs = config->known_rs_ohm;
+        const double ys = (context->slew_v - rs * context->i_slew) / slew_norm;
+        const double ym = (context->m_v - rs * context->i_m) / m_norm;
+        excitation = 1.0 - sm * sm;
+        l = (ys - sm * ym) / (excitation * slew_norm);
+        ke = (ym - sm * ys) / (excitation * m_norm);
+        rs_fixed = true;
+    } else if (motion) {
+        /* Three terms: solve the normalized 3x3 Gram system by its adjugate. */
+        const double m_norm = sqrt(context->m2);
+        const double im = context->i_m / (i_norm * m_norm);
+        const double sm = context->slew_m / (slew_norm * m_norm);
+        const double mv = context->m_v / m_norm;
+        excitation =
+            1.0 + 2.0 * correlation * im * sm - correlation * correlation - im * im - sm * sm;
+        const double a00 = 1.0 - sm * sm;
+        const double a11 = 1.0 - im * im;
+        const double a22 = 1.0 - correlation * correlation;
+        const double a01 = im * sm - correlation;
+        const double a02 = correlation * sm - im;
+        const double a12 = correlation * im - sm;
+        rs = (a00 * iv + a01 * sv + a02 * mv) / (excitation * i_norm);
+        l = (a01 * iv + a11 * sv + a12 * mv) / (excitation * slew_norm);
+        ke = (a02 * iv + a12 * sv + a22 * mv) / (excitation * m_norm);
+    } else {
+        rs = (iv - correlation * sv) / (excitation * i_norm);
+        l = (sv - correlation * iv) / (excitation * slew_norm);
+    }
     if (!isfinite(excitation)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
@@ -126,11 +194,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     if (excitation < FOC_MOTOR_ID_MIN_EXCITATION) {
         return FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE;
     }
-    const double iv = context->i_v / i_norm;
-    const double sv = context->slew_v / slew_norm;
-    const double rs = (iv - correlation * sv) / (excitation * i_norm);
-    const double l = (sv - correlation * iv) / (excitation * slew_norm);
-    if (!isfinite(rs) || !isfinite(l)) {
+    if (!isfinite(rs) || !isfinite(l) || !isfinite(ke)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
     if (rs < config->min_rs_ohm || rs > config->max_rs_ohm || l < config->min_inductance_h ||
@@ -143,17 +207,24 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     if (((double)config->max_interval_us * 1.0e-6) * rs > FOC_MOTOR_ID_MAX_RL_STEP * l) {
         return FOC_CALIBRATION_FAILURE_RANGE;
     }
-    /* Evaluate the published Float32 pair, allowing for accumulated roundoff
-     * in the residual so an unresolved near-zero value cannot pass a tighter limit. */
+    /* Evaluate the published Float32 values, allowing for accumulated roundoff
+     * in the residual so an unresolved near-zero value cannot pass a tighter limit.
+     * Without motion the ke terms are exact zeros and the sums are unchanged. */
     const float published_rs = (float)rs;
     const float published_l = (float)l;
+    const float published_ke = (float)ke;
     const double r_iv = 2.0 * published_rs * context->i_v;
     const double l_sv = 2.0 * published_l * context->slew_v;
     const double rr = (double)published_rs * published_rs * context->i2;
     const double ll = (double)published_l * published_l * context->slew2;
     const double rl = 2.0 * published_rs * published_l * context->i_slew;
-    const double residual2 = context->v2 - r_iv - l_sv + rr + ll + rl;
-    const double scale = context->v2 + fabs(r_iv) + fabs(l_sv) + rr + ll + fabs(rl);
+    const double k_mv = 2.0 * published_ke * context->m_v;
+    const double kk = (double)published_ke * published_ke * context->m2;
+    const double rk = 2.0 * published_rs * published_ke * context->i_m;
+    const double lk = 2.0 * published_l * published_ke * context->slew_m;
+    const double residual2 = context->v2 - r_iv - l_sv + rr + ll + rl - k_mv + kk + rk + lk;
+    const double scale = context->v2 + fabs(r_iv) + fabs(l_sv) + rr + ll + fabs(rl) + fabs(k_mv) +
+        kk + fabs(rk) + fabs(lk);
     const double roundoff = (8.0 * count + 64.0) * DBL_EPSILON * scale;
     if (!isfinite(residual2) || !isfinite(roundoff) || residual2 < -roundoff) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
@@ -165,6 +236,9 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     }
     result->rs_ohm = published_rs;
     result->inductance_h = published_l;
+    result->back_emf_v_s_per_rad = published_ke;
+    result->back_emf_fitted = motion;
+    result->rs_fixed = rs_fixed;
     return FOC_CALIBRATION_FAILURE_NONE;
 }
 
@@ -232,6 +306,7 @@ int foc_motor_id_push(
     }
     if (!sample->current_valid || !isfinite(sample->current_a) ||
         !isfinite(sample->omega_e_rad_s) ||
+        (config->fit_back_emf && !isfinite(sample->rotor_angle_rad)) ||
         (has_interval && (!sample->voltage_valid || !isfinite(sample->mean_voltage_v)))) {
         return foc_motor_id_invalidate(
             context,
@@ -239,8 +314,11 @@ int foc_motor_id_push(
             FOC_MOTOR_ID_ERR_SAMPLE
         );
     }
-    if (!sample->frame_confirmed || !sample->stationary_confirmed ||
-        sample->omega_e_rad_s != 0.0f || sample->saturated ||
+    /* A turning shaft is admitted only when the back-EMF is fitted. */
+    if (!sample->frame_confirmed ||
+        (!config->fit_back_emf &&
+         (!sample->stationary_confirmed || sample->omega_e_rad_s != 0.0f)) ||
+        sample->saturated ||
         (has_interval &&
          (!sample->output_confirmed || sample->voltage_source != config->voltage_source))) {
         return foc_motor_id_invalidate(
@@ -282,11 +360,17 @@ int foc_motor_id_push(
         context->voltage_vs += (double)sample->mean_voltage_v * elapsed_s;
         context->window_us += elapsed_us;
         context->intervals++;
-        if (context->intervals == config->intervals_per_window) {
-            foc_motor_id_close_window(context, sample->current_a);
+        if (context->intervals == config->intervals_per_window &&
+            !foc_motor_id_close_window(context, sample->current_a, sample->rotor_angle_rad)) {
+            return foc_motor_id_invalidate(
+                context,
+                FOC_CALIBRATION_FAILURE_PRECONDITION,
+                FOC_MOTOR_ID_ERR_PRECONDITION
+            );
         }
     } else {
         context->first_current_a = sample->current_a;
+        context->first_angle_rad = sample->rotor_angle_rad;
         result->first_sequence = sample->sequence;
         result->first_us = sample->captured_us;
     }

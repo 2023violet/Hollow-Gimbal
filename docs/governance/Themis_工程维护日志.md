@@ -3176,3 +3176,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 校准管理器新增 CAL-7（掩码 8，可与 1–3 组合）：q 轴电压 bang-bang，行程受 ID 109 约束，窗口由探测到的换向间隔自适应；TUNE 写入 ID 85/86。`foc_mechanical_id` 的阻尼预检查改为拟合后检查。`foc_board_profile` 按 ID 108 由 J、Kt 推导 ID 69–71；Runtime 在轨迹启用时加 (J·a+B·v)/Kt 前馈。存储升为 format 6（232 字节）。固件 CMake 加入 `foc_mechanical_id.c`。
 - CLI 新增 `velocity-bandwidth`/`inertia-travel` 参数、`--cal-stages`、`motor-setup --mechanical` 与 SIL `inertia` 场景（lockstep、free-run 通过）。SIL：J 2e-5–0.01 误差 ≤1.8%，前馈后梯形移动过冲 0.026 → 0.00007 rad。资源：默认镜像 text 88,024 B，bss 13,112 B。
+
+## 2026-11-23 · CAL-3 小惯量修复：q 轴拟合反电动势
+
+- 根因：q 轴 R/L 脉冲推动空载转子，反电动势进入拟合；其比例 ke·Kt·T/(J·R) 与幅值无关。SIL 下 J 3e-4 时 Lq −10%，J ≤ 2e-4 报 PRECONDITION。`foc_motor_id` 增加 `fit_back_emf`（窗口反电动势积分 = ke·Δ转子角）与 `known_rs_ohm`（转动时 R 取 d 轴，只拟合 L、ke）；H0 记录增加 ADC 孔径与编码器采样时刻，CAL-3 把 2 kHz 编码器角度插值到电流孔径（旧角度曾使 J 2e-5 的 q 轴 Rs +23%）。无新参数与协议字段。
+- CLI 新增 SIL `light-rotor` 场景（J 1e-6–2e-3 与 3 Ω 电机，Rs/Ld/Lq/Ψ 误差 ≤0.5%，lockstep、free-run 通过），`inertia` 场景的 2e-5 转子改为掩码 10 从零校准；SIL 单元测试 18 项。参数契约第 19 节记录根因、结果与局限（J 0.02 在 CAL-4 失败另行处理）。资源：默认镜像 text 90,344 B，bss 14,336 B。

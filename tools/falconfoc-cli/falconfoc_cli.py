@@ -914,7 +914,7 @@ def run_virtual_demo(
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
-                 "trajectory", "inertia")
+                 "trajectory", "inertia", "light-rotor")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2107,22 +2107,91 @@ def run_sil_inertia(simulator, base_arguments, flash_path, json_path=None):
     checks["inertia_restored"] = all(abs(restored[name] - saved[name]) < 1e-9 for name in saved)
     transport.__exit__()
 
-    # 4. A light gimbal rotor (J 2e-5) and a heavy one (J 0.01) with a 1 rad travel: CAL-7
-    # alone (mask 8) on the model written from a previous electrical calibration.
-    for name, inertia, damping, travel in (("light", 2e-5, 5e-5, math.pi),
-                                           ("heavy", 0.01, 0.02, 1.0)):
+    # 4. A light gimbal rotor (J 2e-5): CAL-3/4/5 and CAL-7 from nothing (mask 10). A heavy
+    # one (J 0.01) with a 1 rad travel: CAL-7 alone (mask 8) on the model written from a
+    # previous electrical calibration.
+    for name, inertia, damping, travel, stages in (("light", 2e-5, 5e-5, math.pi, 10),
+                                                   ("heavy", 0.01, 0.02, 1.0, 8)):
         transport, session = boot(inertia, damping)
         commission(session.client)
-        for parameter, value in model:
+        for parameter, value in model if stages == 8 else ():
             assert session.tune(parameter, value) == "APPLIED", parameter
         if travel != math.pi:
             assert session.tune("inertia-travel", travel) == "APPLIED"
-        run = metrics[f"{name}_rotor"] = calibrate(session, 8)
+        run = metrics[f"{name}_rotor"] = calibrate(session, stages)
         checks[f"{name}_rotor_identified"] = identified(run, inertia, damping, travel)
         transport.__exit__()
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-inertia",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_light_rotor(simulator, base_arguments, json_path=None):
+    """CAL-3 on light rotors (parameter contract section 19): the q-axis R/L pulses turn a
+    light shaft, the fit takes R from the still d axis and the back-EMF (ke x the rotor
+    angle change, interpolated to each current aperture) from the motion, so Rs, Ld, Lq
+    and the CAL-4 flux are identified from a bare gimbal rotor up to a heavy load.
+    Nothing here is physical evidence."""
+
+    checks, metrics = {}, {}
+    nominal = {"rs": 0.6, "ld": 0.0012, "lq": 0.0015, "psi": 0.01}
+    high_r = {"rs": 3.0, "ld": 0.004, "lq": 0.0045, "psi": 0.006}
+    # Name, motor, inertia, current bandwidth (a high-L motor needs a lower one for CAL-5).
+    cases = (("bare_1e-6", nominal, 1e-6, None), ("light_5e-6", nominal, 5e-6, None),
+             ("gimbal_2e-5", nominal, 2e-5, None), ("loaded_2e-4", nominal, 2e-4, None),
+             ("heavy_2e-3", nominal, 2e-3, None), ("high_r_3e-6", high_r, 3e-6, 100.0))
+
+    for name, motor, inertia, bandwidth in cases:
+        arguments = list(base_arguments) + [
+            "--motor-rs-ohm", str(motor["rs"]), "--motor-ld-h", str(motor["ld"]),
+            "--motor-lq-h", str(motor["lq"]), "--motor-psi-f-wb", str(motor["psi"]),
+            "--motor-inertia", str(inertia)]
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        if bandwidth is not None:
+            assert session.tune("current-bandwidth", bandwidth) == "APPLIED"
+        commissioned = commission(client)
+        _wait_still(session)
+        started = session.call("calibrate", bytes([CAL_STAGES["electrical"]]))["result"]
+        view, peak = None, 0.0
+        for _ in range(400000):
+            view = session.call("calibrate-read", quiet=True)
+            if view["calibration_state"] in ("DONE", "FAILED"):
+                break
+            if view["calibration_state"] == "RL_Q":
+                speed = session.call("telemetry", quiet=True)["rotor_velocity_rad_s"]
+                peak = max(peak, abs(speed))
+        values = {key: session.read(f"model-{key}") for key in ("rs", "ld", "lq", "flux")}
+        transport.__exit__()
+        truth = {"rs": motor["rs"], "ld": motor["ld"], "lq": motor["lq"], "flux": motor["psi"]}
+        errors = {key: values[key] / truth[key] - 1.0 for key in truth}
+        metrics[name] = {"inertia": inertia, "state": view["calibration_state"],
+                         "failure": view["calibration_failure"],
+                         "detail": view["admission_failure"], "q_peak_rad_s": peak,
+                         "relative_error": errors}
+        checks[f"{name}_identified"] = (
+            commissioned == "APPLIED" and started == "ACCEPTED"
+            and view["calibration_state"] == "DONE" and abs(errors["rs"]) < 0.02
+            and abs(errors["ld"]) < 0.02 and abs(errors["lq"]) < 0.03
+            and abs(errors["flux"]) < 0.02)
+        if inertia <= 2e-5:
+            # The former standstill fit refused any q-axis speed above 1 rad/s.
+            checks[f"{name}_shaft_turned"] = peak > 1.0
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-light-rotor",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -2857,6 +2926,10 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "light-rotor":
+                summary = run_sil_light_rotor(os.path.abspath(args.simulator),
+                                              simulator_arguments, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "inertia":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-inertia-flash.bin"))

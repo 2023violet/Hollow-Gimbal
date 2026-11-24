@@ -281,7 +281,14 @@ CAL-4 (flux and Kt through `foc_flux_id`) and CAL-5 (current PI through
 observer streams each cycle's d/q current, applied d/q voltage and speed on the
 slot clock into a 64-entry ring that the Foreground drains. Excitation runs in
 voltage-mode FOC on the calibrated rotor angle (`follow_rotor` drive commands),
-so no fixture is needed. The voltage is declared `COMMANDED` (appended to
+so no fixture is needed. The q-axis pulses turn a free light shaft, so CAL-3
+fits its back-EMF from the rotor angle and takes R from the still d axis
+(`fit_back_emf`, `known_rs_ohm`). The encoder samples at the H1 rate, so each
+record waits for the encoder sample after its ADC aperture and the angle is
+interpolated to the aperture (`runtime->adc.produced_us`); a stale angle would
+add Kt x age / J to Rs. `sil-demo --sil-scenario light-rotor` identifies Rs,
+Ld, Lq and flux from a bare 1e-6 kg·m² rotor to 2e-3 and a 3 Ω motor within
+0.5 %. The voltage is declared `COMMANDED` (appended to
 `foc_motor_id_voltage_source`), and `foc_flux_id_break()` lets each settled speed
 level be its own segment. The manager shares the UART adapter's publication and
 lifecycle sequences, so the Host keeps control after a run. `sil-demo --sil-scenario
@@ -357,7 +364,8 @@ writes IDs 85/86 and `foc_board_profile` derives the velocity PI and position ga
 at ID 108; H1 feeds the planned torque forward. It is opt-in because the shaft
 turns with its load attached: `falconfoc_cli.py motor-setup --mechanical` or
 `request --message calibrate --cal-stages mechanical`. `sil-demo --sil-scenario
-inertia` identifies a 2e-5, a 0.002 and a 0.01 kg·m² rotor and shows the derived
+inertia` identifies a 2e-5 (CAL-3/4/5 and CAL-7 from nothing), a 0.002 and a
+0.01 kg·m² rotor and shows the derived
 gains, the travel bound, the feedforward move and the power-cycle restore.
 
 ### Trajectory shaping

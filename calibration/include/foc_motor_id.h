@@ -1,12 +1,15 @@
 /**
  * @file    foc_motor_id.h
  * @brief   Offline standstill R/L identification and model-based PI candidates.
- * @version v0.2.0
- * @date    2026.11.17
+ * @version v0.3.0
+ * @date    2026.11.23
  *
  * Design overview
  * ---------------
  * Identify one axis from window-integrated standstill voltage and current.
+ * On the q axis the caller may let the shaft turn: the window integral of the
+ * back-EMF is ke x the rotor angle change, fitted as a third term, or with a
+ * supplied d-axis R in place of the free one.
  * Build a two-axis model and design PI candidates for explicit caller review.
  *
  * Usage example
@@ -104,6 +107,25 @@ struct foc_motor_id_config {
     float max_rs_ohm;
     float min_inductance_h;
     float max_inductance_h;
+    /**
+     * Q axis only: also fit a back-EMF term ke x window-mean mechanical speed, taken from
+     * the rotor angle, so the shaft may turn under the q current. Standstill evidence and
+     * zero omega_e are then not required. Appended field; false keeps the standstill fit.
+     */
+    bool fit_back_emf;
+    /** With fit_back_emf: largest window-mean mechanical speed in rad/s (PRECONDITION). */
+    float max_abs_speed_rad_s;
+    /**
+     * With fit_back_emf: window-mean speed RMS in rad/s below which the motion is
+     * negligible and the two-term fit is published (back_emf_fitted false).
+     */
+    float min_speed_rms_rad_s;
+    /**
+     * With fit_back_emf: the d-axis Rs. When the shaft turns, R is taken from it (rs_fixed)
+     * and only L and ke are fitted: on a light rotor the current follows the mechanics and a
+     * free R separates poorly from L. Zero fits all three terms.
+     */
+    float known_rs_ohm;
 };
 
 /**
@@ -125,15 +147,17 @@ struct foc_motor_id_sample {
     float current_a;
     /** Time-average actual axis voltage over the interval. Unused on first sample. */
     float mean_voltage_v;
-    /** Signed electrical speed at capture. Zero is required. */
+    /** Signed electrical speed at capture. Zero is required unless fit_back_emf. */
     float omega_e_rad_s;
+    /** Continuous mechanical rotor angle at capture in rad. Used with fit_back_emf. */
+    float rotor_angle_rad;
     bool current_valid;
     bool voltage_valid;
     /** Acquisition evidence that output took effect over the entire interval. */
     bool output_confirmed;
     /** Acquisition evidence of a common fixed, aligned d/q frame for I and V. */
     bool frame_confirmed;
-    /** Acquisition evidence of standstill over the whole interval. */
+    /** Acquisition evidence of standstill over the whole interval. Unused with fit_back_emf. */
     bool stationary_confirmed;
     /** Reject this capture if excitation was clipped or saturated. */
     bool saturated;
@@ -162,9 +186,18 @@ struct foc_motor_id_result {
     /** Normalized Gram determinant, 0 for collinear and 1 for orthogonal. */
     double excitation;
     bool usable;
+    /**
+     * Fitted back-EMF constant in V s/rad (mechanical), pole pairs x flux on the q axis.
+     * Zero unless back_emf_fitted. A diagnostic: R and L are the published model.
+     */
+    float back_emf_v_s_per_rad;
+    /** True when the three-term fit (with motion) produced this result. */
+    bool back_emf_fitted;
+    /** True when rs_ohm is the supplied known_rs_ohm and only L and ke were fitted. */
+    bool rs_fixed;
 };
 
-/** Caller-owned storage. The six sums describe window-average regressors. */
+/** Caller-owned storage. The sums describe window-average regressors. */
 struct foc_motor_id_context {
     struct foc_motor_id_config config;
     struct foc_motor_id_result result;
@@ -180,6 +213,12 @@ struct foc_motor_id_context {
     uint32_t intervals;
     float first_current_a;
     float previous_current_a;
+    /* Window-mean mechanical speed regressor, fit_back_emf only. */
+    double m2;
+    double i_m;
+    double slew_m;
+    double m_v;
+    float first_angle_rad;
 };
 
 /** Model values in the same electrical coordinate and units as Current Core. */

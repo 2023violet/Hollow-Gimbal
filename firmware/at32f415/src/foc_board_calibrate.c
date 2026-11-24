@@ -72,6 +72,8 @@
 #define CAL_RL_LEVEL_SLOTS          24U
 #define CAL_RL_INTERVALS            768U
 #define CAL_RL_STILL_RAD_S          1.0f
+/* Below this window-mean speed RMS the q shaft is still: the two-term fit is published. */
+#define CAL_RL_MOTION_RAD_S         0.05f
 #define CAL_FLUX_SETTLE_US          400000U
 #define CAL_FLUX_WINDOW             32U
 #define CAL_FLUX_WINDOWS            4U
@@ -246,6 +248,9 @@ cal_h0_observer(void *argument, const struct foc_runtime *runtime, uint32_t slot
         .current_a = runtime->pipeline.measured_dq_a,
         .voltage_v = runtime->pipeline.voltage_dq_v,
         .mechanical_rad_s = runtime->observed_sensor.mechanical_rad_s,
+        .mechanical_rad = runtime->observed_sensor.mechanical_rad,
+        .aperture_us = runtime->adc.produced_us,
+        .sensor_us = runtime->observed_sensor.captured_us,
         .accepted = h0_result == FOC_RUNTIME_OK &&
             runtime->pipeline.safety.state == FOC_SAFE_STATE_RUNNING &&
             runtime->pipeline.last_reason == FOC_PIPELINE_OK && runtime->observed_sensor.valid,
@@ -515,6 +520,8 @@ static float cal_mean(float older, float newer)
 static void cal_capture_begin(struct foc_board_calibration *cal)
 {
     cal->history_count = 0U;
+    cal->rl_pending_count = 0U;
+    cal->rl_points = 0U;
     cal->first_pushed = false;
     cal->pushed = 0U;
     cal->capturing = true;
@@ -544,6 +551,13 @@ static bool cal_rl_begin(struct foc_board_calibration *cal, enum foc_motor_id_ax
         .max_rs_ohm = 10.0f,
         .min_inductance_h = 0.00005f,
         .max_inductance_h = 0.05f,
+        /* q: the pulses turn a light shaft (speed ~ Kt i t / J); the back-EMF is fitted
+         * from the position change, so no inertia is too small. Up to the speed limit. */
+        .fit_back_emf = axis == FOC_MOTOR_ID_Q,
+        .max_abs_speed_rad_s = cal->runtime->config.motion.position.velocity_limit_rad_s,
+        .min_speed_rms_rad_s = CAL_RL_MOTION_RAD_S,
+        /* The d-axis Rs: a turning q fit takes R from the still axis, fits L and ke. */
+        .known_rs_ohm = axis == FOC_MOTOR_ID_Q ? cal->rl_d.rs_ohm : 0.0f,
     };
     cal_capture_begin(cal);
     return foc_motor_id_init(&cal->motor_id, &config, ++cal->capture_serial) == FOC_MOTOR_ID_OK;
@@ -594,11 +608,9 @@ static bool cal_flux_begin(struct foc_board_calibration *cal)
 }
 
 /* Feed one contiguous record to the stage's estimator. False on a capture failure. */
-static bool cal_record(struct foc_board_calibration *cal, const struct foc_board_cal_record *record)
+static bool
+cal_record_estimate(struct foc_board_calibration *cal, const struct foc_board_cal_record *record)
 {
-    if (!cal->capturing) {
-        return true;
-    }
     /* A flux level ends exactly on a window boundary: no open partial window. */
     if (cal->state == FOC_BOARD_CAL_FLUX && cal->pushed >= CAL_FLUX_WINDOW * CAL_FLUX_WINDOWS) {
         cal->capturing = false;
@@ -674,6 +686,7 @@ static bool cal_record(struct foc_board_calibration *cal, const struct foc_board
             .current_a = d_axis ? record->current_a.d : record->current_a.q,
             .mean_voltage_v = d_axis ? vd : vq,
             .omega_e_rad_s = 0.0f,
+            .rotor_angle_rad = record->mechanical_rad,
             .current_valid = true,
             .voltage_valid = true,
             .output_confirmed = confirmed,
@@ -687,6 +700,7 @@ static bool cal_record(struct foc_board_calibration *cal, const struct foc_board
             first.sequence = begin->slot;
             first.captured_us = begin->slot * CAL_SLOT_US;
             first.current_a = d_axis ? begin->current_a.d : begin->current_a.q;
+            first.rotor_angle_rad = begin->mechanical_rad;
             ok = foc_motor_id_push(&cal->motor_id, &first) == FOC_MOTOR_ID_OK;
             cal->first_pushed = true;
         }
@@ -725,6 +739,69 @@ static bool cal_record(struct foc_board_calibration *cal, const struct foc_board
     cal->history[1] = *record;
     cal->pushed++;
     return ok;
+}
+
+/* CAL-3: the encoder samples at the H1 rate, so a record's angle is up to one H1 period
+ * older than its current. Hold records until the encoder sample after their aperture
+ * arrives, then interpolate the angle to the aperture: a stale angle would put a
+ * Kt x delay / J term into the q-axis Rs. False on a capture failure. */
+static bool
+cal_record_align(struct foc_board_calibration *cal, const struct foc_board_cal_record *record)
+{
+    if (cal->rl_pending_count != 0U && record->slot != cal->rl_last_slot + 1U) {
+        return false;
+    }
+    cal->rl_last_slot = record->slot;
+    if (cal->rl_points == 0U || record->sensor_us != cal->rl_point_us[1]) {
+        cal->rl_point_us[0] = cal->rl_point_us[1];
+        cal->rl_point_rad[0] = cal->rl_point_rad[1];
+        cal->rl_point_us[1] = record->sensor_us;
+        cal->rl_point_rad[1] = record->mechanical_rad;
+        cal->rl_points++;
+    }
+    if (cal->rl_pending_count == FOC_BOARD_CAL_RL_PENDING) {
+        return false;
+    }
+    cal->rl_pending[cal->rl_pending_count++] = *record;
+    uint32_t resolved = 0U;
+    /* One call may resolve several records: stop at the capture length (whole windows). */
+    while (cal->rl_points >= 2U && resolved < cal->rl_pending_count &&
+           cal->pushed < CAL_RL_INTERVALS) {
+        struct foc_board_cal_record aligned = cal->rl_pending[resolved];
+        const int32_t after_first = (int32_t)(aligned.aperture_us - cal->rl_point_us[0]);
+        if ((int32_t)(aligned.aperture_us - cal->rl_point_us[1]) > 0) {
+            break;
+        }
+        ++resolved;
+        if (after_first < 0) {
+            /* Only before the first push: the record precedes the first encoder pair. */
+            if (cal->history_count != 0U) {
+                return false;
+            }
+            continue;
+        }
+        const float span = (float)(cal->rl_point_us[1] - cal->rl_point_us[0]);
+        aligned.mechanical_rad = cal->rl_point_rad[0] +
+            (cal->rl_point_rad[1] - cal->rl_point_rad[0]) * ((float)after_first / span);
+        if (!cal_record_estimate(cal, &aligned)) {
+            return false;
+        }
+    }
+    for (uint32_t index = resolved; index < cal->rl_pending_count; ++index) {
+        cal->rl_pending[index - resolved] = cal->rl_pending[index];
+    }
+    cal->rl_pending_count -= resolved;
+    return true;
+}
+
+static bool cal_record(struct foc_board_calibration *cal, const struct foc_board_cal_record *record)
+{
+    if (!cal->capturing) {
+        return true;
+    }
+    return cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q
+        ? cal_record_align(cal, record)
+        : cal_record_estimate(cal, record);
 }
 
 static bool cal_drain(struct foc_board_calibration *cal)
@@ -934,7 +1011,7 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
     }
     if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
         /* d: a varied pulse train (no torque on the d axis). q: a zero-mean train, so the
-         * free shaft only dithers and the back-EMF stays negligible. */
+         * free shaft only dithers about its start; its back-EMF is fitted, not assumed away. */
         static const float d_levels[8] = {1.0f, 1.0f, -0.75f, -0.75f, 0.33f, -1.0f, 0.65f, -0.26f};
         static const float q_levels[8] = {1.0f, -1.0f, -1.0f, 1.0f, 0.5f, -0.5f, -0.5f, 0.5f};
         const uint32_t level = (elapsed / (CAL_RL_LEVEL_SLOTS * CAL_SLOT_US)) % 8U;

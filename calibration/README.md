@@ -35,15 +35,16 @@ Runtime through the Control Plane application adapter.
 [Measurement Trace v1](MEASUREMENT_TRACE.md) validates recorded observations before
 offline replay through the same workflow. The Host CLI loads and hashes the pack.
 
-## Standstill motor R/L and PI design
+## Motor R/L (standstill, or q axis turning) and PI design
 
 Include `foc_motor_id.h` and link `falconfoc-calibration`. A capture belongs to
 one caller-owned context, one axis, one acquisition origin, and one caller
 capture ID. The same instance can be reset for another capture.
 
 1. Initialize a d or q capture with expected time intervals, signal and
-   parameter ranges, excitation floors, and a residual bound. Require
-   max_interval_s*max_Rs/min_L <= 0.3 (the fastest admitted RL pole).
+   parameter ranges, excitation floors, and a residual bound. The fit is
+   refused (RANGE) when max_interval_s*Rs/L of the fitted pair exceeds 0.3
+   (the RL pole is not resolved), whatever the configured bounds.
 2. Submit a capture ID, nonzero setup ID and acquisition origin on every
    endpoint. The setup ID binds the motor, fixed frame and acquisition
    calibration. Allocate a fresh capture ID for each acquisition, including
@@ -81,13 +82,31 @@ capture ID. The same instance can be reset for another capture.
    both fits as provenance alongside the numerical model. Ld and Lq come
    from their respective captures.
 
+On the q axis the caller may let the shaft turn (`fit_back_emf`): a free
+rotor under q current accelerates by Kt*i/J, and its back-EMF ke*w biases a
+standstill fit (SIL: Lq -10 % at J 3e-4, refused below 2e-4 kg m^2). Each
+endpoint then carries the continuous mechanical angle at its ADC aperture;
+the window integral of the back-EMF is ke*(angle_end - angle_start), a
+third column with no speed differentiation. Standstill evidence and zero
+omega_e are not required; a window-mean speed above `max_abs_speed_rad_s`
+reports PRECONDITION, and below `min_speed_rms_rad_s` RMS the two-term fit
+is published bit for bit (`back_emf_fitted` false). With `known_rs_ohm`
+(the d-axis Rs) the turning fit takes that R and fits L and ke
+(`rs_fixed`): on a light rotor the current follows the mechanics, i ~ di/dt
+within a long level, and a free R separates poorly from L. Without it, R,
+L and ke are fitted together (normalized 3x3 Gram determinant as the
+excitation). `back_emf_v_s_per_rad` (pole pairs x flux) is a diagnostic.
+The angle must be the angle at the current's aperture: an angle older by d
+adds ke*Kt*d/J to the fitted R.
+
 The model is the zero-speed reduction of the PMSM d/q equations. Correct
 voltage/current scaling, electrical alignment, sufficient excitation and
 sampling resolution are acquisition requirements. Assert the common, fixed
 d/q frame for I and V and standstill for each endpoint and the entire interval.
 For measured captures, associate the setup ID with validated electrical zero
-and signs, rotor restraint, and voltage and clock calibration evidence. The
-estimator checks supplied assertions and zero observed speed. Zero encoder
+and signs, rotor restraint (or, on the q axis, the turning fit above), and
+voltage and clock calibration evidence. The estimator checks supplied
+assertions and zero observed speed. Zero encoder
 change alone cannot establish standstill. A permanent-magnet rotor under q current may
 move. Real acquisition must establish restraint and measure or validate
 interval-average terminal voltage, including inverter drop and deadtime.

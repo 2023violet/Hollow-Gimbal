@@ -154,10 +154,19 @@ struct foc_board_cal_record {
     struct foc_vector_dq current_a;
     struct foc_vector_dq voltage_v;
     float mechanical_rad_s;
+    /** Continuous rotor position: the CAL-3 q-axis back-EMF regressor. */
+    float mechanical_rad;
+    /** ADC aperture time of the current, monotonic microseconds. */
+    uint32_t aperture_us;
+    /** Capture time of mechanical_rad (the encoder runs at the H1 rate). */
+    uint32_t sensor_us;
     bool accepted;
 };
 
 #define FOC_BOARD_CAL_RING          64U
+
+/** CAL-3 records waiting for the encoder sample after their aperture. */
+#define FOC_BOARD_CAL_RL_PENDING    8U
 
 /** Raw sweep samples: forward and backward points of CAL-2. */
 #define FOC_BOARD_CAL_SWEEP_SAMPLES 64U
@@ -215,6 +224,14 @@ struct foc_board_calibration {
     struct foc_board_cal_record ring[FOC_BOARD_CAL_RING];
     struct foc_board_cal_record history[2];
     uint32_t history_count;
+    /* CAL-3: the rotor angle interpolated to each current aperture between the two
+     * latest encoder samples; records wait for the sample after their aperture. */
+    struct foc_board_cal_record rl_pending[FOC_BOARD_CAL_RL_PENDING];
+    uint32_t rl_pending_count;
+    uint32_t rl_points;
+    uint32_t rl_point_us[2];
+    float rl_point_rad[2];
+    uint32_t rl_last_slot;
     bool first_pushed;
     bool capturing;
     uint32_t pushed;

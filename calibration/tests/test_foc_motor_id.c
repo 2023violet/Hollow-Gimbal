@@ -1,6 +1,6 @@
 /**
  * @file    test_foc_motor_id.c
- * @brief   Standstill fit, quality rejection and PI policy contracts.
+ * @brief   Standstill and back-EMF fits, quality rejection and PI policy contracts.
  * @version v0.1.0
  * @date    2026.11.17
  *
@@ -447,11 +447,147 @@ static int test_commanded_voltage_policy(void)
     return 0;
 }
 
+/* A q-axis pulse train on a free light rotor: di/dt = (v - R i - ke w) / L, J dw/dt = Kt i.
+ * Integrated in 1 us steps; each 40 us interval holds one voltage. Returns the push status. */
+static int collect_turning(
+    struct foc_motor_id_context *context,
+    bool claim_still,
+    double inertia,
+    double *peak
+)
+{
+    static const float levels[8] = {1.0f, -1.0f, -1.0f, 1.0f, 0.5f, -0.5f, -0.5f, 0.5f};
+    const double rs = 0.6;
+    const double l = 0.0015;
+    const double ke = 0.07;
+    const double kt = 0.105;
+    double current = 0.0;
+    double speed = 0.0;
+    double angle = 0.25;
+    *peak = 0.0;
+    for (unsigned int k = 0U; k <= 384U; ++k) {
+        const float voltage = k == 0U ? 0.0f : 0.5f * levels[((k - 1U) / 24U) % 8U];
+        for (unsigned int step = 0U; k != 0U && step < 40U; ++step) {
+            const double di = (voltage - rs * current - ke * speed) / l;
+            const double dw = kt * current / inertia;
+            angle += (speed + 0.5 * dw * 1.0e-6) * 1.0e-6;
+            current += di * 1.0e-6;
+            speed += dw * 1.0e-6;
+        }
+        *peak = fmax(*peak, fabs(speed));
+        struct foc_motor_id_sample sample = sample_at(context, k);
+        sample.current_a = (float)current;
+        sample.mean_voltage_v = voltage;
+        sample.rotor_angle_rad = (float)angle;
+        sample.omega_e_rad_s = claim_still ? 0.0f : (float)(7.0 * speed);
+        sample.stationary_confirmed = claim_still;
+        const int status = foc_motor_id_push(context, &sample);
+        if (status != FOC_MOTOR_ID_OK) {
+            return status;
+        }
+    }
+    return FOC_MOTOR_ID_OK;
+}
+
+static int test_back_emf(void)
+{
+    struct foc_motor_id_config turning = config;
+    turning.axis = FOC_MOTOR_ID_Q;
+    turning.fit_back_emf = true;
+    turning.max_abs_speed_rad_s = 50.0f;
+    turning.min_speed_rms_rad_s = 0.05f;
+    turning.max_rs_ohm = 2.0f;
+    struct foc_motor_id_context context = {0};
+    struct foc_motor_id_result result;
+    double peak = 0.0;
+
+    /* The shaft turns well past standstill; the three-term fit recovers R, L and ke. */
+    CHECK(foc_motor_id_init(&context, &turning, 21U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_turning(&context, false, 2.0e-5, &peak) == 0);
+    CHECK(peak > 1.0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && result.back_emf_fitted);
+    CHECK(fabsf(result.rs_ohm / 0.6f - 1.0f) < 0.01f);
+    CHECK(fabsf(result.inductance_h / 0.0015f - 1.0f) < 0.01f);
+    CHECK(fabsf(result.back_emf_v_s_per_rad / 0.07f - 1.0f) < 0.02f);
+    CHECK(result.excitation >= 0.02);
+
+    /* With the d-axis R supplied, R is taken and L and ke are fitted. */
+    struct foc_motor_id_config known = turning;
+    known.known_rs_ohm = 0.6f;
+    CHECK(foc_motor_id_init(&context, &known, 30U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_turning(&context, false, 2.0e-5, &peak) == 0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && result.rs_fixed);
+    CHECK(result.rs_ohm == 0.6f && fabsf(result.inductance_h / 0.0015f - 1.0f) < 0.01f);
+    CHECK(fabsf(result.back_emf_v_s_per_rad / 0.07f - 1.0f) < 0.02f);
+
+    /* A very light rotor spins far faster; the supplied R still identifies L and ke. */
+    CHECK(foc_motor_id_init(&context, &known, 32U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_turning(&context, false, 1.0e-6, &peak) == 0);
+    CHECK(peak > 10.0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && result.rs_fixed);
+    CHECK(fabsf(result.inductance_h / 0.0015f - 1.0f) < 0.01f);
+    CHECK(fabsf(result.back_emf_v_s_per_rad / 0.07f - 1.0f) < 0.02f);
+
+    /* The same motion fitted as standstill is biased: the reason for the third term. */
+    struct foc_motor_id_config still = turning;
+    still.fit_back_emf = false;
+    still.max_residual_rms_v = 1.0f;
+    CHECK(foc_motor_id_init(&context, &still, 22U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_turning(&context, true, 2.0e-5, &peak) == 0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && !result.back_emf_fitted);
+    CHECK(fabsf(result.inductance_h / 0.0015f - 1.0f) > 0.05f);
+
+    /* Without fit_back_emf, a turning shaft is refused at the first sample. */
+    CHECK(foc_motor_id_init(&context, &still, 23U) == FOC_MOTOR_ID_OK);
+    struct foc_motor_id_sample moving = sample_at(&context, 0U);
+    moving.stationary_confirmed = false;
+    CHECK(foc_motor_id_push(&context, &moving) == FOC_MOTOR_ID_ERR_PRECONDITION);
+
+    /* A window faster than the bound is refused. */
+    struct foc_motor_id_config slow = turning;
+    slow.max_abs_speed_rad_s = 0.5f;
+    CHECK(foc_motor_id_init(&context, &slow, 24U) == FOC_MOTOR_ID_OK);
+    CHECK(collect_turning(&context, false, 2.0e-5, &peak) == FOC_MOTOR_ID_ERR_PRECONDITION);
+    CHECK(context.result.failure == FOC_CALIBRATION_FAILURE_PRECONDITION);
+
+    /* A still shaft under fit_back_emf publishes the two-term fit, bit for bit. */
+    struct foc_motor_id_config plain = turning;
+    plain.fit_back_emf = false;
+    struct foc_motor_id_result reference;
+    CHECK(foc_motor_id_init(&context, &plain, 25U) == FOC_MOTOR_ID_OK);
+    CHECK(collect(&context, 0.6f, 0.0015f, false) == 0);
+    CHECK(foc_motor_id_finish(&context, &reference) == FOC_MOTOR_ID_OK);
+    CHECK(foc_motor_id_init(&context, &turning, 26U) == FOC_MOTOR_ID_OK);
+    CHECK(collect(&context, 0.6f, 0.0015f, false) == 0);
+    CHECK(foc_motor_id_finish(&context, &result) == FOC_MOTOR_ID_OK && !result.back_emf_fitted);
+    CHECK(
+        result.rs_ohm == reference.rs_ohm && result.inductance_h == reference.inductance_h &&
+        result.residual_rms_v == reference.residual_rms_v && result.back_emf_v_s_per_rad == 0.0f
+    );
+
+    /* Configuration: q axis only, and a speed floor below the bound. */
+    struct foc_motor_id_config bad = turning;
+    bad.axis = FOC_MOTOR_ID_D;
+    CHECK(foc_motor_id_init(&context, &bad, 27U) == FOC_MOTOR_ID_ERR_CONFIG);
+    bad = turning;
+    bad.min_speed_rms_rad_s = bad.max_abs_speed_rad_s;
+    CHECK(foc_motor_id_init(&context, &bad, 28U) == FOC_MOTOR_ID_ERR_CONFIG);
+    bad = turning;
+    bad.fit_back_emf = false;
+    bad.known_rs_ohm = 0.6f;
+    CHECK(foc_motor_id_init(&context, &bad, 33U) == FOC_MOTOR_ID_ERR_CONFIG);
+    bad = turning;
+    bad.max_abs_speed_rad_s = 0.0f;
+    bad.min_speed_rms_rad_s = 0.0f;
+    CHECK(foc_motor_id_init(&context, &bad, 29U) == FOC_MOTOR_ID_ERR_CONFIG);
+    return 0;
+}
+
 int main(void)
 {
     return test_observation_contract() || test_voltage_policy() || test_fit() ||
         test_acquisition_resolution() || test_invalid_samples() || test_fit_rejection() ||
-        test_pi() || test_commanded_voltage_policy();
+        test_pi() || test_commanded_voltage_policy() || test_back_emf();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

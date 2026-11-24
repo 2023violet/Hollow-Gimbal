@@ -3181,3 +3181,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 根因：q 轴 R/L 脉冲推动空载转子，反电动势进入拟合；其比例 ke·Kt·T/(J·R) 与幅值无关。SIL 下 J 3e-4 时 Lq −10%，J ≤ 2e-4 报 PRECONDITION。`foc_motor_id` 增加 `fit_back_emf`（窗口反电动势积分 = ke·Δ转子角）与 `known_rs_ohm`（转动时 R 取 d 轴，只拟合 L、ke）；H0 记录增加 ADC 孔径与编码器采样时刻，CAL-3 把 2 kHz 编码器角度插值到电流孔径（旧角度曾使 J 2e-5 的 q 轴 Rs +23%）。无新参数与协议字段。
 - CLI 新增 SIL `light-rotor` 场景（J 1e-6–2e-3 与 3 Ω 电机，Rs/Ld/Lq/Ψ 误差 ≤0.5%，lockstep、free-run 通过），`inertia` 场景的 2e-5 转子改为掩码 10 从零校准；SIL 单元测试 18 项。参数契约第 19 节记录根因、结果与局限（J 0.02 在 CAL-4 失败另行处理）。资源：默认镜像 text 90,344 B，bss 14,336 B。
+
+## 2026-11-23 · CAL-4 重转子修复：按转速稳定开始采样
+
+- 根因：CAL-4 每档固定等 400 ms，重转子（τ ≈ J·Rs/(ke·Kt)，J 0.02 约 1.6 s）在反向档仍沿原方向转，负方向窗口不足，报 FLUX / SAMPLE_COUNT。改为每 100 ms 用编码器角度差求平均转速，方向一致、电气转速 ≥ 2 rad/s 且由连续两次变化估计的距稳态 ≤ 5% 时开始采样；每档最多 10 s，超时报 TIMEOUT。估计器、协议与参数不变。
+- SIL `light-rotor` 场景改名 `rotor-range`，增加 J 0.02、0.05（完成，Ψ 误差 ≤0.04%）与 0.2（TIMEOUT）；CAL-4 时长 J 2e-5 不变、0.02 为 12 s。参数契约第 20 节。资源：默认镜像 text 90,744 B，bss 14,368 B。

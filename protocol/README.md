@@ -400,6 +400,8 @@ then spans four more reversals and at least 40 windows (at most 12 s). Each H0
 period's speed and Kt × iq feed `foc_mechanical_id`; TUNE writes J and B (IDs
 85/86) and the unified refresh derives IDs 69–71. Without three reversals in
 10 s (a very heavy or damped load at 20 % current) the run ends TIMEOUT.
+CAL-4 also ends TIMEOUT when a speed level is not steady in its direction within
+10 s (SIL: J above about 0.05 kg·m² for the 0.105 N·m/A plant).
 
 ### Persistent settings
 

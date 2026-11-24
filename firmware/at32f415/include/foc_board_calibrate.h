@@ -248,6 +248,15 @@ struct foc_board_calibration {
     /* M3c: CAL-3 probes the drive voltage when no alignment ran in this boot. */
     bool probing;
     float probe_current_a;
+    /* CAL-4: latest rotor angle and its capture time, and the steady check (mean speeds of
+     * the last two check intervals) that starts each level's capture. */
+    float flux_angle;
+    uint32_t flux_angle_us;
+    float flux_check_angle;
+    uint32_t flux_check_us;
+    float flux_check_speed[2];
+    uint32_t flux_checks;
+    uint32_t flux_samples;
     /* M3-R transaction report. mode_claimed: this run put the Runtime in CALIBRATION
      * mode; failing: RESTORE returns it to CURRENT on the way to FAILED. */
     bool mode_claimed;

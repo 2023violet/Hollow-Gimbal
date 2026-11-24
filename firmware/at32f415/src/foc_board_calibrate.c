@@ -75,6 +75,18 @@
 /* Below this window-mean speed RMS the q shaft is still: the two-term fit is published. */
 #define CAL_RL_MOTION_RAD_S         0.05f
 #define CAL_FLUX_SETTLE_US          400000U
+/* A level is captured once its speed has the level's sign and is within 5 % of steady: a
+ * heavy rotor (tau = J Rs / (ke Kt)) takes seconds, and after a reversal it still turns the
+ * old way. Every 100 ms the mean speed of the interval is taken from the encoder angle and
+ * its capture times (no filter lag or staircase at a crawl). Two successive changes d1, d2
+ * of an exponential approach leave d2 r / (1 - r) to go, r = d2 / d1, whatever tau; a
+ * change within 0.3 % of the speed is steady. The speed must also reach twice the
+ * estimator's 1 rad/s electrical window floor. Each level waits at most 10 s (TIMEOUT). */
+#define CAL_FLUX_STEADY_US          100000U
+#define CAL_FLUX_STEADY_REMAINING   0.05f
+#define CAL_FLUX_STEADY_FLOOR       0.003f
+#define CAL_FLUX_MIN_SPEED_E_RAD_S  2.0f
+#define CAL_FLUX_SETTLE_MAX_US      10000000U
 #define CAL_FLUX_WINDOW             32U
 #define CAL_FLUX_WINDOWS            4U
 #define CAL_TUNE_TIMEOUT_US         50000U
@@ -604,6 +616,8 @@ static bool cal_flux_begin(struct foc_board_calibration *cal)
     cal->capturing = false;
     cal->pushed = 0U;
     cal->level = 0U;
+    cal->flux_checks = 0U;
+    cal->flux_samples = 0U;
     return foc_flux_id_init(&cal->flux_id, &config) == FOC_CALIBRATION_FAILURE_NONE;
 }
 
@@ -818,6 +832,8 @@ static bool cal_drain(struct foc_board_calibration *cal)
     while (tail != head && ok) {
         const struct foc_board_cal_record *record = &cal->ring[tail % FOC_BOARD_CAL_RING];
         cal->probe_current_a = hypotf(record->current_a.d, record->current_a.q);
+        cal->flux_angle = record->mechanical_rad;
+        cal->flux_angle_us = record->sensor_us;
         ok = cal_record(cal, record);
         ++tail;
     }
@@ -1060,6 +1076,8 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         cal->pushed = 0U;
         if (++cal->level < 4U) {
             cal->state_us = now_us;
+            cal->flux_checks = 0U;
+            cal->flux_samples = 0U;
             return;
         }
         if (foc_flux_id_finish(&cal->flux_id, &cal->flux_result) != FOC_CALIBRATION_FAILURE_NONE ||
@@ -1081,11 +1099,47 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         atomic_store(&cal->record_active, 0U);
         foc_runtime_revoke_command(cal->runtime);
         cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
-    } else if (!cal->capturing && elapsed >= CAL_FLUX_SETTLE_US) {
-        if (cal->level != 0U) {
-            foc_flux_id_break(&cal->flux_id);
+    } else if (!cal->capturing && cal->pushed == 0U) {
+        /* Settle: one check per interval; the first three only set the references. */
+        if (elapsed > CAL_FLUX_SETTLE_MAX_US) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+            return;
         }
-        cal_capture_begin(cal);
+        const uint32_t check = elapsed / CAL_FLUX_STEADY_US;
+        if (check <= cal->flux_checks) {
+            return;
+        }
+        const uint32_t span_us = cal->flux_angle_us - cal->flux_check_us;
+        const float speed = cal->flux_samples == 0U || span_us == 0U
+            ? 0.0f
+            : (cal->flux_angle - cal->flux_check_angle) * (1.0e6f / (float)span_us);
+        const float d1 = cal->flux_check_speed[1] - cal->flux_check_speed[0];
+        const float d2 = speed - cal->flux_check_speed[1];
+        bool steady = false;
+        const float pole_pairs = (float)cal->runtime->config.motion.rotor.pole_pairs;
+        if (cal->flux_samples >= 3U && elapsed >= CAL_FLUX_SETTLE_US &&
+            speed * levels[cal->level] > 0.0f &&
+            fabsf(speed) * pole_pairs >= CAL_FLUX_MIN_SPEED_E_RAD_S) {
+            if (fabsf(d2) <= CAL_FLUX_STEADY_FLOOR * fabsf(speed)) {
+                steady = true;
+            } else if (d1 * d2 > 0.0f && fabsf(d2) < fabsf(d1)) {
+                const float ratio = d2 / d1;
+                steady =
+                    fabsf(d2 * ratio / (1.0f - ratio)) <= CAL_FLUX_STEADY_REMAINING * fabsf(speed);
+            }
+        }
+        cal->flux_check_speed[0] = cal->flux_check_speed[1];
+        cal->flux_check_speed[1] = speed;
+        cal->flux_check_angle = cal->flux_angle;
+        cal->flux_check_us = cal->flux_angle_us;
+        cal->flux_checks = check;
+        cal->flux_samples++;
+        if (steady) {
+            if (cal->level != 0U) {
+                foc_flux_id_break(&cal->flux_id);
+            }
+            cal_capture_begin(cal);
+        }
     }
 }
 

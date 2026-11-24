@@ -201,11 +201,12 @@ class Board1SilTest(unittest.TestCase):
                                           Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
-    def test_light_rotor_electrical_identification(self):
-        """CAL-3/4 identify Rs, Ld, Lq and flux while the q pulses turn a bare gimbal
-        rotor, a light, loaded and heavy one, and a high-resistance motor."""
+    def test_rotor_range_electrical_identification(self):
+        """CAL-3/4 identify Rs, Ld, Lq and flux from a bare gimbal rotor (the q pulses turn
+        it) to a heavy load (CAL-4 waits for steady speed), and a high-resistance motor; a
+        rotor too heavy to settle reports TIMEOUT."""
         with contextlib.redirect_stdout(io.StringIO()):
-            summary = cli.run_sil_light_rotor(SIL, ["--lockstep-us", "500"])
+            summary = cli.run_sil_rotor_range(SIL, ["--lockstep-us", "500"])
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
     def test_free_running_host_silence_trips_command_timeout(self):

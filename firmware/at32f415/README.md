@@ -286,9 +286,13 @@ fits its back-EMF from the rotor angle and takes R from the still d axis
 (`fit_back_emf`, `known_rs_ohm`). The encoder samples at the H1 rate, so each
 record waits for the encoder sample after its ADC aperture and the angle is
 interpolated to the aperture (`runtime->adc.produced_us`); a stale angle would
-add Kt x age / J to Rs. `sil-demo --sil-scenario light-rotor` identifies Rs,
-Ld, Lq and flux from a bare 1e-6 kg·m² rotor to 2e-3 and a 3 Ω motor within
-0.5 %. The voltage is declared `COMMANDED` (appended to
+add Kt x age / J to Rs. Each CAL-4 level starts its capture once the speed
+(mean over 100 ms from the encoder angle) has the level's sign and is within 5 %
+of steady, estimated from two successive changes; a heavy rotor takes seconds and
+after a reversal still turns the old way. A level waits at most 10 s, then the
+run ends TIMEOUT. `sil-demo --sil-scenario rotor-range` identifies Rs, Ld, Lq
+and flux from a bare 1e-6 kg·m² rotor to 0.05 and a 3 Ω motor within 0.5 %, and
+shows the TIMEOUT of a 0.2 kg·m² rotor. The voltage is declared `COMMANDED` (appended to
 `foc_motor_id_voltage_source`), and `foc_flux_id_break()` lets each settled speed
 level be its own segment. The manager shares the UART adapter's publication and
 lifecycle sequences, so the Host keeps control after a run. `sil-demo --sil-scenario

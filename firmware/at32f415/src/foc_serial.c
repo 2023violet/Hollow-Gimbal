@@ -97,6 +97,7 @@ enum {
     PARAM_PROFILE_GEAR_RATIO = 99,
     PARAM_CURRENT_BANDWIDTH = 104,
     /* Trajectory acceleration and deceleration (contract 3.4), rotor-side, 0 unlimited. */
+    PARAM_DEAD_TIME_COMP = 87,
     PARAM_ACCEL = 106,
     PARAM_DECEL = 107,
     /* Velocity bandwidth for the J-derived outer gains and the CAL-7 travel (contract 18). */
@@ -393,7 +394,7 @@ static bool foc_serial_tuning_parameter(
         (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
         id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH ||
         id == PARAM_INERTIA_TRAVEL;
-    const bool ramp = id == PARAM_ACCEL || id == PARAM_DECEL;
+    const bool ramp = id == PARAM_ACCEL || id == PARAM_DECEL || id == PARAM_DEAD_TIME_COMP;
     if ((trip ? !runtime->config.trip_enabled
               : !profile && !ramp && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
         foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
@@ -469,6 +470,17 @@ static bool foc_serial_tuning_parameter(
         return true;
     case PARAM_VELOCITY_REFERENCE_LIMIT:
         foc_serial_tuning_float(parameter, tuning.velocity_limit_rad_s, 0.1f, 1000.0f, UNIT_RAD_S);
+        return true;
+    case PARAM_DEAD_TIME_COMP:
+        /* Inverter dead-time compensation of the current loop; 0 (default) off. The Host
+         * enables it, typically with the CAL-3 value of ID 95. */
+        foc_serial_tuning_float(
+            parameter,
+            tuning.dead_time_v,
+            0.0f,
+            FOC_RUNTIME_DEAD_TIME_MAX_V,
+            UNIT_VOLT
+        );
         return true;
     case PARAM_ACCEL:
     case PARAM_DECEL:
@@ -688,6 +700,9 @@ static int foc_serial_tuning_write(
         break;
     case PARAM_ACCEL:
         tuning.accel_rad_s2 = floating;
+        break;
+    case PARAM_DEAD_TIME_COMP:
+        tuning.dead_time_v = floating;
         break;
     case PARAM_DECEL:
         tuning.decel_rad_s2 = floating;

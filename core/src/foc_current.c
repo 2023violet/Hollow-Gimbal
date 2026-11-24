@@ -61,6 +61,41 @@ foc_current_duty_voltage(const struct foc_svpwm_output *duty, float vbus_v)
     };
 }
 
+/* Dead-time compensation for a d/q reference: the phase-current sign vector, ramped through
+ * zero, back in d/q (amplitude-invariant), times the dead-time voltage. */
+static struct foc_vector_dq foc_current_dead_time(
+    const struct foc_current_config *config,
+    const struct foc_angle_cache *angle_cache,
+    struct foc_vector_dq target
+)
+{
+    struct foc_vector_alpha_beta reference;
+    if (foc_inverse_park_cached(&target, angle_cache, &reference) != FOC_STATUS_OK) {
+        return (struct foc_vector_dq){0};
+    }
+    const float phase[3] = {
+        reference.alpha,
+        -0.5f * reference.alpha + 0.8660254f * reference.beta,
+        -0.5f * reference.alpha - 0.8660254f * reference.beta,
+    };
+    float sign[3];
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        sign[index] = fmaxf(-1.0f, fminf(1.0f, phase[index] / config->dead_time_knee_a));
+    }
+    const struct foc_vector_alpha_beta sign_alpha_beta = {
+        (2.0f * sign[0] - sign[1] - sign[2]) / 3.0f,
+        (sign[1] - sign[2]) * FOC_CURRENT_INV_SQRT3,
+    };
+    struct foc_vector_dq sign_dq;
+    if (foc_park_cached(&sign_alpha_beta, angle_cache, &sign_dq) != FOC_STATUS_OK) {
+        return (struct foc_vector_dq){0};
+    }
+    return (struct foc_vector_dq){
+        config->dead_time_v * sign_dq.d,
+        config->dead_time_v * sign_dq.q,
+    };
+}
+
 static int foc_current_modulate(
     const struct foc_current_config *config,
     const struct foc_current_input *input,
@@ -159,8 +194,13 @@ int foc_current_init(struct foc_current_context *context, const struct foc_curre
         return status;
     }
     if (!foc_current_dq_finite(config->kp_v_per_a) ||
-        !foc_current_dq_finite(config->ki_v_per_a_s) || !isfinite(config->current_limit_a)) {
+        !foc_current_dq_finite(config->ki_v_per_a_s) || !isfinite(config->current_limit_a) ||
+        !isfinite(config->dead_time_v) || !isfinite(config->dead_time_knee_a)) {
         return FOC_STATUS_ERR_NONFINITE;
+    }
+    if (config->dead_time_v < 0.0f ||
+        (config->dead_time_v > 0.0f && !(config->dead_time_knee_a > 0.0f))) {
+        return FOC_STATUS_ERR_INVALID_CONFIG;
     }
     if (config->kp_v_per_a.d < 0.0f || config->kp_v_per_a.q < 0.0f ||
         config->ki_v_per_a_s.d < 0.0f || config->ki_v_per_a_s.q < 0.0f ||
@@ -327,6 +367,12 @@ static int foc_current_step_internal(
             feedforward_output.voltage_q_v,
         };
         feedforward_enabled = feedforward_output.enabled;
+    }
+    if (config->dead_time_v > 0.0f) {
+        const struct foc_vector_dq dead_time = foc_current_dead_time(config, &angle_cache, target);
+        feedforward_voltage.d += dead_time.d;
+        feedforward_voltage.q += dead_time.q;
+        feedforward_enabled = true;
     }
     const struct foc_vector_dq error = {
         target.d - result.measured_dq_a.d,

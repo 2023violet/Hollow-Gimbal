@@ -56,7 +56,7 @@ PARAMETERS = {
     "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
     "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
     "coast-status": 91, "coast-flux": 92, "coast-angle-error": 93, "driven-flux": 94,
-    "dead-time-v": 95,
+    "dead-time-v": 95, "dead-time-comp": 87,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
@@ -920,7 +920,7 @@ SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
-                 "dead-time")
+                 "dead-time", "dead-time-comp")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2465,6 +2465,103 @@ def run_sil_dead_time(simulator, base_arguments, json_path=None):
     return summary
 
 
+def run_sil_dead_time_comp(simulator, base_arguments, flash_path, json_path=None):
+    """Runtime dead-time compensation (parameter contract section 24): the current loop adds
+    ID 87 per phase from the reference current. It is off by default; CAL-3 only reports the
+    identified dead time (ID 95) and the Host enables it by writing ID 87. Through a 0.2 V dead
+    time with a 50 Hz current loop and a load, the q-current tracking error falls against the
+    same run with ID 87 at 0; the speed ripple is reported, not improved. The value survives
+    a power cycle. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    speed = 2.0
+
+    def boot():
+        arguments = list(base_arguments) + ["--dead-time-v", "0.2",
+                                            "--load-torque-nm", "0.03,1500000",
+                                            "--flash", str(flash_path)]
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        return transport, session
+
+    def low_speed(session):
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, samples = session.run("velocity", speed, 1500000)
+        session.stop()
+        _wait_still(session)
+        running = [s for s in samples if s["state"] == SIL_STATE_RUNNING]
+        tail = running[len(running) // 2:]
+        if not tail:
+            return steps, {"samples": 0}
+        error = [s["iq_a"] - s["iq_target_a"] for s in tail]
+        mean_speed = sum(s["velocity_rad_s"] for s in tail) / len(tail)
+        return steps, {
+            "samples": len(tail),
+            "iq_target_mean_a": sum(s["iq_target_a"] for s in tail) / len(tail),
+            "iq_error_rms_a": math.sqrt(sum(e * e for e in error) / len(error)),
+            "speed_mean_rad_s": mean_speed,
+            "speed_ripple_rms_rad_s": math.sqrt(
+                sum((s["velocity_rad_s"] - mean_speed) ** 2 for s in tail) / len(tail)),
+        }
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. CAL-3 reports the dead time (ID 95) and leaves the compensation off (ID 87 = 0).
+    transport, session = boot()
+    checks["commissioned"] = commission(session.client) == "APPLIED"
+    checks["slow_current_loop"] = session.tune("current-bandwidth", 50.0) == "APPLIED"
+    _wait_still(session)
+    started = session.call("calibrate", bytes([CAL_STAGES["electrical"]]))["result"]
+    view = None
+    for _ in range(800000):
+        view = session.call("calibrate-read", quiet=True)
+        if view["calibration_state"] in ("DONE", "FAILED"):
+            break
+    identified = session.read("dead-time-v")
+    metrics["calibration"] = {"state": view["calibration_state"], "identified_v": identified,
+                              "compensation_v": session.read("dead-time-comp")}
+    checks["calibration_reports_only"] = (started == "ACCEPTED"
+                                          and view["calibration_state"] == "DONE"
+                                          and abs(identified / 0.2 - 1.0) < 0.15
+                                          and metrics["calibration"]["compensation_v"] == 0.0)
+
+    # 2. Low speed without, then with the Host-enabled compensation.
+    steps_off, off = low_speed(session)
+    checks["host_enables"] = session.tune("dead-time-comp", identified) == "APPLIED"
+    steps_on, on = low_speed(session)
+    metrics["uncompensated"], metrics["compensated"] = off, on
+    ran = (steps_on == steps_off == {"arm": "APPLIED", "start": "APPLIED"}
+           and on["samples"] > 0 and off["samples"] > 0)
+    checks["tracking_error_reduced"] = ran and on["iq_error_rms_a"] < 0.6 * off["iq_error_rms_a"]
+    checks["speed_holds"] = ran and abs(on["speed_mean_rad_s"] - speed) < 0.2
+    checks["above_limit_refused"] = session.tune("dead-time-comp", 1.5) == "INVALID_ARGUMENT"
+
+    # 3. Save, power cycle: ID 87 comes back.
+    checks["saved"] = session.call("save")["result"] == "APPLIED"
+    transport.__exit__()
+    transport, session = boot()
+    restored = metrics["restored_v"] = session.read("dead-time-comp")
+    checks["compensation_restored"] = abs(restored - identified) < 1e-9
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-dead-time-comp",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_trajectory(simulator, base_arguments, flash_path, json_path=None):
     """Trajectory shaping (parameter contract 3.4, P1 step B): acceleration (ID 106) and
     deceleration (ID 107) shape velocity references; in position mode the planner runs a
@@ -3189,6 +3286,12 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "dead-time-comp":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-dead-time-comp-flash.bin"))
+                summary = run_sil_dead_time_comp(os.path.abspath(args.simulator),
+                                                 simulator_arguments, flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "dead-time":
                 summary = run_sil_dead_time(os.path.abspath(args.simulator),
                                             simulator_arguments, args.json)

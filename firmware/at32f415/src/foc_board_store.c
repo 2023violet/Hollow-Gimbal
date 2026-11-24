@@ -6,7 +6,8 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 6, 232 bytes, little-endian. Format 5 is bytes 0–219 with
+ * Record "FBP1", format 7, 236 bytes, little-endian. Format 6 is bytes 0–227 with its
+ * CRC at 228 and no dead-time compensation. Format 5 is bytes 0–219 with
  * its CRC at 220 and no velocity bandwidth or inertia travel; format 4 is bytes 0–211
  * with its CRC at 212 and no acceleration limits; format 3 is bytes 0–207 with its CRC at
  * 208 and no output zero; format 2 is bytes 0–135 with its CRC at 136;
@@ -14,7 +15,7 @@
  * still decode, keeping the boot profile and protection thresholds:
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 6     10 length u16 = 232
+ *   4  magic "FBP1"          8  format u16 = 7     10 length u16 = 236
  *   12 sequence u32
  *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
  *   28 runtime encoder direction i32   32 electrical offset f32
@@ -33,7 +34,8 @@
  *   208 output-position zero offset f32 rad (format 4; 0 from format 3)
  *   212/216 acceleration / deceleration f32 rad/s² (format 5; 0 from format 4)
  *   220/224 velocity bandwidth Hz / inertia travel rad (format 6; boot values before)
- *   228 CRC-32 (IEEE, reflected) of bytes 4–227
+ *   228 dead-time compensation f32 V (format 7; 0, off, before)
+ *   232 CRC-32 (IEEE, reflected) of bytes 4–231
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -47,8 +49,10 @@
 
 #define STORE_COMMIT    UINT32_C(0xC35A4C7E)
 #define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT    6U
-#define STORE_CRC_AT    228U
+#define STORE_FORMAT    7U
+#define STORE_CRC_AT    232U
+#define STORE_V6_BYTES  232U
+#define STORE_V6_CRC_AT 228U
 #define STORE_V5_BYTES  224U
 #define STORE_V5_CRC_AT 220U
 #define STORE_V4_BYTES  216U
@@ -334,6 +338,7 @@ void foc_board_store_encode(
     put_f32(record + 216, t->decel_rad_s2);
     put_f32(record + 220, t->profile.velocity_bandwidth_hz);
     put_f32(record + 224, t->profile.inertia_travel_rad);
+    put_f32(record + 228, t->dead_time_v);
     put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
 }
 
@@ -351,15 +356,17 @@ int foc_board_store_decode(
     const bool v3 = format == 3U && length == STORE_V3_BYTES;
     const bool v4 = format == 4U && length == STORE_V4_BYTES;
     const bool v5 = format == 5U && length == STORE_V5_BYTES;
-    const bool v6 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
+    const bool v6 = format == 6U && length == STORE_V6_BYTES;
+    const bool v7 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
     const size_t crc_at = v1 ? STORE_V1_CRC_AT
         : v2                 ? STORE_V2_CRC_AT
         : v3                 ? STORE_V3_CRC_AT
         : v4                 ? STORE_V4_CRC_AT
         : v5                 ? STORE_V5_CRC_AT
+        : v6                 ? STORE_V6_CRC_AT
                              : STORE_CRC_AT;
     if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
-        !(v1 || v2 || v3 || v4 || v5 || v6) ||
+        !(v1 || v2 || v3 || v4 || v5 || v6 || v7) ||
         get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
         (!v1 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
@@ -390,15 +397,16 @@ int foc_board_store_decode(
         .remote_current_cap_a = get_f32(record + 96),
         .remote_position_cap_rad = get_f32(record + 100),
         .calibration_present = !v1 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
-        .output_zero_rad = v4 || v5 || v6 ? get_f32(record + 208) : 0.0f,
-        .extended = v3 || v4 || v5 || v6,
-        .mechanical = v6,
+        .output_zero_rad = v4 || v5 || v6 || v7 ? get_f32(record + 208) : 0.0f,
+        .extended = v3 || v4 || v5 || v6 || v7,
+        .mechanical = v6 || v7,
     };
-    if (v5 || v6) {
+    settings->tuning.dead_time_v = v7 ? get_f32(record + 228) : 0.0f;
+    if (v5 || v6 || v7) {
         settings->tuning.accel_rad_s2 = get_f32(record + 212);
         settings->tuning.decel_rad_s2 = get_f32(record + 216);
     }
-    if (v3 || v4 || v5 || v6) {
+    if (v3 || v4 || v5 || v6 || v7) {
         settings->tuning.profile = (struct foc_runtime_profile){
             .rs_ohm = get_f32(record + 136),
             .ld_h = get_f32(record + 140),
@@ -411,8 +419,8 @@ int foc_board_store_decode(
             .max_speed_rad_s = get_f32(record + 168),
             .gear_ratio = get_f32(record + 172),
             .current_bandwidth_hz = get_f32(record + 176),
-            .velocity_bandwidth_hz = v6 ? get_f32(record + 220) : 0.0f,
-            .inertia_travel_rad = v6 ? get_f32(record + 224) : 0.0f,
+            .velocity_bandwidth_hz = v6 || v7 ? get_f32(record + 220) : 0.0f,
+            .inertia_travel_rad = v6 || v7 ? get_f32(record + 224) : 0.0f,
         };
         settings->tuning.trips = (struct foc_runtime_trip_limits){
             .overcurrent_a = get_f32(record + 180),

@@ -50,6 +50,14 @@ struct foc_current_config {
     struct foc_vector_dq ki_v_per_a_s;
     /** Positive maximum magnitude of the requested current vector in A. */
     float current_limit_a;
+    /**
+     * Inverter dead-time compensation in V, 0 disables it (appended). Each phase adds
+     * dead_time_v x clamp(i_ref_x / dead_time_knee_a, -1, 1) from the limited reference,
+     * as a feedforward voltage that anti-windup treats like the proportional term.
+     */
+    float dead_time_v;
+    /** Positive current in A over which the phase sign ramps through zero, when enabled. */
+    float dead_time_knee_a;
 };
 
 /** Read-only feedback and command for one current step. All fields must be finite. */

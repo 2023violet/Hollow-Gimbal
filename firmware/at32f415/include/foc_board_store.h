@@ -44,7 +44,7 @@ enum foc_board_store_limits {
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
     /** Encoded record size and programming unit. */
     /** Format 3 record; formats 1 (108 bytes) and 2 (140 bytes) still decode. */
-    FOC_BOARD_STORE_RECORD_BYTES = 232,
+    FOC_BOARD_STORE_RECORD_BYTES = 236,
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 

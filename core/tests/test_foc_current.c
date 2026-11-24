@@ -420,13 +420,68 @@ static int test_fixed_rotor_model(void)
     return 0;
 }
 
+static int test_dead_time_compensation(void)
+{
+    struct foc_current_config config = test_config();
+    config.dead_time_v = 0.1f;
+    config.dead_time_knee_a = 0.03f;
+    struct foc_current_context context = {0};
+    struct foc_current_input input = {.vbus_v = 12.0f, .dt_s = 0.001f};
+    struct foc_current_output output;
+    TEST_ASSERT(foc_current_init(&context, &config) == FOC_STATUS_OK);
+
+    /* d reference at angle 0: phases +1, -0.5, -0.5 -> signs +1, -1, -1 -> s_d = 4/3. */
+    input.target_a = (struct foc_vector_dq){1.0f, 0.0f};
+    TEST_ASSERT(foc_current_step(&context, &input, &output) == FOC_STATUS_OK);
+    TEST_ASSERT(near(output.voltage_dq_v.d, 2.0f + 0.1f * 4.0f / 3.0f));
+    TEST_ASSERT(near(output.voltage_dq_v.q, 0.0f));
+
+    /* q reference: phases 0, +0.866, -0.866 -> s_q = 2 / sqrt(3). */
+    input.target_a = (struct foc_vector_dq){0.0f, 1.0f};
+    TEST_ASSERT(foc_current_step(&context, &input, &output) == FOC_STATUS_OK);
+    TEST_ASSERT(near(output.voltage_dq_v.d, 0.0f));
+    TEST_ASSERT(near(output.voltage_dq_v.q, 2.0f + 0.1f * 1.1547005f));
+
+    /* Inside the knee the sign ramps: 10 mA on q gives s_q = 2 x 0.2887 / sqrt(3) = 1/3. */
+    input.target_a = (struct foc_vector_dq){0.0f, 0.01f};
+    TEST_ASSERT(foc_current_step(&context, &input, &output) == FOC_STATUS_OK);
+    TEST_ASSERT(near(output.voltage_dq_v.q, 0.02f + 0.1f / 3.0f));
+
+    /* Zero disables it: the same step as a configuration without the fields. */
+    const struct foc_current_config plain = test_config();
+    struct foc_current_config off = plain;
+    off.dead_time_knee_a = 0.03f;
+    struct foc_current_context reference = {0};
+    struct foc_current_output expected;
+    TEST_ASSERT(foc_current_init(&reference, &plain) == FOC_STATUS_OK);
+    TEST_ASSERT(foc_current_init(&context, &off) == FOC_STATUS_OK);
+    input.target_a = (struct foc_vector_dq){0.3f, -0.7f};
+    input.theta_elec_rad = 0.4f;
+    TEST_ASSERT(foc_current_step(&reference, &input, &expected) == FOC_STATUS_OK);
+    TEST_ASSERT(foc_current_step(&context, &input, &output) == FOC_STATUS_OK);
+    TEST_ASSERT(memcmp(&expected, &output, sizeof output) == 0);
+
+    /* Invalid settings. */
+    struct foc_current_config bad = config;
+    bad.dead_time_v = -0.1f;
+    TEST_ASSERT(foc_current_init(&context, &bad) == FOC_STATUS_ERR_INVALID_CONFIG);
+    bad = config;
+    bad.dead_time_knee_a = 0.0f;
+    TEST_ASSERT(foc_current_init(&context, &bad) == FOC_STATUS_ERR_INVALID_CONFIG);
+    bad = config;
+    bad.dead_time_v = NAN;
+    TEST_ASSERT(foc_current_init(&context, &bad) == FOC_STATUS_ERR_NONFINITE);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------ */
 
 int main(void)
 {
     return test_proportional_and_coordinates() || test_integral_and_instances() ||
         test_voltage_and_anti_windup() || test_rejected_steps() ||
-        test_low_voltage_duty_roundoff() || test_fixed_rotor_model();
+        test_low_voltage_duty_roundoff() || test_fixed_rotor_model() ||
+        test_dead_time_compensation();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

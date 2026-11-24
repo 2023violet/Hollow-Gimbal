@@ -76,6 +76,10 @@ static const struct foc_pipeline_config pipeline_config = {
             .kp_v_per_a = {.d = 1.08f, .q = 1.35f},
             .ki_v_per_a_s = {.d = 540.0f, .q = 540.0f},
             .current_limit_a = 2.5f,
+            /* Dead-time compensation off until the Host sets ID 87 (CAL-3 reports the dead
+             * time in ID 95); the sign ramps over the same 30 mA as the CAL-3 basis. */
+            .dead_time_v = 0.0f,
+            .dead_time_knee_a = 0.03f,
         },
     .adc =
         {

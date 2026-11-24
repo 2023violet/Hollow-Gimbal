@@ -230,6 +230,15 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_dead_time(SIL, ["--lockstep-us", "500"])
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_dead_time_compensation_at_runtime(self):
+        """CAL-3 reports the dead time and leaves the compensation off; enabled by the Host it
+        cuts the q-current tracking error of a slow current loop; it survives a power cycle."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_dead_time_comp(SIL, ["--lockstep-us", "500"],
+                                                 Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

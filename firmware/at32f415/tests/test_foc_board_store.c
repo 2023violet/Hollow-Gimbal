@@ -512,9 +512,10 @@ static int test_profile_record(void)
     in.tuning.decel_rad_s2 = 120.0f;
     in.tuning.profile.velocity_bandwidth_hz = 12.0f;
     in.tuning.profile.inertia_travel_rad = 1.5f;
+    in.tuning.dead_time_v = 0.08f;
     foc_board_store_encode(&nominal, &in, 7U, record);
     put_word(record, UINT32_C(0xC35A4C7E));
-    CHECK(record[8] == 6U && record[10] == 232U);
+    CHECK(record[8] == 7U && record[10] == 236U);
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
@@ -526,6 +527,17 @@ static int test_profile_record(void)
     CHECK(out.output_zero_rad == -2.5f);
     CHECK(out.tuning.accel_rad_s2 == 40.0f && out.tuning.decel_rad_s2 == 120.0f);
     CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
+    CHECK(out.tuning.dead_time_v == 0.08f);
+    /* Format 6 (232 bytes, CRC at 228) keeps IDs 108/109, no dead-time compensation. */
+    uint8_t v6[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v6, 0xFF, sizeof v6);
+    memcpy(v6, record, 228U);
+    v6[8] = 6U;
+    v6[10] = 232U;
+    put_word(v6 + 228, test_crc32(v6 + 4, 224U));
+    CHECK(foc_board_store_decode(v6, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
+    CHECK(out.tuning.dead_time_v == 0.0f);
     /* Format 5 (224 bytes, CRC at 220) keeps the acceleration limits, not IDs 108/109. */
     uint8_t v5[FOC_BOARD_STORE_RECORD_BYTES];
     memset(v5, 0xFF, sizeof v5);

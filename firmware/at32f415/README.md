@@ -292,7 +292,9 @@ interpolated to the aperture (`runtime->adc.produced_us`); a stale angle would
 add Kt x age / J to Rs. The d-axis fit also identifies the inverter dead-time
 voltage against each record's phase-current sign vector (`fit_dead_time`); the q
 axis and CAL-4 subtract it, and ID 95 reports it (`sil-demo --sil-scenario
-dead-time`, with the SIL's `--dead-time-v`). Each CAL-4 level starts its capture once the speed
+dead-time`, with the SIL's `--dead-time-v`). The current loop can compensate it
+(`foc_current_config.dead_time_v`, ID 87, store format 7), off by default and
+enabled by the Host (`sil-demo --sil-scenario dead-time-comp`). Each CAL-4 level starts its capture once the speed
 (mean over 100 ms from the encoder angle) has the level's sign and is within 5 %
 of steady, estimated from two successive changes; a heavy rotor takes seconds and
 after a reversal still turns the old way. A level waits at most 10 s, then the

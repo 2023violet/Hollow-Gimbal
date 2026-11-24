@@ -223,6 +223,9 @@ struct foc_runtime_tuning {
      * FOC_RUNTIME_RAMP_MIN/MAX. Either nonzero shapes velocity and position references. */
     float accel_rad_s2;
     float decel_rad_s2;
+    /** Inverter dead-time compensation of the current loop in V, 0 off, at most
+     * FOC_RUNTIME_DEAD_TIME_MAX_V; the ramp width stays the instance's dead_time_knee_a. */
+    float dead_time_v;
     /** Command and lifecycle freshness lease in µs. */
     uint32_t command_timeout_us;
     /** Protection thresholds, checked only when the instance enables protection. */
@@ -236,6 +239,9 @@ struct foc_runtime_tuning {
 #define FOC_RUNTIME_RAMP_MIN_RAD_S2       0.1f
 #define FOC_RUNTIME_RAMP_MAX_RAD_S2       100000.0f
 #define FOC_RUNTIME_RAMP_UNLIMITED_RAD_S2 1.0e6f
+
+/** Largest dead-time compensation a tuning may select, in V. */
+#define FOC_RUNTIME_DEAD_TIME_MAX_V       1.0f
 
 /** Inclusive bounds of the command lease a tuning candidate may select, in µs. */
 enum foc_runtime_tuning_limits {

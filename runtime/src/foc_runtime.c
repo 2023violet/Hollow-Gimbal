@@ -1571,10 +1571,16 @@ static int foc_runtime_tuning_check(
         tuning->command_timeout_us < runtime->pipeline.safety.config.sample_timeout_us) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
+    if (!(tuning->dead_time_v >= 0.0f && tuning->dead_time_v <= FOC_RUNTIME_DEAD_TIME_MAX_V) ||
+        (tuning->dead_time_v > 0.0f &&
+         !(runtime->pipeline.current.config.dead_time_knee_a > 0.0f))) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
     struct foc_current_config inner = runtime->pipeline.current.config;
     inner.kp_v_per_a = tuning->current_kp_v_per_a;
     inner.ki_v_per_a_s = tuning->current_ki_v_per_a_s;
     inner.current_limit_a = tuning->current_limit_a;
+    inner.dead_time_v = tuning->dead_time_v;
     if (foc_current_init(current, &inner) != FOC_STATUS_OK) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
@@ -1733,6 +1739,7 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .iq_limit_a = motion->iq_limit_a,
         .accel_rad_s2 = motion->accel_rad_s2,
         .decel_rad_s2 = motion->decel_rad_s2,
+        .dead_time_v = inner->dead_time_v,
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
         .trips = runtime->config.trips,
         .profile = runtime->config.profile,

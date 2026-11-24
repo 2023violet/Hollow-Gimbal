@@ -3196,3 +3196,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - `g3/safe` 新增 `FOC_SAFE_FAULT_DRIVER`（位 16）；Runtime 快速输入追加 `driver_fault`，H0 未锁存时请求 INHIBIT 并锁存，FAULT_CLEAR 可清除且要求线已释放。板级 ADC 适配增加 nFAULT 读取回调与 2 次采样去抖，ARM 读 PB2，SIL 增加 `--driver-fault-us on_us[,off_us]`。首版每周期重复请求停机会饿死 H0 心跳（同时锁存 FAST_HEARTBEAT），改为仅在未锁存时请求。
 - CLI 故障名加入 `DRIVER_FAULT`，新增 SIL `driver-fault` 场景与单元测试（19 项）；协议 README、firmware README 与参数契约第 21 节同步。资源：默认镜像 text 91,028 B，bss 14,376 B。
+
+## 2026-11-23 · 滑行检查：相电压测磁链与电角度误差
+
+- 调查结论：5 kHz 边沿对齐 PWM 下单次 ADC 只能读到瞬时端电压，无法给 CAL-3 提供周期平均端电压；相电压只在桥臂关断时可用。校准管理器新增状态 17 COAST：CAL-4 后加起转档（受 0.6 × 电压上限、ID 72 的 80% 与电流阶跃约束），关断后每 1 ms 读相电压，用最高两相线电压和编码器中心差分转速拟合磁链与角度误差，可用时替换 CAL-4 磁链；含 CAL-7 时不运行。板级新增相电压读取回调（ARM：规则组软件触发 PA1–PA3；SIL：开路反电动势经分压，最低相按最坏情况钳位），SIL 增加 `--dead-time-v`。PARAM_READ 新增只读 ID 91–94。
+- CLI 新增 `coast-*`/`driven-flux` 参数名、状态 COAST、SIL `coast` 场景与单元测试（20 项）：0.08 V 死区下 CAL-4 磁链 +15%，滑行磁链 −0.4%；0.1 rad 偏移误差读回 0.0994 rad。协议 README、firmware README、参数契约第 22 节同步。资源：默认镜像 text 93,524 B，bss 14,504 B。

@@ -446,6 +446,33 @@ static void foc_at32_board_pins_init(void)
     gpio_init(GPIOB, &pins);
 }
 
+/* Coast check phase voltages, foreground only, bridge off: three single software-triggered
+ * ordinary conversions (the injected H0 group preempts them), logical phases A, B, C =
+ * driver C (PA1/IN1), B (PA2/IN2), A (PA3/IN3), the order of the currents and PWM. */
+static bool foc_at32_phase_voltage_read(void *argument, uint16_t counts[3], uint32_t *sample_us)
+{
+    (void)argument;
+    static const adc_channel_select_type channels[3] =
+        {ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3};
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        adc_ordinary_channel_set(ADC1, channels[index], 1, ADC_SAMPLETIME_28_5);
+        adc_flag_clear(ADC1, ADC_CCE_FLAG);
+        adc_ordinary_software_trigger_enable(ADC1, TRUE);
+        uint32_t remaining = 1000U;
+        while (adc_flag_get(ADC1, ADC_CCE_FLAG) == RESET && remaining != 0U) {
+            remaining--;
+        }
+        if (remaining == 0U) {
+            return false;
+        }
+        counts[index] = adc_ordinary_conversion_data_get(ADC1);
+        if (index == 1U) {
+            *sample_us = foc_at32_now_us();
+        }
+    }
+    return true;
+}
+
 /* DRV8311 nFAULT (PB2, open drain with the board pull-up): asserted when low. */
 static bool foc_at32_nfault_asserted(void *argument)
 {
@@ -523,6 +550,7 @@ static bool foc_at32_adc_init(void)
     adc_base_config_type config;
     adc_base_default_para_init(&config);
     config.sequence_mode = TRUE;
+    config.ordinary_channel_length = 1;
     adc_base_config(ADC1, &config);
     adc_preempt_channel_length_set(ADC1, 4);
     /* VBUS (PA0), IC (PA4), IB (PA5), IA (PA6) in physical driver phase order. */
@@ -531,6 +559,8 @@ static bool foc_at32_adc_init(void)
     adc_preempt_channel_set(ADC1, ADC_CHANNEL_5, 3, ADC_SAMPLETIME_7_5);
     adc_preempt_channel_set(ADC1, ADC_CHANNEL_6, 4, ADC_SAMPLETIME_7_5);
     adc_preempt_conversion_trigger_set(ADC1, ADC12_PREEMPT_TRIG_SOFTWARE, TRUE);
+    /* Ordinary group: one software-triggered phase-voltage channel at a time (coast check). */
+    adc_ordinary_conversion_trigger_set(ADC1, ADC12_ORDINARY_TRIG_SOFTWARE, TRUE);
     adc_enable(ADC1, TRUE);
 
     adc_calibration_init(ADC1);
@@ -694,6 +724,7 @@ int main(void)
         );
         const struct foc_serial_calibration calibrate = foc_board_calibration_serial(&calibration);
         foc_serial_attach_calibration(&serial, &calibrate);
+        foc_board_calibration_attach_phase_voltage(&calibration, foc_at32_phase_voltage_read, NULL);
         /* The boot configuration and tuning CONFIG_ERASE returns to, before any restore. */
         foc_board_calibration_capture_boot(&calibration, &boot);
 #if defined(FALCONFOC_BOARD_PERSISTENCE)

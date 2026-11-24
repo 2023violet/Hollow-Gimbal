@@ -216,6 +216,13 @@ class Board1SilTest(unittest.TestCase):
             summary = cli.run_sil_driver_fault(SIL, ["--lockstep-us", "500"])
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_coast_check_flux_and_angle(self):
+        """The coast EMF gives the flux free of an inverter dead-time error that biases
+        CAL-4, reports a commutation angle error, and is skipped with CAL-7."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_coast(SIL, ["--lockstep-us", "500"])
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_free_running_host_silence_trips_command_timeout(self):
         """Time keeps moving without frames: the command timeout stops the drive."""
         with cli.SimulatorTransport(SIL, ["--speed", "0.02"]) as transport:

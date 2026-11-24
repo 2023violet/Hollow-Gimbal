@@ -98,6 +98,8 @@ struct sil_plant {
     uint32_t inhibits;
     /* Constant external load torque from plant time load_on_us (0 never). */
     double load_torque_nm;
+    /* Inverter dead-time and switch-drop error: each phase loses dead_time_v x sign(i). */
+    double dead_time_v;
     uint32_t load_on_us;
     bool load_applied;
 };
@@ -166,6 +168,32 @@ static uint32_t sil_slot_index(uint32_t now_us)
     return now_us / (uint32_t)FOC_BOARD_H0_US;
 }
 
+/* Average phase voltages minus dead_time_v x sign(i) per phase (smoothed over 20 mA),
+ * reduced to alpha/beta as foc_virtual_motor_apply_duty() does. */
+static int sil_plant_step_dead_time(struct sil_plant *plant, double dt_s)
+{
+    struct foc_virtual_motor_observation seen;
+    if (foc_virtual_motor_observe(&plant->motor, &seen) != 0) {
+        return -1;
+    }
+    const double theta = seen.electrical_position_rad;
+    const double i_alpha = cos(theta) * seen.id_a - sin(theta) * seen.iq_a;
+    const double i_beta = sin(theta) * seen.id_a + cos(theta) * seen.iq_a;
+    const double current[3] = {
+        i_alpha,
+        -0.5 * i_alpha + 0.8660254037844386 * i_beta,
+        -0.5 * i_alpha - 0.8660254037844386 * i_beta,
+    };
+    const double duty[3] = {plant->active.duty_a, plant->active.duty_b, plant->active.duty_c};
+    double v[3];
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        v[index] = plant->vbus_v * duty[index] - plant->dead_time_v * tanh(current[index] / 0.02);
+    }
+    const double alpha = (2.0 * v[0] - v[1] - v[2]) / 3.0;
+    const double beta = (v[1] - v[2]) / 1.7320508075688772;
+    return foc_virtual_motor_step(&plant->motor, alpha, beta, dt_s);
+}
+
 /* Integrate the plant to now_us with the drive that was in effect. */
 static int sil_plant_advance(struct sil_plant *plant, uint32_t now_us)
 {
@@ -184,9 +212,11 @@ static int sil_plant_advance(struct sil_plant *plant, uint32_t now_us)
         const double dt_s = (double)step * 1.0e-6;
         /* HIGH_Z: all bridge switches off. Winding current has already decayed
          * through the diodes; the open winding carries none and the shaft coasts. */
-        const int status = plant->drive == SIL_DRIVE_UPDATE
-            ? foc_virtual_motor_apply_duty(&plant->motor, &plant->active, plant->vbus_v, dt_s)
-            : foc_virtual_motor_step_open_circuit(&plant->motor, 0.0, 0.0, dt_s);
+        const int status = plant->drive != SIL_DRIVE_UPDATE
+            ? foc_virtual_motor_step_open_circuit(&plant->motor, 0.0, 0.0, dt_s)
+            : plant->dead_time_v > 0.0
+            ? sil_plant_step_dead_time(plant, dt_s)
+            : foc_virtual_motor_apply_duty(&plant->motor, &plant->active, plant->vbus_v, dt_s);
         if (status != 0) {
             return status;
         }
@@ -515,6 +545,34 @@ static void sil_report(struct sil_device *device)
     );
 }
 
+/* main.c foc_at32_phase_voltage_read(): the open-winding EMF as terminal voltages through
+ * the 11:1 dividers. The floating neutral is taken at its worst: the lowest terminal sits on a
+ * body-diode clamp 0.3 V below ground, which the ADC reads as zero. */
+static bool sil_phase_voltage_read(void *argument, uint16_t counts[3], uint32_t *sample_us)
+{
+    struct sil_device *device = argument;
+    struct sil_plant *plant = &device->plant;
+    double alpha = 0.0;
+    double beta = 0.0;
+    if (sil_plant_advance(plant, device->now_us) != 0 || plant->drive == SIL_DRIVE_UPDATE ||
+        foc_virtual_motor_measure_open_circuit(&plant->motor, &alpha, &beta) != 0) {
+        return false;
+    }
+    const double emf[3] = {
+        alpha,
+        -0.5 * alpha + 0.8660254037844386 * beta,
+        -0.5 * alpha - 0.8660254037844386 * beta,
+    };
+    const double lowest = fmin(emf[0], fmin(emf[1], emf[2]));
+    const double per_count = SIL_ADC_FULL_SCALE * SIL_VBUS_DIVIDER / SIL_ADC_MAX;
+    for (unsigned int index = 0U; index < 3U; ++index) {
+        const double count = round((emf[index] - lowest - 0.3) / per_count);
+        counts[index] = (uint16_t)fmin(fmax(count, 0.0), SIL_ADC_MAX);
+    }
+    *sample_us = device->now_us;
+    return true;
+}
+
 /* main.c foc_at32_nfault_asserted(): the injected nFAULT window on virtual time. */
 static bool sil_driver_fault_line(void *argument)
 {
@@ -681,7 +739,8 @@ static void sil_usage(const char *name)
         "[--motor-ld-h l]\n"
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
-        "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n",
+        "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n"
+        "          [--dead-time-v v]\n",
         name
     );
 }
@@ -830,6 +889,9 @@ int main(int argc, char **argv)
             motor.inertia_kg_m2 = strtod(value, NULL);
         } else if (strcmp(option, "--motor-damping") == 0) {
             motor.damping_nm_s = strtod(value, NULL);
+        } else if (strcmp(option, "--dead-time-v") == 0) {
+            /* Inverter voltage error per phase, opposing its current. */
+            device.plant.dead_time_v = strtod(value, NULL);
         } else if (strcmp(option, "--driver-fault-us") == 0) {
             /* DRV8311 nFAULT held low from on_us until off_us (default: never released). */
             char *rest = NULL;
@@ -914,6 +976,11 @@ int main(int argc, char **argv)
         &device.serial,
         NULL,
         NULL
+    );
+    foc_board_calibration_attach_phase_voltage(
+        &device.calibration,
+        sil_phase_voltage_read,
+        &device
     );
     const struct foc_serial_calibration calibration =
         foc_board_calibration_serial(&device.calibration);

@@ -55,13 +55,16 @@ PARAMETERS = {
     "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
     "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
     "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
+    "coast-status": 91, "coast-flux": 92, "coast-angle-error": 93, "driven-flux": 94,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
                       "model-damping", "rated-current", "peak-current", "max-speed",
                       "gear-ratio", "current-bandwidth", "current-kp-q", "current-ki-q",
                       "current-limit", "velocity-limit", "trip-sustained-ms")
-PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32"}
+PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32", 91: "u32"}
+# Coast check outcome (ID 91).
+COAST_STATUS = ["NOT_RUN", "USED", "TOO_FEW", "INCONSISTENT"]
 # Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection, 16 the
 # gate driver nFAULT line.
 FAULT_BITS = ["COMMAND_TIMEOUT", "SAMPLE_TIMEOUT", "SAMPLE_INVALID", "FAST_HEARTBEAT",
@@ -75,7 +78,7 @@ def fault_names(mask):
         bit for bit in range(len(FAULT_BITS), 32) if mask & (1 << bit)]
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
               "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE",
-              "INERTIA"]
+              "INERTIA", "COAST"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
                 "CAPTURE", "INERTIA"]
@@ -915,7 +918,7 @@ def run_virtual_demo(
 SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 3, 4
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
-                 "trajectory", "inertia", "rotor-range", "driver-fault")
+                 "trajectory", "inertia", "rotor-range", "driver-fault", "coast")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2313,6 +2316,83 @@ def run_sil_driver_fault(simulator, base_arguments, json_path=None):
     return summary
 
 
+def run_sil_coast(simulator, base_arguments, json_path=None):
+    """Coast check after CAL-4 (parameter contract section 22): the drive spins up, the bridge
+    turns off and the phase-voltage dividers (PA1-PA3) see the EMF alone, free of Rs, dead
+    time and switch drops. The flux fitted from the line-to-line voltage of the two highest
+    phases (the lowest may sit on a body-diode clamp) replaces CAL-4's, and the d share of
+    the EMF reports the electrical angle error. The plant takes the worst-case clamp.
+    Nothing here is physical evidence."""
+
+    checks, metrics = {}, {}
+    flux = 0.01
+
+    def calibrate(arguments, stages=2, trim=None):
+        transport = SimulatorTransport(simulator, list(base_arguments) + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        commissioned = commission(client)
+        if trim is not None:
+            offset = session.read("electrical-offset")
+            written = session.call("param-write", parameter_write(
+                PARAMETERS["electrical-offset"], "f32", (offset + trim) % (2.0 * math.pi)))
+            assert written["result"] == "APPLIED", written
+        _wait_still(session)
+        started = session.call("calibrate", bytes([stages]))["result"]
+        view, states = None, []
+        for _ in range(600000):
+            view = session.call("calibrate-read", quiet=True)
+            if not states or states[-1] != view["calibration_state"]:
+                states.append(view["calibration_state"])
+            if view["calibration_state"] in ("DONE", "FAILED"):
+                break
+        values = {name: session.read(name) for name in (
+            "coast-status", "coast-flux", "coast-angle-error", "driven-flux", "model-flux")}
+        transport.__exit__()
+        values["coast-status"] = COAST_STATUS[values["coast-status"]]
+        return {"commissioned": commissioned, "started": started,
+                "state": view["calibration_state"], "states": states, **values}
+
+    def used(run, angle=0.0):
+        return (run["started"] == "ACCEPTED" and run["state"] == "DONE"
+                and "COAST" in run["states"] and run["coast-status"] == "USED"
+                and abs(run["coast-flux"] / flux - 1.0) < 0.01
+                and abs(run["coast-angle-error"] - angle) < 0.01
+                and run["model-flux"] == run["coast-flux"])
+
+    # 1. Ideal inverter: coast and driven flux agree.
+    run = metrics["ideal"] = calibrate([])
+    checks["ideal_coast_used"] = used(run) and abs(run["driven-flux"] / flux - 1.0) < 0.01
+
+    # 2. A 0.08 V dead-time error per phase biases the driven CAL-4 flux, not the coast one.
+    run = metrics["dead_time"] = calibrate(["--dead-time-v", "0.08"])
+    checks["dead_time_driven_biased"] = run["driven-flux"] / flux - 1.0 > 0.1
+    checks["dead_time_coast_used"] = used(run)
+
+    # 3. A commutation offset 0.1 rad off: the coast EMF reports the angle error.
+    run = metrics["offset_error"] = calibrate([], trim=0.1)
+    checks["offset_error_reported"] = used(run, angle=0.1)
+
+    # 4. With CAL-7 the drive continues into it: no coast.
+    run = metrics["with_inertia"] = calibrate([], stages=CAL_STAGES["electrical-mechanical"])
+    checks["no_coast_with_cal7"] = (run["state"] == "DONE" and "COAST" not in run["states"]
+                                    and run["coast-status"] == "NOT_RUN")
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-coast",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_trajectory(simulator, base_arguments, flash_path, json_path=None):
     """Trajectory shaping (parameter contract 3.4, P1 step B): acceleration (ID 106) and
     deceleration (ID 107) shape velocity references; in position mode the planner runs a
@@ -3037,6 +3117,10 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario == "coast":
+                summary = run_sil_coast(os.path.abspath(args.simulator), simulator_arguments,
+                                        args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "driver-fault":
                 summary = run_sil_driver_fault(os.path.abspath(args.simulator),
                                                simulator_arguments, args.json)

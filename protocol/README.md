@@ -391,7 +391,7 @@ that is running, including a calibration restored at boot.
 
 States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
 SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10, RL_D 11, RL_Q 12, FLUX 13,
-TUNE 14, RESTORE 15, INERTIA 16. Failures: none 0, state 1, ADC 2, lifecycle 3,
+TUNE 14, RESTORE 15, INERTIA 16, COAST 17. Failures: none 0, state 1, ADC 2, lifecycle 3,
 drive 4, current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted
 11, timeout 12, R/L 13, flux 14, tune 15, capture 16, inertia 17. Byte 4 carries
 the admission failure, or for R/L, flux and inertia failures the estimator's
@@ -408,6 +408,18 @@ then spans four more reversals and at least 40 windows (at most 12 s). Each H0
 period's speed and Kt × iq feed `foc_mechanical_id`; TUNE writes J and B (IDs
 85/86) and the unified refresh derives IDs 69–71. Without three reversals in
 10 s (a very heavy or damped load at 20 % current) the run ends TIMEOUT.
+
+Coast check (state 17, electrical stage without CAL-7, phase-voltage reader
+attached): after the fourth CAL-4 level the drive spins up (at most 0.6 × the
+voltage limit and an EMF of 80 % of ID 72, the current step within 60 % of the
+current limit), settles, and turns the bridge off. With no winding current the
+phase dividers see the EMF alone. Each millisecond the line-to-line voltage of the
+two highest phases (the lowest may sit on a body-diode clamp) is fitted against
+the encoder angle and a central-difference speed, giving the flux and the
+electrical angle error. A usable fit replaces CAL-4's flux. Read-only results of
+the latest run: ID 91 u32 status (0 not run, 1 used, 2 too few samples, 3
+inconsistent), ID 92 f32 coast flux Wb, ID 93 f32 angle error rad (firmware angle
+minus true), ID 94 f32 the driven CAL-4 flux Wb. The check never fails a run.
 CAL-4 also ends TIMEOUT when a speed level is not steady in its direction within
 10 s (SIL: J above about 0.05 kg·m² for the 0.105 N·m/A plant).
 

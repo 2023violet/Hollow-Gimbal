@@ -124,6 +124,11 @@ struct foc_serial_commission_view {
     uint8_t source;
     /** ADC zero of this boot: pending 0, ready 1, last attempt refused 2. */
     uint8_t zero_state;
+    /** Coast check of the latest run (IDs 91-94): status, flux, angle error, driven flux. */
+    uint8_t coast_status;
+    float coast_flux_wb;
+    float coast_angle_error_rad;
+    float driven_flux_wb;
 };
 
 struct foc_serial_calibration {

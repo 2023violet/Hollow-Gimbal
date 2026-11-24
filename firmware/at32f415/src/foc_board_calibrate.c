@@ -101,6 +101,19 @@
 #define CAL_INERTIA_WINDOWS         40U
 #define CAL_INERTIA_MAX_SAMPLES     60000U
 #define CAL_INERTIA_REVERSALS       4U
+/* Coast check: with the bridge off the winding current is zero, so the terminal voltages are
+ * the EMF alone, free of Rs, dead time and switch drops. One sample per millisecond while the
+ * line-to-line EMF (sqrt 3 x |w_e| x driven flux) stays above 0.5 V, at most 2 s or 400
+ * samples, at least 20. The lowest terminal may sit on a body-diode clamp below the ADC zero,
+ * so each sample uses only the line-to-line voltage of the two highest phases, and only when
+ * the middle one reads at least 0.2 V. The fit is refused above 10 % relative residual. */
+#define CAL_COAST_SAMPLE_US         1000U
+#define CAL_COAST_TIMEOUT_US        2000000U
+#define CAL_COAST_MIN_SAMPLES       20U
+#define CAL_COAST_MAX_SAMPLES       400U
+#define CAL_COAST_MIN_EMF_V         0.3f
+#define CAL_COAST_MIN_READING_V     0.03f
+#define CAL_COAST_MAX_RESIDUAL      0.1
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -841,6 +854,162 @@ static bool cal_drain(struct foc_board_calibration *cal)
     return ok;
 }
 
+/* Coast check ----------------------------------------------------------------------- */
+
+/* After CAL-4 with a phase-voltage reader; not with CAL-7, which continues CAL-4's drive. */
+static bool cal_coast_planned(const struct foc_board_calibration *cal)
+{
+    return cal->phase_read != NULL && (cal->stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U &&
+        (cal->stages & FOC_BOARD_CAL_STAGE_MECHANICAL) == 0U;
+}
+
+static void
+cal_coast_begin(struct foc_board_calibration *cal, const struct foc_runtime_snapshot *view)
+{
+    cal->coast_qq = cal->coast_qd = cal->coast_dd = 0.0;
+    cal->coast_qv = cal->coast_dv = cal->coast_vv = 0.0;
+    cal->coast_samples = 0U;
+    cal->coast_last_us = cal->state_us;
+    cal->coast_points_count = 0U;
+    cal->coast_start_speed = fabsf(view->mechanical_rad_s);
+    cal->driven_flux_wb = (float)cal->flux_result.flux_wb;
+}
+
+/* Line-to-line voltage of logical phases x and y for a unit EMF on the given axis. */
+static float cal_coast_basis(float theta, float d, float q, unsigned int x, unsigned int y)
+{
+    const float alpha = d * cosf(theta) - q * sinf(theta);
+    const float beta = d * sinf(theta) + q * cosf(theta);
+    const float phase[3] = {
+        alpha,
+        -0.5f * alpha + 0.8660254f * beta,
+        -0.5f * alpha - 0.8660254f * beta,
+    };
+    return phase[x] - phase[y];
+}
+
+/* Fit v_xy = a b_q + b b_d over the samples: a = flux cos(e), b = flux sin(e), where e is the
+ * firmware electrical angle minus the true one. Uses the coast flux in place of CAL-4's. */
+static void cal_coast_finish(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    const double det = cal->coast_qq * cal->coast_dd - cal->coast_qd * cal->coast_qd;
+    if (cal->coast_samples < CAL_COAST_MIN_SAMPLES || !(det > 0.0)) {
+        cal->coast_status = FOC_BOARD_CAL_COAST_TOO_FEW;
+    } else {
+        const double a = (cal->coast_qv * cal->coast_dd - cal->coast_dv * cal->coast_qd) / det;
+        const double b = (cal->coast_dv * cal->coast_qq - cal->coast_qv * cal->coast_qd) / det;
+        const double residual = cal->coast_vv - a * cal->coast_qv - b * cal->coast_dv;
+        const float flux = hypotf((float)a, (float)b);
+        cal->coast_flux_wb = flux;
+        cal->coast_angle_error_rad = atan2f((float)b, (float)a);
+        if (!isfinite(flux) || !(cal->coast_vv > 0.0) ||
+            residual > CAL_COAST_MAX_RESIDUAL * CAL_COAST_MAX_RESIDUAL * cal->coast_vv ||
+            flux < cal->flux_id.config.min_flux_wb || flux > cal->flux_id.config.max_flux_wb) {
+            cal->coast_status = FOC_BOARD_CAL_COAST_INCONSISTENT;
+        } else {
+            cal->coast_status = FOC_BOARD_CAL_COAST_USED;
+            cal->flux_result.flux_wb = flux;
+        }
+    }
+    cal_enter(cal, FOC_BOARD_CAL_TUNE, now_us);
+}
+
+/* Add the row of the middle point: its speed is the central difference of the encoder
+ * positions around it (the filtered speed lags while the rotor decelerates), its angle the
+ * position extrapolated to its phase-voltage time with that speed. */
+static void cal_coast_row(
+    struct foc_board_calibration *cal,
+    const struct foc_board_cal_coast_point *before,
+    const struct foc_board_cal_coast_point *middle,
+    const struct foc_board_cal_coast_point *after
+)
+{
+    const int32_t span_us = (int32_t)(after->sensor_us - before->sensor_us);
+    if (!middle->usable || span_us <= 0) {
+        return;
+    }
+    const float speed =
+        (after->mechanical_rad - before->mechanical_rad) * (1.0e6f / (float)span_us);
+    const float age_s = (float)(int32_t)(middle->sample_us - middle->sensor_us) * 1.0e-6f;
+    struct foc_electrical_state electrical;
+    if (foc_rotor_electrical(
+            &cal->runtime->config.motion.rotor,
+            middle->mechanical_rad + speed * age_s,
+            speed,
+            &electrical
+        ) != FOC_STATUS_OK) {
+        return;
+    }
+    const float omega = electrical.velocity_rad_s;
+    const double bq =
+        omega * cal_coast_basis(electrical.angle_rad, 0.0f, 1.0f, middle->high, middle->low);
+    const double bd =
+        omega * cal_coast_basis(electrical.angle_rad, 1.0f, 0.0f, middle->high, middle->low);
+    const double v = middle->pair_v;
+    cal->coast_qq += bq * bq;
+    cal->coast_qd += bq * bd;
+    cal->coast_dd += bd * bd;
+    cal->coast_qv += bq * v;
+    cal->coast_dv += bd * v;
+    cal->coast_vv += v * v;
+    cal->coast_samples++;
+}
+
+/* Bridge off: one phase-voltage sample per interval with the latest encoder position. */
+static void cal_coast(
+    struct foc_board_calibration *cal,
+    const struct foc_runtime_snapshot *view,
+    uint32_t now_us
+)
+{
+    if (now_us - cal->coast_last_us < CAL_COAST_SAMPLE_US) {
+        return;
+    }
+    cal->coast_last_us = now_us;
+    const float pole_pairs = (float)cal->runtime->config.motion.rotor.pole_pairs;
+    const float emf = 1.7320508f * pole_pairs * fabsf(view->mechanical_rad_s) * cal->driven_flux_wb;
+    if (now_us - cal->state_us > CAL_COAST_TIMEOUT_US ||
+        cal->coast_samples >= CAL_COAST_MAX_SAMPLES ||
+        (view->sensor_valid && emf < CAL_COAST_MIN_EMF_V)) {
+        cal_coast_finish(cal, now_us);
+        return;
+    }
+    uint16_t counts[3];
+    uint32_t sample_us = 0U;
+    if (!view->sensor_valid || !cal->phase_read(cal->phase_argument, counts, &sample_us)) {
+        cal->coast_points_count = 0U;
+        return;
+    }
+    const float scale = cal->runtime->pipeline.adc_config.vbus_v_per_count;
+    const float volts[3] =
+        {(float)counts[0] * scale, (float)counts[1] * scale, (float)counts[2] * scale};
+    /* The two highest phases; the lowest may be clamped below the ADC zero. */
+    unsigned int lowest = 0U;
+    for (unsigned int index = 1U; index < 3U; ++index) {
+        if (volts[index] < volts[lowest]) {
+            lowest = index;
+        }
+    }
+    const unsigned int high = lowest == 0U ? 1U : 0U;
+    const unsigned int low = lowest == 2U ? 1U : 2U;
+    const struct foc_board_cal_coast_point point = {
+        .mechanical_rad = view->mechanical_rad,
+        .sensor_us = view->sensor_us,
+        .sample_us = sample_us,
+        .pair_v = volts[high] - volts[low],
+        .high = (uint8_t)high,
+        .low = (uint8_t)low,
+        .usable = fminf(volts[high], volts[low]) >= CAL_COAST_MIN_READING_V,
+    };
+    if (cal->coast_points_count >= 2U) {
+        cal_coast_row(cal, &cal->coast_points[0], &cal->coast_points[1], &point);
+        cal->coast_points[0] = cal->coast_points[1];
+        cal->coast_points[1] = point;
+    } else {
+        cal->coast_points[cal->coast_points_count++] = point;
+    }
+}
+
 /* Kt for CAL-7: this run's flux when CAL-4 ran, otherwise the profile's. */
 static float cal_inertia_kt(const struct foc_board_calibration *cal)
 {
@@ -1069,7 +1238,24 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         0.15f * limit,
         0.2f * cal->runtime->pipeline.current.config.current_limit_a * cal->rl_model.rs_ohm
     );
-    const float levels[4] = {base, 2.0f * base, -base, -2.0f * base};
+    /* Level 4 (coast check only): spin up for the coast, at most 0.6 x the voltage limit and
+     * an EMF of 80 % of the speed limit (ID 72) with the CAL-4 flux, the current step from -2a
+     * again within 60 % of the current limit. */
+    const float spin_speed_v = 0.8f * cal->runtime->config.motion.position.velocity_limit_rad_s *
+        (float)cal->runtime->config.motion.rotor.pole_pairs * (float)cal->flux_result.flux_wb;
+    const float spin = fmaxf(
+        2.0f * base,
+        fminf(
+            fminf(
+                2.0f * base +
+                    0.6f * cal->runtime->pipeline.current.config.current_limit_a *
+                        cal->rl_model.rs_ohm,
+                0.6f * limit
+            ),
+            spin_speed_v
+        )
+    );
+    const float levels[5] = {base, 2.0f * base, -base, -2.0f * base, -spin};
     cal_drive_dq(cal, 0.0f, levels[cal->level], 0.0f, true, now_us);
     if (!cal->capturing && cal->pushed >= CAL_FLUX_WINDOW * CAL_FLUX_WINDOWS) {
         /* Level complete: move on, or finish after the fourth. */
@@ -1096,13 +1282,27 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
             cal_enter(cal, FOC_BOARD_CAL_INERTIA, now_us);
             return;
         }
+        if (cal_coast_planned(cal)) {
+            /* The drive keeps running into the spin-up level; settle then stops it. */
+            cal->state_us = now_us;
+            cal->flux_checks = 0U;
+            cal->flux_samples = 0U;
+            return;
+        }
         atomic_store(&cal->record_active, 0U);
         foc_runtime_revoke_command(cal->runtime);
         cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
     } else if (!cal->capturing && cal->pushed == 0U) {
         /* Settle: one check per interval; the first three only set the references. */
-        if (elapsed > CAL_FLUX_SETTLE_MAX_US) {
+        if (elapsed > CAL_FLUX_SETTLE_MAX_US && cal->level < 4U) {
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+            return;
+        }
+        if (cal->level == 4U && elapsed > CAL_FLUX_SETTLE_MAX_US) {
+            /* The coast check is optional: an unsettled spin-up still coasts. */
+            atomic_store(&cal->record_active, 0U);
+            foc_runtime_revoke_command(cal->runtime);
+            cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
             return;
         }
         const uint32_t check = elapsed / CAL_FLUX_STEADY_US;
@@ -1134,7 +1334,12 @@ static void cal_electrical(struct foc_board_calibration *cal, uint32_t now_us)
         cal->flux_check_us = cal->flux_angle_us;
         cal->flux_checks = check;
         cal->flux_samples++;
-        if (steady) {
+        if (steady && cal->level == 4U) {
+            /* Spin-up settled: bridge off, the coast check samples the EMF. */
+            atomic_store(&cal->record_active, 0U);
+            foc_runtime_revoke_command(cal->runtime);
+            cal_enter(cal, FOC_BOARD_CAL_DRIVE_STOP, now_us);
+        } else if (steady) {
             if (cal->level != 0U) {
                 foc_flux_id_break(&cal->flux_id);
             }
@@ -1335,6 +1540,10 @@ int foc_board_calibration_start(
     cal->flux_result = (struct foc_flux_id_result){0};
     cal->pi = (struct foc_motor_pi_candidate){0};
     cal->mech_result = (struct foc_mechanical_id_result){0};
+    cal->coast_status = FOC_BOARD_CAL_COAST_NOT_RUN;
+    cal->coast_flux_wb = 0.0f;
+    cal->coast_angle_error_rad = 0.0f;
+    cal->driven_flux_wb = 0.0f;
     /* CAL-7 without CAL-3/4 takes Rs and Kt from the profile; TUNE needs the full model. */
     if (mechanical && (stages & FOC_BOARD_CAL_STAGE_ELECTRICAL) == 0U &&
         (!foc_board_profile_model_complete(&cal->tuning.profile) ||
@@ -1374,6 +1583,16 @@ void foc_board_calibration_adopt(
         calibration->align_voltage_v = 0.0f;
         calibration->active_source = FOC_BOARD_CAL_SOURCE_STORAGE;
     }
+}
+
+void foc_board_calibration_attach_phase_voltage(
+    struct foc_board_calibration *calibration,
+    foc_board_phase_voltage_read read,
+    void *argument
+)
+{
+    calibration->phase_read = read;
+    calibration->phase_argument = argument;
 }
 
 void foc_board_calibration_capture_boot(
@@ -1654,11 +1873,18 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     }
     case FOC_BOARD_CAL_DRIVE_STOP:
         if (cal_quiet(&view)) {
+            const bool coast = cal->electrical_phase && cal_coast_planned(cal) &&
+                cal->flux_result.state == FOC_CALIBRATION_STATE_VALID;
             cal_enter(
                 cal,
-                cal->electrical_phase ? FOC_BOARD_CAL_TUNE : FOC_BOARD_CAL_APPLY,
+                coast                       ? FOC_BOARD_CAL_COAST
+                    : cal->electrical_phase ? FOC_BOARD_CAL_TUNE
+                                            : FOC_BOARD_CAL_APPLY,
                 now_us
             );
+            if (coast) {
+                cal_coast_begin(cal, &view);
+            }
         } else if (now_us - cal->state_us > CAL_STOP_TIMEOUT_US) {
             cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
         }
@@ -1676,6 +1902,9 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
         break;
     case FOC_BOARD_CAL_INERTIA:
         cal_inertia(cal, &view, now_us);
+        break;
+    case FOC_BOARD_CAL_COAST:
+        cal_coast(cal, &view, now_us);
         break;
     case FOC_BOARD_CAL_RESTORE:
         if (cal->failing && !cal_quiet(&view)) {
@@ -1812,6 +2041,10 @@ static bool cal_serial_commission(const void *context, struct foc_serial_commiss
         .zero_state = cal->zero_ready ? FOC_BOARD_CAL_ZERO_READY
             : cal->zero_refused       ? FOC_BOARD_CAL_ZERO_REFUSED
                                       : FOC_BOARD_CAL_ZERO_PENDING,
+        .coast_status = cal->coast_status,
+        .coast_flux_wb = cal->coast_flux_wb,
+        .coast_angle_error_rad = cal->coast_angle_error_rad,
+        .driven_flux_wb = cal->driven_flux_wb,
     };
     return true;
 }

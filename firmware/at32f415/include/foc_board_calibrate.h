@@ -66,7 +66,41 @@ enum foc_board_cal_state {
     FOC_BOARD_CAL_RESTORE = 15,
     /** CAL-7 inertia and damping identification (P1, appended). */
     FOC_BOARD_CAL_INERTIA = 16,
+    /** Bridge off after the electrical stages: flux and angle error from the coasting EMF. */
+    FOC_BOARD_CAL_COAST = 17,
 };
+
+/** One coast sample: encoder position and its time, phase-voltage time and pair voltage. */
+struct foc_board_cal_coast_point {
+    float mechanical_rad;
+    uint32_t sensor_us;
+    uint32_t sample_us;
+    float pair_v;
+    uint8_t high;
+    uint8_t low;
+    bool usable;
+};
+
+/** Coast check outcome (PARAM_READ ID 91). */
+enum foc_board_cal_coast {
+    /** Not run: no electrical stage, or no phase-voltage reader attached. */
+    FOC_BOARD_CAL_COAST_NOT_RUN = 0,
+    /** Measured; its flux replaced the driven CAL-4 flux. */
+    FOC_BOARD_CAL_COAST_USED = 1,
+    /** Too few usable samples (the rotor was too slow or stopped too soon). */
+    FOC_BOARD_CAL_COAST_TOO_FEW = 2,
+    /** The fit did not describe the samples (residual, or flux out of range). */
+    FOC_BOARD_CAL_COAST_INCONSISTENT = 3,
+};
+
+/**
+ * Optional phase-voltage reader for the coast check: three terminal voltages in ADC counts
+ * in logical phase order A, B, C (the order of the currents and PWM channels) and their
+ * sample time in monotonic microseconds. Foreground only, while the bridge is off.
+ */
+typedef bool (*foc_board_phase_voltage_read)(void *argument,
+                                             uint16_t counts[3],
+                                             uint32_t *sample_us);
 
 /** CALIBRATE_START stage mask. */
 enum foc_board_cal_stages {
@@ -245,6 +279,24 @@ struct foc_board_calibration {
     struct foc_motor_rl_model rl_model;
     struct foc_flux_id_result flux_result;
     struct foc_motor_pi_candidate pi;
+    /* Coast check: phase-voltage reader, least-squares sums and result. */
+    foc_board_phase_voltage_read phase_read;
+    void *phase_argument;
+    double coast_qq;
+    double coast_qd;
+    double coast_dd;
+    double coast_qv;
+    double coast_dv;
+    double coast_vv;
+    uint32_t coast_samples;
+    uint32_t coast_last_us;
+    struct foc_board_cal_coast_point coast_points[2];
+    uint32_t coast_points_count;
+    float coast_start_speed;
+    uint8_t coast_status;
+    float coast_flux_wb;
+    float coast_angle_error_rad;
+    float driven_flux_wb;
     /* M3c: CAL-3 probes the drive voltage when no alignment ran in this boot. */
     bool probing;
     float probe_current_a;
@@ -315,6 +367,11 @@ void foc_board_calibration_adopt(struct foc_board_calibration *calibration,
 
 /** Record the boot configuration and tuning CONFIG_ERASE returns to. Call after bind and
  * before a stored record is restored; an accepted supply becomes the SUPPLY group. */
+/** Attach the coast check's phase-voltage reader, before producers start. NULL detaches. */
+void foc_board_calibration_attach_phase_voltage(struct foc_board_calibration *calibration,
+                                                foc_board_phase_voltage_read read,
+                                                void *argument);
+
 void foc_board_calibration_capture_boot(struct foc_board_calibration *calibration,
                                         const struct foc_board_boot *boot);
 

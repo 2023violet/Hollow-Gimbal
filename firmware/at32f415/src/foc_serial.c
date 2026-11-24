@@ -60,6 +60,11 @@ enum {
     PARAM_COMMUTATION_VALID = 88,
     PARAM_COMMUTATION_SOURCE = 89,
     PARAM_ADC_ZERO_STATE = 90,
+    /* Coast check of the latest calibration run, read only. */
+    PARAM_COAST_STATUS = 91,
+    PARAM_COAST_FLUX = 92,
+    PARAM_COAST_ANGLE_ERROR = 93,
+    PARAM_DRIVEN_FLUX = 94,
     /* Controller tuning receipt, read only. */
     PARAM_TUNING_REVISION = 60,
     PARAM_TUNING_RESULT = 61,
@@ -808,14 +813,26 @@ static bool foc_serial_parameter_read(
         foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
         return true;
     }
-    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_ADC_ZERO_STATE &&
+    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_DRIVEN_FLUX &&
         serial->calibration.commission != NULL) {
         struct foc_serial_commission_view view = {0};
         (void)serial->calibration.commission(serial->calibration.context, &view);
-        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
-        parameter->value = id == PARAM_COMMUTATION_VALID ? view.valid
-            : id == PARAM_COMMUTATION_SOURCE             ? view.source
-                                                         : view.zero_state;
+        if (id >= PARAM_COAST_FLUX) {
+            const float value = id == PARAM_COAST_FLUX ? view.coast_flux_wb
+                : id == PARAM_COAST_ANGLE_ERROR        ? view.coast_angle_error_rad
+                                                       : view.driven_flux_wb;
+            *parameter = (struct foc_serial_parameter){
+                .type = PARAM_F32,
+                .unit = id == PARAM_COAST_ANGLE_ERROR ? UNIT_RADIAN : UNIT_WEBER,
+                .value = foc_serial_float_bits(value),
+            };
+        } else {
+            *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
+            parameter->value = id == PARAM_COMMUTATION_VALID ? view.valid
+                : id == PARAM_COMMUTATION_SOURCE             ? view.source
+                : id == PARAM_ADC_ZERO_STATE                 ? view.zero_state
+                                                             : view.coast_status;
+        }
         parameter->minimum = parameter->maximum = parameter->value;
         return true;
     }

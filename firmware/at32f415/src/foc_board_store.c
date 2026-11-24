@@ -6,7 +6,8 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 7, 236 bytes, little-endian. Format 6 is bytes 0–227 with its
+ * Record "FBP1", format 8, 244 bytes, little-endian. Format 7 is bytes 0–231 with its
+ * CRC at 232 and no CAN settings (defaults on restore). Format 6 is bytes 0–227 with its
  * CRC at 228 and no dead-time compensation. Format 5 is bytes 0–219 with
  * its CRC at 220 and no velocity bandwidth or inertia travel; format 4 is bytes 0–211
  * with its CRC at 212 and no acceleration limits; format 3 is bytes 0–207 with its CRC at
@@ -15,7 +16,7 @@
  * still decode, keeping the boot profile and protection thresholds:
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 7     10 length u16 = 236
+ *   4  magic "FBP1"          8  format u16 = 8     10 length u16 = 244
  *   12 sequence u32
  *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
  *   28 runtime encoder direction i32   32 electrical offset f32
@@ -35,7 +36,9 @@
  *   212/216 acceleration / deceleration f32 rad/s² (format 5; 0 from format 4)
  *   220/224 velocity bandwidth Hz / inertia travel rad (format 6; boot values before)
  *   228 dead-time compensation f32 V (format 7; 0, off, before)
- *   232 CRC-32 (IEEE, reflected) of bytes 4–231
+ *   232 CAN node ID u8   233 CAN bit-rate code u8 (0 125k, 1 250k, 2 500k, 3 1M)
+ *   234/236 heartbeat / encoder-estimate periods u16 ms   238 reserved u16 = 0 (format 8)
+ *   240 CRC-32 (IEEE, reflected) of bytes 4–239
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -49,8 +52,10 @@
 
 #define STORE_COMMIT    UINT32_C(0xC35A4C7E)
 #define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT    7U
-#define STORE_CRC_AT    232U
+#define STORE_FORMAT    8U
+#define STORE_CRC_AT    240U
+#define STORE_V7_BYTES  236U
+#define STORE_V7_CRC_AT 232U
 #define STORE_V6_BYTES  232U
 #define STORE_V6_CRC_AT 228U
 #define STORE_V5_BYTES  224U
@@ -225,6 +230,7 @@ static bool settings_from_live(
     settings->remote_current_cap_a = serial->current_limit_a;
     settings->remote_position_cap_rad = serial->position_limit_rad;
     settings->output_zero_rad = serial->output_zero_rad;
+    settings->can = serial->can;
     return true;
 }
 
@@ -236,7 +242,8 @@ static bool serial_caps_valid(const struct foc_board_settings *settings)
         settings->remote_current_cap_a <= settings->tuning.iq_limit_a &&
         isfinite(settings->remote_position_cap_rad) && settings->remote_position_cap_rad >= 1.0f &&
         settings->remote_position_cap_rad <= 1000.0f && isfinite(settings->output_zero_rad) &&
-        fabsf(settings->output_zero_rad) <= 1000.0f;
+        fabsf(settings->output_zero_rad) <= 1000.0f &&
+        foc_serial_can_settings_valid(&settings->can);
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -339,6 +346,13 @@ void foc_board_store_encode(
     put_f32(record + 220, t->profile.velocity_bandwidth_hz);
     put_f32(record + 224, t->profile.inertia_travel_rad);
     put_f32(record + 228, t->dead_time_v);
+    const uint32_t rate = settings->can.bitrate;
+    record[232] = (uint8_t)settings->can.node_id;
+    record[233] = rate == 125000U ? 0U : rate == 250000U ? 1U : rate == 500000U ? 2U : 3U;
+    record[234] = (uint8_t)settings->can.heartbeat_ms;
+    record[235] = (uint8_t)(settings->can.heartbeat_ms >> 8);
+    record[236] = (uint8_t)settings->can.estimates_ms;
+    record[237] = (uint8_t)(settings->can.estimates_ms >> 8);
     put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
 }
 
@@ -357,16 +371,19 @@ int foc_board_store_decode(
     const bool v4 = format == 4U && length == STORE_V4_BYTES;
     const bool v5 = format == 5U && length == STORE_V5_BYTES;
     const bool v6 = format == 6U && length == STORE_V6_BYTES;
-    const bool v7 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
+    const bool v7 = format == 7U && length == STORE_V7_BYTES;
+    const bool v8 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
     const size_t crc_at = v1 ? STORE_V1_CRC_AT
         : v2                 ? STORE_V2_CRC_AT
         : v3                 ? STORE_V3_CRC_AT
         : v4                 ? STORE_V4_CRC_AT
         : v5                 ? STORE_V5_CRC_AT
         : v6                 ? STORE_V6_CRC_AT
+        : v7                 ? STORE_V7_CRC_AT
                              : STORE_CRC_AT;
     if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
-        !(v1 || v2 || v3 || v4 || v5 || v6 || v7) ||
+        !(v1 || v2 || v3 || v4 || v5 || v6 || v7 || v8) ||
+        (v8 && (record[233] > 3U || record[238] != 0U || record[239] != 0U)) ||
         get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
         (!v1 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
@@ -397,16 +414,26 @@ int foc_board_store_decode(
         .remote_current_cap_a = get_f32(record + 96),
         .remote_position_cap_rad = get_f32(record + 100),
         .calibration_present = !v1 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
-        .output_zero_rad = v4 || v5 || v6 || v7 ? get_f32(record + 208) : 0.0f,
-        .extended = v3 || v4 || v5 || v6 || v7,
-        .mechanical = v6 || v7,
+        .output_zero_rad = v4 || v5 || v6 || v7 || v8 ? get_f32(record + 208) : 0.0f,
+        .extended = v3 || v4 || v5 || v6 || v7 || v8,
+        .mechanical = v6 || v7 || v8,
+        .can = foc_serial_can_defaults(),
     };
-    settings->tuning.dead_time_v = v7 ? get_f32(record + 228) : 0.0f;
-    if (v5 || v6 || v7) {
+    settings->tuning.dead_time_v = v7 || v8 ? get_f32(record + 228) : 0.0f;
+    if (v8) {
+        static const uint32_t rates[] = {125000U, 250000U, 500000U, 1000000U};
+        settings->can = (struct foc_serial_can_settings){
+            .node_id = record[232],
+            .bitrate = rates[record[233]],
+            .heartbeat_ms = (uint32_t)record[234] | (uint32_t)record[235] << 8,
+            .estimates_ms = (uint32_t)record[236] | (uint32_t)record[237] << 8,
+        };
+    }
+    if (v5 || v6 || v7 || v8) {
         settings->tuning.accel_rad_s2 = get_f32(record + 212);
         settings->tuning.decel_rad_s2 = get_f32(record + 216);
     }
-    if (v3 || v4 || v5 || v6 || v7) {
+    if (v3 || v4 || v5 || v6 || v7 || v8) {
         settings->tuning.profile = (struct foc_runtime_profile){
             .rs_ohm = get_f32(record + 136),
             .ld_h = get_f32(record + 140),
@@ -419,8 +446,8 @@ int foc_board_store_decode(
             .max_speed_rad_s = get_f32(record + 168),
             .gear_ratio = get_f32(record + 172),
             .current_bandwidth_hz = get_f32(record + 176),
-            .velocity_bandwidth_hz = v6 || v7 ? get_f32(record + 220) : 0.0f,
-            .inertia_travel_rad = v6 || v7 ? get_f32(record + 224) : 0.0f,
+            .velocity_bandwidth_hz = v6 || v7 || v8 ? get_f32(record + 220) : 0.0f,
+            .inertia_travel_rad = v6 || v7 || v8 ? get_f32(record + 224) : 0.0f,
         };
         settings->tuning.trips = (struct foc_runtime_trip_limits){
             .overcurrent_a = get_f32(record + 180),
@@ -620,6 +647,7 @@ void foc_board_persistence_restore(
     serial->current_limit_a = settings.remote_current_cap_a;
     serial->position_limit_rad = settings.remote_position_cap_rad;
     serial->output_zero_rad = settings.output_zero_rad;
+    serial->can = settings.can;
     persistence->loaded_sequence = sequence;
     persistence->state = FOC_BOARD_STORE_LOADED;
 }

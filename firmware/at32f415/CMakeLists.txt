@@ -74,6 +74,7 @@ add_library(
   src/foc_board_timing.c
   src/foc_board_capture.c
   src/foc_serial.c
+  src/foc_can.c
   src/foc_uart_buffer.c
   "${repo}/core/src/foc_core.c"
   "${repo}/core/src/foc_current.c"
@@ -175,6 +176,7 @@ if(CMAKE_CROSSCOMPILING)
     "${startup}/startup_at32f415.s"
     "${cmsis}/device_support/system_at32f415.c"
     "${vendor}/drivers/src/at32f415_adc.c"
+    "${vendor}/drivers/src/at32f415_can.c"
     "${vendor}/drivers/src/at32f415_crm.c"
     "${vendor}/drivers/src/at32f415_flash.c"
     "${vendor}/drivers/src/at32f415_gpio.c"
@@ -244,6 +246,9 @@ else()
   add_executable(test-foc-serial tests/test_foc_serial.c)
   target_link_libraries(test-foc-serial PRIVATE falconfoc-board1)
   add_test(NAME test-foc-serial COMMAND test-foc-serial)
+  add_executable(test-foc-can tests/test_foc_can.c)
+  target_link_libraries(test-foc-can PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-can COMMAND test-foc-can)
   add_executable(foc-serial-sim tests/foc_serial_sim.c)
   target_link_libraries(foc-serial-sim PRIVATE falconfoc-board1-supply-none)
   add_executable(foc-serial-sim-verification tests/foc_serial_sim.c)

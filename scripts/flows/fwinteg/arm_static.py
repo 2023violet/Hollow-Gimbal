@@ -66,6 +66,14 @@ REVIEWED_PROLOGUES = {
         "and PB0/PB1 analog) the board pins are set (PA1-PA3 phase-voltage analog, NFAULT PB2 "
         "input, PB8 pull-down) and the PLL runs from the 8 MHz crystal (x75/4) with a HICK "
         "fallback recorded in clock_from_crystal",
+    "eb8d476b7a15c849f0d4bc5efeed290c316213c70de1575ece78a63b84e60ba0":
+        "CAN1 start after the restore (2026-11-24): the pinout prologue instruction for "
+        "instruction, same calls and order; only register allocation differs because the "
+        "inlined CAN init reads clock_from_crystal later and keeps its address in a "
+        "callee-saved register",
+    "d058797222020e7f65d9a753eafbbcb52e920413e07f64619fb739e6e805d806":
+        "CAN1 start after the restore (2026-11-24), timing-trace build: as above, plus wide "
+        "encodings (ldr.w/strb.w) of the same clock_from_crystal store",
 }
 
 

@@ -57,6 +57,7 @@ firmware-at32f415	test-foc-board-config
 firmware-at32f415	test-foc-board-store
 firmware-at32f415	test-foc-board1
 firmware-at32f415	test-foc-board1-sil
+firmware-at32f415	test-foc-can
 firmware-at32f415	test-foc-capture-boot-import
 firmware-at32f415	test-foc-capture-import
 firmware-at32f415	test-foc-locked-timing-import

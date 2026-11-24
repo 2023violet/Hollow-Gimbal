@@ -3211,3 +3211,8 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - `foc_current_config` 追加 `dead_time_v`/`dead_time_knee_a`，由参考电流符号向量作前馈，沿用已有前馈的抗积分饱和；Runtime 调参 `dead_time_v`；可写 ID 87，存储 format 7（236 字节）。校准不写 ID 87（用户决定默认关闭，由上位机按 ID 95 启用）。Core 单元测试按手算值校验补偿电压与关闭时逐位不变。
 - SIL `dead-time-comp` 场景与单元测试（22 项）：0.2 V、50 Hz 电流环、带负载时 q 轴跟踪误差 6.3 → 2.4 mA，掉电恢复 ID 87。更正：最初报告的"补偿后转速波动变差约 30%"是运行顺序造成的（校准后第一次运行偏大），交替重复后补偿对转速波动无影响；参数契约第 24 节记录。资源：默认镜像 text 95,788 B，bss 14,600 B。
+
+## 2026-11-24 · CAN：CANSimple 第一步
+
+- 新增 `foc_can.c`：CANSimple 帧（11 位 ID = 节点 << 5 | 命令）经新的 `foc_serial_execute()` 走 UART 同一套准入；Set_Axis_State/Controller_Mode/Input_*/Limits/Traj/Gains/Absolute_Position、心跳与位置速度周期帧、Address 按序列号分配、RxSdo/TxSdo 读写 FalconFOC 参数、Estop/Clear_Errors/Reboot。`main.c` 在设置恢复后启动 CAN1（PA11/PA12，HICK 时不启用），RX FIFO0 中断优先级 2。参数 120/122/123/125（保存）、126/127（只读），存储 format 8（244 字节）。
+- SIL `--can <serial>` 复用 stdio；CLI 虚拟总线、`can` 命令、场景 `can` 与 `can-multi`，SIL 单元测试新增 2 项；`protocol/tests/cansimple_vectors.tsv` 与 Python 校验。用户决定：先 CANSimple，MIT 第二步。参数契约第 25 节。默认镜像 text 102,660 B（+6,872）、bss 15,304 B（+704）；带存储镜像余量约 19.4 KB。未上板。fwinteg：`expected_tests.tsv` 加入 `test-foc-can`；`arm_static.py` 记录两个复核过的锁定前序摘要（指令逐条相同，只有寄存器分配不同，因内联的 CAN 初始化稍后读 `clock_from_crystal`）。

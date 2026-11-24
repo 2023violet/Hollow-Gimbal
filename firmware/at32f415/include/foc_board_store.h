@@ -44,7 +44,7 @@ enum foc_board_store_limits {
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
     /** Encoded record size and programming unit. */
     /** Format 3 record; formats 1 (108 bytes) and 2 (140 bytes) still decode. */
-    FOC_BOARD_STORE_RECORD_BYTES = 236,
+    FOC_BOARD_STORE_RECORD_BYTES = 244,
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 
@@ -79,6 +79,8 @@ struct foc_board_settings {
     float remote_position_cap_rad;
     /** Format 4: output-position zero offset in output rad (PARAM 124); 0 before. */
     float output_zero_rad;
+    /** Format 8: CAN settings (IDs 120, 122, 123, 125); defaults before. */
+    struct foc_serial_can_settings can;
     /** Format 2: an applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;

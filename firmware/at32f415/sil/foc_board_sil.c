@@ -24,6 +24,13 @@
  * Time runs freely (scaled wall clock) or in lockstep after each received
  * frame. stdout carries protocol bytes only; FALCONF0C_META lines on stderr
  * carry virtual plant observations. Nothing here is physical evidence.
+ *
+ * With --can <serial>, stdin and stdout carry records instead of raw UART bytes:
+ * channel u8, length u8, payload. Channel 0 is UART bytes, channel 1 one CAN frame
+ * (id u16, flags u8 with bit 0 RTR, length u8, 8 data bytes), channel 2 a time
+ * advance (u32 µs, lockstep only), acknowledged with a channel 2 record carrying the
+ * virtual time. In lockstep, UART records advance time as before (per frame delimiter);
+ * CAN records do not, so a Host can step several nodes alike.
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -33,6 +40,7 @@
 #include "foc_board_calibrate.h"
 #include "foc_board_store.h"
 #include "foc_board_timing.h"
+#include "foc_can.h"
 #include "foc_serial.h"
 #include "foc_virtual_bootstrap_instrument.h"
 #include "foc_virtual_motor.h"
@@ -68,6 +76,11 @@
 #define SIL_FOREGROUND_US  10U
 #define SIL_PLANT_STEP_US  5U
 #define SIL_H1_FIRST_US    1U
+/* Multiplexed stdio record channels (--can). */
+#define SIL_CHANNEL_UART   0U
+#define SIL_CHANNEL_CAN    1U
+#define SIL_CHANNEL_TICK   2U
+#define SIL_CAN_RECORD     12U
 
 /* Private Types ---------------------------------------------------------------- */
 
@@ -124,6 +137,14 @@ struct sil_device {
     struct foc_serial serial;
     struct foc_board_persistence persistence;
     struct foc_board_calibration calibration;
+    struct foc_can_buffer can_buffer;
+    struct foc_can can;
+    /* --can: multiplexed stdio records and the record being received. */
+    bool mux;
+    uint8_t record[2U + 255U];
+    unsigned int record_have;
+    /* A time-advance record was received: acknowledge it with the virtual time. */
+    bool tick_ack;
     /* Virtual peripherals. */
     struct sil_flash flash;
     struct sil_plant plant;
@@ -441,17 +462,51 @@ static void sil_tmr5(struct sil_device *device, uint32_t phase_us)
     }
 }
 
+static void sil_write_record(uint8_t channel, const uint8_t *payload, size_t length)
+{
+    const uint8_t header[2] = {channel, (uint8_t)length};
+    (void)fwrite(header, 1U, sizeof header, stdout);
+    (void)fwrite(payload, 1U, length, stdout);
+    (void)fflush(stdout);
+}
+
 static void sil_drain_tx(struct sil_device *device)
 {
-    uint8_t buffer[256];
+    uint8_t buffer[255];
     size_t length = 0U;
     while (length < sizeof buffer && foc_uart_tx_pop(&device->uart, &buffer[length])) {
         ++length;
     }
-    if (length != 0U) {
-        (void)fwrite(buffer, 1U, length, stdout);
-        (void)fflush(stdout);
+    if (length == 0U) {
+        return;
     }
+    if (device->mux) {
+        sil_write_record(SIL_CHANNEL_UART, buffer, length);
+        return;
+    }
+    (void)fwrite(buffer, 1U, length, stdout);
+    (void)fflush(stdout);
+}
+
+/* The CAN port of main.c: every frame leaves at once on the virtual bus. */
+static bool sil_can_send(void *context, const struct foc_can_frame *frame)
+{
+    (void)context;
+    uint8_t payload[SIL_CAN_RECORD] = {
+        (uint8_t)frame->id,
+        (uint8_t)(frame->id >> 8),
+        frame->rtr ? 1U : 0U,
+        frame->length,
+    };
+    memcpy(payload + 4, frame->data, sizeof frame->data);
+    sil_write_record(SIL_CHANNEL_CAN, payload, sizeof payload);
+    return true;
+}
+
+static uint32_t sil_can_state(const void *context)
+{
+    const struct sil_device *device = context;
+    return device->mux ? FOC_CAN_STATE_ACTIVE : FOC_CAN_STATE_OFF;
 }
 
 static uint32_t sil_serial_clock(void *argument)
@@ -587,6 +642,9 @@ static void sil_foreground(struct sil_device *device)
     struct foc_runtime_foreground_result result;
     (void)foc_runtime_foreground_poll(&device->runtime, device->now_us, 0U, 0U, &result);
     foc_serial_poll(&device->serial, &device->uart, &device->runtime, sil_serial_clock, device);
+    if (device->mux) {
+        foc_can_poll(&device->can, &device->serial, &device->runtime, device->now_us);
+    }
     foc_board_calibration_poll(&device->calibration, device->now_us);
     sil_drain_tx(device);
     sil_report(device);
@@ -657,6 +715,49 @@ static void sil_sleep_ms(unsigned int ms)
 #endif
 }
 
+/* One complete --can record: returns the lockstep advance it asks for in µs. */
+static uint32_t sil_record(struct sil_device *device, uint32_t lockstep_us)
+{
+    const uint8_t channel = device->record[0];
+    const uint8_t length = device->record[1];
+    const uint8_t *payload = device->record + 2;
+    uint32_t advance = 0U;
+    if (channel == SIL_CHANNEL_UART) {
+        for (unsigned int index = 0U; index < length; ++index) {
+            foc_uart_rx_push(&device->uart, payload[index], false);
+            advance += payload[index] == 0U ? lockstep_us : 0U;
+        }
+    } else if (channel == SIL_CHANNEL_CAN && length == SIL_CAN_RECORD) {
+        struct foc_can_frame frame = {
+            .id = (uint16_t)((payload[0] | payload[1] << 8) & 0x7FF),
+            .rtr = (payload[2] & 1U) != 0U,
+            .length = payload[3] > 8U ? 8U : payload[3],
+        };
+        memcpy(frame.data, payload + 4, sizeof frame.data);
+        foc_can_rx_push(&device->can_buffer, &frame);
+    } else if (channel == SIL_CHANNEL_TICK && length == 4U) {
+        advance = (uint32_t)payload[0] | (uint32_t)payload[1] << 8 | (uint32_t)payload[2] << 16 |
+            (uint32_t)payload[3] << 24;
+        device->tick_ack = true;
+    }
+    return advance;
+}
+
+/* Feed one received byte: raw UART, or part of a --can record. Returns the advance. */
+static uint32_t sil_receive(struct sil_device *device, uint8_t byte, uint32_t lockstep_us)
+{
+    if (!device->mux) {
+        foc_uart_rx_push(&device->uart, byte, false);
+        return byte == 0U ? lockstep_us : 0U;
+    }
+    device->record[device->record_have++] = byte;
+    if (device->record_have < 2U || device->record_have < 2U + device->record[1]) {
+        return 0U;
+    }
+    device->record_have = 0U;
+    return sil_record(device, lockstep_us);
+}
+
 /* Move every byte already waiting on stdin into the USART RX queue. */
 static void sil_read_available(struct sil_device *device)
 {
@@ -693,7 +794,7 @@ static void sil_read_available(struct sil_device *device)
         length = (size_t)received;
 #endif
         for (size_t index = 0U; index < length; ++index) {
-            foc_uart_rx_push(&device->uart, buffer[index], false);
+            (void)sil_receive(device, buffer[index], 0U);
         }
     }
 }
@@ -740,7 +841,7 @@ static void sil_usage(const char *name)
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
         "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n"
-        "          [--dead-time-v v]\n",
+        "          [--dead-time-v v] [--can serial]\n",
         name
     );
 }
@@ -889,6 +990,10 @@ int main(int argc, char **argv)
             motor.inertia_kg_m2 = strtod(value, NULL);
         } else if (strcmp(option, "--motor-damping") == 0) {
             motor.damping_nm_s = strtod(value, NULL);
+        } else if (strcmp(option, "--can") == 0) {
+            /* Multiplexed stdio with a virtual CAN bus; the value is the 48-bit serial. */
+            device.mux = true;
+            device.can.port.serial_number = strtoull(value, NULL, 0) & 0xFFFFFFFFFFFFULL;
         } else if (strcmp(option, "--dead-time-v") == 0) {
             /* Inverter voltage error per phase, opposing its current. */
             device.plant.dead_time_v = strtod(value, NULL);
@@ -1006,6 +1111,16 @@ int main(int argc, char **argv)
     const struct foc_serial_persistence persistence =
         foc_board_persistence_serial(&device.persistence);
     foc_serial_attach_persistence(&device.serial, &persistence);
+    /* main.c foc_at32_can_init(): the port, after the restore. */
+    const struct foc_can_port can_port = {
+        .context = &device,
+        .send = sil_can_send,
+        .state = sil_can_state,
+        .serial_number = device.can.port.serial_number,
+    };
+    foc_can_init(&device.can, &device.can_buffer, &can_port);
+    const struct foc_serial_can_link can_link = {&device.can, foc_can_link_status};
+    foc_serial_attach_can_link(&device.serial, &can_link);
     /* A calibration restored from storage is the manager's applied result; saves keep it. */
     if (device.persistence.calibration_restored) {
         foc_board_calibration_adopt(&device.calibration, &device.persistence.restored_calibration);
@@ -1041,9 +1156,20 @@ int main(int argc, char **argv)
             if (byte == EOF) {
                 break;
             }
-            foc_uart_rx_push(&device.uart, (uint8_t)byte, false);
-            if (byte == 0 && sil_advance_to(&device, device.now_us + lockstep_us) != 0) {
+            const uint32_t advance = sil_receive(&device, (uint8_t)byte, lockstep_us);
+            if (advance != 0U && sil_advance_to(&device, device.now_us + advance) != 0) {
                 return 1;
+            }
+            if (device.tick_ack) {
+                /* Every frame of the advanced interval is already on stdout. */
+                const uint8_t now[4] = {
+                    (uint8_t)device.now_us,
+                    (uint8_t)(device.now_us >> 8),
+                    (uint8_t)(device.now_us >> 16),
+                    (uint8_t)(device.now_us >> 24),
+                };
+                device.tick_ack = false;
+                sil_write_record(SIL_CHANNEL_TICK, now, sizeof now);
             }
             if (duration_us != 0U && device.now_us >= duration_us) {
                 break;

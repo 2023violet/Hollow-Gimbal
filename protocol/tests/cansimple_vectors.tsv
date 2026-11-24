@@ -1,0 +1,14 @@
+# CANSimple vectors (contract 25): id_hex rtr data_hex description; '-' is empty.
+7e6	1	-	discovery: Address request to the broadcast node 0x3F
+7e6	0	03c3b2a1c0f00000	assign node 3 to serial 0xF0C0A1B2C3
+097	1	-	Get_Bus_Voltage_Current request to node 4 (4 << 5 | 0x17)
+067	0	08000000	Set_Axis_State CLOSED_LOOP to node 3
+06b	0	0200000001000000	Set_Controller_Mode velocity, passthrough
+06d	0	0000003f00000000	Set_Input_Vel 0.5 turn/s
+06c	0	0000803e00000000	Set_Input_Pos 0.25 turn, no feedforward
+06e	0	0ad7233c	Set_Input_Torque 0.01 N*m
+064	0	014a000050c30000	RxSdo write ID 74 = 50000 us
+064	0	0078000000000000	RxSdo read ID 120
+076	0	01	Reboot action 1: save
+062	0	-	Estop
+078	0	00	Clear_Errors

@@ -26,6 +26,7 @@
 #define HEXT_STARTUP_TIMEOUT 0x3000U
 #define HICK_VALUE           8000000U
 #define ADC_MODULE_ENABLED
+#define CAN_MODULE_ENABLED
 #define CRM_MODULE_ENABLED
 #define FLASH_MODULE_ENABLED
 #define GPIO_MODULE_ENABLED
@@ -34,6 +35,7 @@
 #define USART_MODULE_ENABLED
 
 #include "at32f415_adc.h"
+#include "at32f415_can.h"
 #include "at32f415_crm.h"
 #include "at32f415_flash.h"
 #include "at32f415_gpio.h"

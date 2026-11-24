@@ -16,6 +16,8 @@ import sys
 import threading
 import time
 
+import falconfoc_can
+
 
 MESSAGES = {
     "hello": 1, "capability": 2, "status": 3, "setpoint": 0x10,
@@ -57,13 +59,16 @@ PARAMETERS = {
     "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
     "coast-status": 91, "coast-flux": 92, "coast-angle-error": 93, "driven-flux": 94,
     "dead-time-v": 95, "dead-time-comp": 87,
+    "can-node-id": 120, "can-bitrate": 122, "can-heartbeat-ms": 123, "can-estimates-ms": 125,
+    "can-status": 126, "raw-faults": 127,
 }
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
                       "model-damping", "rated-current", "peak-current", "max-speed",
                       "gear-ratio", "current-bandwidth", "current-kp-q", "current-ki-q",
                       "current-limit", "velocity-limit", "trip-sustained-ms")
-PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32", 91: "u32"}
+PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32", 91: "u32",
+                   120: "u32", 122: "u32", 123: "u32", 125: "u32", 126: "u32", 127: "u32"}
 # Coast check outcome (ID 91).
 COAST_STATUS = ["NOT_RUN", "USED", "TOO_FEW", "INCONSISTENT"]
 # Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection, 16 the
@@ -920,7 +925,7 @@ SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
-                 "dead-time", "dead-time-comp")
+                 "dead-time", "dead-time-comp", "can", "can-multi")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2562,6 +2567,251 @@ def run_sil_dead_time_comp(simulator, base_arguments, flash_path, json_path=None
     return summary
 
 
+def _can_heartbeat(client, node, predicate, timeout_us, keep_alive=None):
+    """Wait for a heartbeat of node whose decoded content satisfies predicate."""
+    identifier = falconfoc_can.arbitration_id(node, falconfoc_can.COMMANDS["heartbeat"])
+    frame = client.wait(lambda f: f.id == identifier and len(f.data) == 7
+                        and predicate(falconfoc_can.decode_frame(f)), timeout_us, keep_alive)
+    return None if frame is None else falconfoc_can.decode_frame(frame)
+
+
+def _can_estimates(frames, node):
+    identifier = falconfoc_can.arbitration_id(node, falconfoc_can.COMMANDS["get-encoder-estimates"])
+    return [falconfoc_can.decode_frame(frame) for frame in frames if frame.id == identifier]
+
+
+def _can_run(client, node, mode, value, duration_us):
+    """Stream one CANSimple setpoint for duration_us; returns the encoder estimates."""
+    mark = len(client.bus.inbox)
+    for _ in range(duration_us // client.step_us):
+        client.set_input(node, mode, value)
+        client.step()
+    return _can_estimates(client.frames_since(mark), node)
+
+
+def run_sil_can(simulator, base_arguments, flash_path, json_path=None):
+    """CANSimple on one Board1 SIL node (parameter contract section 25): discovery and node
+    assignment by serial number, cyclic heartbeat and encoder estimates, parameters over
+    SDO, a motor calibration requested over CAN, velocity, position and torque control
+    with the command lease as watchdog, Estop and Clear_Errors, then save and power cycle.
+    Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    serial_number, node = 0xF0C0A1B2C3, 3
+    if flash_path.exists():
+        flash_path.unlink()
+
+    def boot():
+        device = falconfoc_can.MuxSimulatorNode(
+            simulator, list(base_arguments) + ["--flash", str(flash_path)], serial_number)
+        client = falconfoc_can.CanSimpleClient(falconfoc_can.SilCanBus([device]))
+        uart = Client(device)
+        uart.hello()
+        return device, client, uart
+
+    device, client, uart = boot()
+    # 1. Discovery and assignment.
+    checks["discovered_unaddressed"] = client.scan() == {serial_number: 0x3F}
+    client.address(node, serial_number)
+    reply = client.wait(lambda f: f.id == falconfoc_can.arbitration_id(node, 6), 20000)
+    checks["assigned_by_serial"] = reply is not None and reply.data[0] == node
+    mark = len(client.bus.inbox)
+    for _ in range(int(0.35e6) // client.step_us):
+        client.step()
+    beats = [time for time, frame in client.bus.inbox[mark:]
+             if frame.id == falconfoc_can.arbitration_id(node, 1)]
+    intervals = [later - earlier for earlier, later in zip(beats, beats[1:])]
+    estimates = _can_estimates(client.frames_since(mark), node)
+    metrics["cyclic"] = {"heartbeat_intervals_us": intervals, "estimates": len(estimates)}
+    checks["heartbeat_100ms"] = len(intervals) >= 2 and all(
+        abs(interval - 100000) <= 1000 for interval in intervals)
+    checks["estimates_10ms"] = abs(len(estimates) - 35) <= 1
+    # 2. Parameters over SDO: the lease, a refused value, the link status.
+    checks["lease_written"] = client.sdo(node, PARAMETERS["command-lease-us"], 50000)[0] == 1
+    for _ in range(10):
+        client.step()
+    checks["lease_read_back"] = client.sdo(node, PARAMETERS["command-lease-us"]) == (0, 50000)
+    checks["out_of_range_refused"] = client.sdo(node, PARAMETERS["can-node-id"], 99)[0] == 7
+    link = client.sdo(node, PARAMETERS["can-status"])[1]
+    checks["link_active"] = link is not None and link & 0xFF == 1
+    # 3. Commutation import over UART, then the motor calibration over CAN.
+    checks["commissioned"] = commission(uart) == "APPLIED"
+    client.set_axis_state(node, "motor-calibration")
+    running = _can_heartbeat(client, node, lambda hb: hb["state"] == "MOTOR_CALIBRATION", 150000)
+    done = _can_heartbeat(client, node, lambda hb: hb["state"] == "IDLE"
+                          and hb["procedure"] != "BUSY", 60000000)
+    kt = client.sdo_float(node, PARAMETERS["model-kt"])
+    metrics["calibration"] = {"done": done, "kt_nm_per_a": kt}
+    checks["calibrated_over_can"] = (running is not None and done is not None
+                                     and done["procedure"] == "SUCCESS" and kt is not None
+                                     and kt > 0.0)
+    # 4. Velocity: closed loop while streaming, then the lease trips when streaming stops.
+    client.set_controller_mode(node, "velocity")
+    for _ in range(10):
+        client.step()
+    keep = lambda: client.set_input(node, "velocity", 0.5)
+    client.set_axis_state(node, "closed-loop")
+    closed = _can_heartbeat(client, node, lambda hb: hb["state"] == "CLOSED_LOOP", 300000, keep)
+    velocity = _can_run(client, node, "velocity", 0.5, 1000000)
+    tail = velocity[len(velocity) // 2:]
+    mean_velocity = sum(e["velocity_turns_s"] for e in tail) / max(len(tail), 1)
+    metrics["velocity"] = {"target_turns_s": 0.5, "mean_turns_s": mean_velocity}
+    checks["velocity_tracks"] = closed is not None and abs(mean_velocity / 0.5 - 1.0) < 0.05
+    watchdog = _can_heartbeat(client, node, lambda hb: "WATCHDOG_TIMER_EXPIRED" in hb["error_names"]
+                              and hb["state"] == "IDLE", 200000)
+    client.send(node, "clear-errors", b"\0")
+    cleared = _can_heartbeat(client, node, lambda hb: hb["errors"] == 0, 300000)
+    checks["lease_is_watchdog"] = watchdog is not None and cleared is not None
+    # 5. Position: once the shaft is still, zero the output, then go to a quarter turn.
+    estimates_id = falconfoc_can.arbitration_id(node, falconfoc_can.COMMANDS["get-encoder-estimates"])
+    client.wait(lambda f: f.id == estimates_id
+                and abs(falconfoc_can.decode_frame(f)["velocity_turns_s"]) < 0.002, 3000000)
+    client.send(node, "set-absolute-position", struct.pack("<f", 0.0))
+    client.set_controller_mode(node, "position")
+    for _ in range(10):
+        client.step()
+    zeroed = client.request(node, "get-encoder-estimates")
+    zero_position = falconfoc_can.decode_frame(zeroed)["position_turns"] if zeroed else None
+    keep = lambda: client.set_input(node, "position", 0.25)
+    client.set_axis_state(node, "closed-loop")
+    closed = _can_heartbeat(client, node, lambda hb: hb["state"] == "CLOSED_LOOP", 300000, keep)
+    position = _can_run(client, node, "position", 0.25, 1500000)
+    arrived = _can_heartbeat(client, node, lambda hb: hb["trajectory_done"], 150000, keep)
+    final = position[-1]["position_turns"] if position else None
+    metrics["position"] = {"zeroed_turns": zero_position, "final_turns": final}
+    checks["position_zeroed"] = zero_position is not None and abs(zero_position) < 1e-3
+    checks["position_reached"] = (closed is not None and arrived is not None and final is not None
+                                  and abs(final - 0.25) < 0.01)
+    # 6. Torque, then Estop and Clear_Errors.
+    client.set_axis_state(node, "idle")
+    for _ in range(40):
+        client.step()
+    client.set_controller_mode(node, "torque")
+    for _ in range(10):
+        client.step()
+    keep = lambda: client.set_input(node, "torque", 0.01)
+    client.set_axis_state(node, "closed-loop")
+    closed = _can_heartbeat(client, node, lambda hb: hb["state"] == "CLOSED_LOOP", 300000, keep)
+    torque_run = _can_run(client, node, "torque", 0.01, 300000)
+    keep()
+    torques = client.request(node, "get-torques")
+    target, estimate = falconfoc_can.decode_frame(torques)["values"] if torques else (None, None)
+    metrics["torque"] = {"target_nm": target, "estimate_nm": estimate,
+                         "final_turns_s": torque_run[-1]["velocity_turns_s"] if torque_run else None}
+    checks["torque_applied"] = (closed is not None and target is not None
+                                and abs(target - 0.01) < 1e-6 and abs(estimate / 0.01 - 1.0) < 0.3
+                                and torque_run and torque_run[-1]["velocity_turns_s"] > 0.0)
+    client.send(node, "estop")
+    stopped = _can_heartbeat(client, node, lambda hb: hb["state"] == "IDLE"
+                             and "ESTOP_REQUESTED" in hb["error_names"], 150000)
+    client.send(node, "clear-errors", b"\0")
+    cleared = _can_heartbeat(client, node, lambda hb: hb["errors"] == 0, 300000)
+    checks["estop_and_clear"] = stopped is not None and cleared is not None
+    # 7. Save over CAN and power cycle: the node ID and the lease come back.
+    client.send(node, "reboot", b"\x01")
+    for _ in range(20):
+        client.step()
+    stored = client.sdo(node, PARAMETERS["store-stored-sequence"])[1]
+    checks["saved_over_can"] = stored is not None and stored > 0
+    device.__exit__()
+    device, client, uart = boot()
+    beat = _can_heartbeat(client, node, lambda hb: True, 300000)
+    checks["node_restored"] = beat is not None and client.sdo(node, PARAMETERS["can-node-id"]) == (0, node)
+    checks["lease_restored"] = client.sdo(node, PARAMETERS["command-lease-us"]) == (0, 50000)
+    device.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-can", "status":
+               "SIL_PASS" if passed else "SIL_FAIL", "simulated": True, "physical_applied": False,
+               "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_can_multi(simulator, base_arguments, json_path=None):
+    """Two Board1 SIL nodes on one virtual CAN bus: both discovered unaddressed, assigned
+    nodes 1 and 2 by serial number, cyclic periods set per node, driven at different
+    velocities at the same time, and stopped together by one broadcast Estop. Nothing here
+    is physical evidence."""
+
+    checks, metrics = {}, {}
+    serials = {1: 0xF0C0000001, 2: 0xF0C0000002}
+    devices = [falconfoc_can.MuxSimulatorNode(simulator, list(base_arguments), serials[node])
+               for node in (1, 2)]
+    client = falconfoc_can.CanSimpleClient(falconfoc_can.SilCanBus(devices))
+    uarts = [Client(device) for device in devices]
+    for uart in uarts:
+        uart.hello()
+    checks["both_discovered"] = client.scan() == {serials[1]: 0x3F, serials[2]: 0x3F}
+    for node, serial_number in serials.items():
+        client.address(node, serial_number)
+    for _ in range(10):
+        client.step()
+    checks["both_assigned"] = client.scan() == {serials[1]: 1, serials[2]: 2}
+    checks["period_written"] = client.sdo(2, PARAMETERS["can-heartbeat-ms"], 50)[0] == 2
+    mark = len(client.bus.inbox)
+    for _ in range(int(0.4e6) // client.step_us):
+        client.step()
+    frames = client.frames_since(mark)
+    beats = {node: sum(1 for f in frames if f.id == falconfoc_can.arbitration_id(node, 1))
+             for node in (1, 2)}
+    metrics["heartbeats_in_400ms"] = beats
+    checks["periods_per_node"] = abs(beats[1] - 4) <= 1 and abs(beats[2] - 8) <= 1
+    for node in (1, 2):
+        client.sdo(node, PARAMETERS["command-lease-us"], 50000)
+    checks["commissioned"] = all(commission(uart) == "APPLIED" for uart in uarts)
+    targets = {1: 0.5, 2: -0.25}
+    for node in (1, 2):
+        client.set_controller_mode(node, "velocity")
+    for _ in range(10):
+        client.step()
+
+    def keep():
+        for node, target in targets.items():
+            client.set_input(node, "velocity", target)
+
+    for node in (1, 2):
+        client.set_axis_state(node, "closed-loop")
+    closed = all(_can_heartbeat(client, node, lambda hb: hb["state"] == "CLOSED_LOOP", 300000, keep)
+                 for node in (1, 2))
+    mark = len(client.bus.inbox)
+    for _ in range(1000000 // client.step_us):
+        keep()
+        client.step()
+    frames = client.frames_since(mark)
+    means = {}
+    for node in (1, 2):
+        estimates = _can_estimates(frames, node)
+        tail = estimates[len(estimates) // 2:]
+        means[node] = sum(e["velocity_turns_s"] for e in tail) / max(len(tail), 1)
+    metrics["velocity"] = {"targets_turns_s": targets, "means_turns_s": means}
+    checks["independent_velocities"] = closed and all(
+        abs(means[node] / targets[node] - 1.0) < 0.05 for node in (1, 2))
+    client.send(falconfoc_can.UNADDRESSED, "estop")
+    stopped = all(_can_heartbeat(client, node, lambda hb: hb["state"] == "IDLE"
+                                 and "ESTOP_REQUESTED" in hb["error_names"], 150000)
+                  for node in (1, 2))
+    checks["broadcast_estop"] = stopped
+    for device in devices:
+        device.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-can-multi", "status":
+               "SIL_PASS" if passed else "SIL_FAIL", "simulated": True, "physical_applied": False,
+               "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_trajectory(simulator, base_arguments, flash_path, json_path=None):
     """Trajectory shaping (parameter contract 3.4, P1 step B): acceleration (ID 106) and
     deceleration (ID 107) shape velocity references; in position mode the planner runs a
@@ -2989,6 +3239,71 @@ def run_sil_swap(simulator, base_arguments, flash_path, json_path=None):
     return summary
 
 
+def can_command(args, parser):
+    """One CANSimple command over a USB-CAN adapter (python-can) or a fresh SIL node."""
+    if args.can_command is None:
+        parser.error("can requires --can-command")
+    if args.can_interface:
+        bus = falconfoc_can.PythonCanBus(args.can_interface, args.can_channel, args.can_bitrate)
+        devices = []
+    elif args.simulator:
+        arguments = ["--lockstep-us", str(args.sil_lockstep_us or 500)]
+        if args.sil_flash:
+            arguments += ["--flash", args.sil_flash]
+        devices = [falconfoc_can.MuxSimulatorNode(os.path.abspath(args.simulator), arguments,
+                                                  args.can_serial)]
+        bus = falconfoc_can.SilCanBus(devices)
+    else:
+        parser.error("can requires --can-interface or --simulator")
+    client = falconfoc_can.CanSimpleClient(bus, step_us=500 if devices else 2000)
+    out = {"command": args.can_command, "node": args.node}
+    try:
+        if args.can_command == "scan":
+            out["devices"] = [{"serial": hex(serial), "node": node}
+                              for serial, node in client.scan(50000).items()]
+        elif args.can_command == "assign":
+            client.address(args.node, args.can_serial)
+            reply = client.wait(lambda f: f.command == 6 and len(f.data) == 8
+                                and int.from_bytes(f.data[1:7], "little") == args.can_serial,
+                                50000)
+            out["assigned"] = reply is not None and reply.data[0] == args.node
+        elif args.can_command == "state":
+            client.set_axis_state(args.node, args.axis_state)
+        elif args.can_command == "mode":
+            client.set_controller_mode(args.node, args.control, args.input_mode)
+        elif args.can_command == "set":
+            mode = {"torque": "torque", "velocity": "velocity", "position": "position"}[args.control]
+            client.set_input(args.node, mode, args.value)
+        elif args.can_command == "save":
+            client.send(args.node, "reboot", b"\x01")
+        elif args.can_command in ("read", "write"):
+            identifier = PARAMETERS[args.param] if args.param else args.id
+            kind = PARAMETER_TYPES.get(identifier, "f32") if args.param else args.type
+            result, raw = client.sdo(args.node, identifier,
+                                     args.value if args.can_command == "write" else None, kind)
+            out.update(parameter=identifier, result=RESULTS[result] if result is not None and result < len(RESULTS) else result,
+                       raw=raw)
+            if raw is not None and kind == "f32":
+                out["value"] = struct.unpack("<f", struct.pack("<I", raw))[0]
+            elif raw is not None:
+                out["value"] = raw
+        if args.can_command == "watch":
+            mark = len(bus.inbox)
+            client.step(args.duration_us or 200000)
+            out["frames"] = [falconfoc_can.decode_frame(frame)
+                             for frame in client.frames_since(mark)
+                             if args.node == 0x3F or frame.node == args.node]
+        else:
+            client.step(10000)
+        print(json.dumps(out, allow_nan=False))
+        return 0
+    finally:
+        for device in devices:
+            device.__exit__()
+        if not devices:
+            bus.__exit__()
+
+
 def calibrate_host(args, parser):
     if not args.simulator or args.port or args.message:
         parser.error("calibrate requires the Host falconfoc-virtual-calibrate --simulator")
@@ -3094,10 +3409,26 @@ def main():
     parser.add_argument(
         "action",
         choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "sil-demo",
-                 "calibrate", "motor-setup"],
+                 "calibrate", "motor-setup", "can"],
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
     parser.add_argument("--hex", default="", help="Wire hex for decode, including delimiter")
+    parser.add_argument("--can-command", choices=("scan", "assign", "state", "mode", "set", "read",
+                                                  "write", "watch", "save"),
+                        help="can: CANSimple command")
+    parser.add_argument("--can-interface", help="can: python-can interface (slcan, gs_usb, ...)")
+    parser.add_argument("--can-channel", help="can: python-can channel (COM5, can0, ...)")
+    parser.add_argument("--can-bitrate", type=int, default=1000000)
+    parser.add_argument("--can-serial", type=lambda value: int(value, 0), default=0xF0C0000001,
+                        help="can: device serial number (assign; the SIL node's serial)")
+    parser.add_argument("--node", type=lambda value: int(value, 0), default=0x3F,
+                        help="can: CANSimple node ID (0x3F unaddressed)")
+    parser.add_argument("--axis-state", choices=sorted(falconfoc_can.AXIS_STATES),
+                        default="idle", help="can state: requested axis state")
+    parser.add_argument("--control", choices=sorted(falconfoc_can.CONTROL_MODES),
+                        default="velocity", help="can mode/set: control mode")
+    parser.add_argument("--input-mode", choices=sorted(falconfoc_can.INPUT_MODES),
+                        default="passthrough", help="can mode: input mode")
     parser.add_argument("--sequence", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--session", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--mode", choices=["current", "velocity", "position"], default="current")
@@ -3199,6 +3530,8 @@ def main():
     try:
         if args.action == "calibrate":
             return calibrate_host(args, parser)
+        if args.action == "can":
+            return can_command(args, parser)
         payload = b""
         if args.message == "setpoint":
             payload = setpoint(args.mode, args.first, args.second)
@@ -3286,6 +3619,18 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
+            if args.action == "sil-demo" and args.sil_scenario in ("can", "can-multi"):
+                if args.sil_lockstep_us <= 0:
+                    parser.error("the CAN scenarios step a virtual bus: give --sil-lockstep-us")
+                if args.sil_scenario == "can-multi":
+                    summary = run_sil_can_multi(os.path.abspath(args.simulator),
+                                                simulator_arguments, args.json)
+                else:
+                    flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                        "sil-can-flash.bin"))
+                    summary = run_sil_can(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "dead-time-comp":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-dead-time-comp-flash.bin"))

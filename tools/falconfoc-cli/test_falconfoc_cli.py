@@ -240,5 +240,55 @@ class DeviceTests(unittest.TestCase):
         self.assertGreater(comparison["max_abs_delta_iq_a"], 0.001)
 
 
+
+class CanSimpleVectorTests(unittest.TestCase):
+    """The Host CANSimple client encodes protocol/tests/cansimple_vectors.tsv."""
+
+    class Bus:
+        def __init__(self):
+            self.sent, self.inbox = [], []
+
+        def send(self, frame):
+            self.sent.append(frame)
+
+        def step(self, us):
+            pass
+
+    def test_vectors(self):
+        import falconfoc_can as can
+        path = pathlib.Path(__file__).resolve().parents[2] / "protocol/tests/cansimple_vectors.tsv"
+        rows = [line.split("\t") for line in path.read_text().splitlines()
+                if line and not line.startswith("#")]
+        bus = self.Bus()
+        client = can.CanSimpleClient(bus)
+        client.scan(timeout_us=0)
+        client.address(3, 0xF0C0A1B2C3)
+        client.request(4, "get-bus-voltage-current", timeout_us=0)
+        client.set_axis_state(3, "closed-loop")
+        client.set_controller_mode(3, "velocity")
+        client.set_input(3, "velocity", 0.5)
+        client.set_input(3, "position", 0.25)
+        client.set_input(3, "torque", 0.01)
+        client.sdo(3, 74, 50000, timeout_us=0)
+        client.sdo(3, 120, timeout_us=0)
+        client.send(3, "reboot", b"\x01")
+        client.send(3, "estop")
+        client.send(3, "clear-errors", b"\0")
+        self.assertEqual(len(bus.sent), len(rows))
+        for frame, (identifier, rtr, data, description) in zip(bus.sent, rows):
+            self.assertEqual(frame.id, int(identifier, 16), description)
+            self.assertEqual(frame.rtr, rtr == "1", description)
+            self.assertEqual(frame.data.hex(), "" if data == "-" else data, description)
+
+    def test_decode_heartbeat(self):
+        import falconfoc_can as can
+        frame = can.CanFrame(0x61, bytes.fromhex("00000001080001"))
+        decoded = can.decode_frame(frame)
+        self.assertEqual((decoded["node"], decoded["state"], decoded["procedure"]),
+                         (3, "CLOSED_LOOP", "SUCCESS"))
+        self.assertEqual(decoded["error_names"], ["WATCHDOG_TIMER_EXPIRED"])
+        self.assertTrue(decoded["trajectory_done"])
+
+
 if __name__ == "__main__":
     unittest.main()

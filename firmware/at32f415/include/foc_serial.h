@@ -154,6 +154,24 @@ struct foc_serial_calibration {
     int (*reset)(void *context, uint32_t now_us);
 };
 
+/** CAN settings (contract 25), owned by Foreground and saved with the parameters. */
+struct foc_serial_can_settings {
+    /** CANSimple node ID 0-63; 63 (0x3F) is unaddressed. */
+    uint32_t node_id;
+    /** Bit rate in bit/s: 125000, 250000, 500000 or 1000000; applied at boot. */
+    uint32_t bitrate;
+    /** Heartbeat and encoder-estimate periods in ms, 0 off. */
+    uint32_t heartbeat_ms;
+    uint32_t estimates_ms;
+};
+
+/** Optional CAN link status for read-only PARAM_READ ID 126. */
+struct foc_serial_can_link {
+    const void *context;
+    /** Bits 0-7 state (FOC_CAN_STATE_*), 8-15 refused commands, 16-31 dropped frames. */
+    uint32_t (*status)(const void *context);
+};
+
 /** Fixed UART queue depth and default number of bytes examined per poll. */
 enum foc_serial_limits {
     FOC_UART_RX_CAPACITY = 256,
@@ -241,6 +259,10 @@ struct foc_serial {
     struct foc_serial_persistence persistence;
     /** Optional calibration manager; CALIBRATE_* are NOT_SUPPORTED without it. */
     struct foc_serial_calibration calibration;
+    /** CAN settings (IDs 120, 122, 123, 125); defaults from foc_serial_can_defaults(). */
+    struct foc_serial_can_settings can;
+    /** Optional CAN link status (ID 126). */
+    struct foc_serial_can_link can_link;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -280,6 +302,26 @@ void foc_serial_attach_persistence(struct foc_serial *serial,
 /** Attach the calibration manager before receiving bytes. */
 void foc_serial_attach_calibration(struct foc_serial *serial,
                                    const struct foc_serial_calibration *calibration);
+
+/** Default CAN settings: unaddressed node 0x3F, 1 Mbit/s, heartbeat 100 ms, estimates 10 ms. */
+struct foc_serial_can_settings foc_serial_can_defaults(void);
+
+/** True when the settings are within the ranges of their PARAM_WRITE entries. */
+bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *settings);
+
+/** Attach the CAN link status before receiving bytes. */
+void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link);
+
+/**
+ * Foreground only. Run one decoded request for another transport (CAN) without a wire
+ * session or sequence: the same admission as a UART request after its session check.
+ * Fills response (payload[0] is the result) and returns the FOC_PROTO_* result code.
+ */
+int foc_serial_execute(struct foc_serial *serial,
+                       struct foc_runtime *runtime,
+                       const struct foc_protocol_frame *request,
+                       uint32_t now_us,
+                       struct foc_protocol_frame *response);
 
 /** Read the Runtime lifecycle result associated with the latest Host request. */
 int foc_serial_read_lifecycle_result(const struct foc_serial *serial,

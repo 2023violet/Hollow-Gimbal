@@ -513,9 +513,15 @@ static int test_profile_record(void)
     in.tuning.profile.velocity_bandwidth_hz = 12.0f;
     in.tuning.profile.inertia_travel_rad = 1.5f;
     in.tuning.dead_time_v = 0.08f;
+    in.can = (struct foc_serial_can_settings){
+        .node_id = 5U,
+        .bitrate = 500000U,
+        .heartbeat_ms = 250U,
+        .estimates_ms = 20U,
+    };
     foc_board_store_encode(&nominal, &in, 7U, record);
     put_word(record, UINT32_C(0xC35A4C7E));
-    CHECK(record[8] == 7U && record[10] == 236U);
+    CHECK(record[8] == 8U && record[10] == 244U);
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
@@ -528,6 +534,24 @@ static int test_profile_record(void)
     CHECK(out.tuning.accel_rad_s2 == 40.0f && out.tuning.decel_rad_s2 == 120.0f);
     CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
     CHECK(out.tuning.dead_time_v == 0.08f);
+    CHECK(out.can.node_id == 5U && out.can.bitrate == 500000U);
+    CHECK(out.can.heartbeat_ms == 250U && out.can.estimates_ms == 20U);
+    /* Format 7 (236 bytes, CRC at 232) keeps the dead-time compensation, CAN defaults. */
+    uint8_t v7[FOC_BOARD_STORE_RECORD_BYTES];
+    memset(v7, 0xFF, sizeof v7);
+    memcpy(v7, record, 232U);
+    v7[8] = 7U;
+    v7[10] = 236U;
+    put_word(v7 + 232, test_crc32(v7 + 4, 228U));
+    CHECK(foc_board_store_decode(v7, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.tuning.dead_time_v == 0.08f);
+    CHECK(out.can.node_id == 63U && out.can.bitrate == 1000000U && out.can.heartbeat_ms == 100U);
+    /* A format-8 bit-rate code above 3 is refused. */
+    uint8_t bad[FOC_BOARD_STORE_RECORD_BYTES];
+    memcpy(bad, record, sizeof bad);
+    bad[233] = 4U;
+    put_word(bad + 240, test_crc32(bad + 4, 236U));
+    CHECK(foc_board_store_decode(bad, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     /* Format 6 (232 bytes, CRC at 228) keeps IDs 108/109, no dead-time compensation. */
     uint8_t v6[FOC_BOARD_STORE_RECORD_BYTES];
     memset(v6, 0xFF, sizeof v6);

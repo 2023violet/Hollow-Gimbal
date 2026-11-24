@@ -113,6 +113,13 @@ enum {
     PARAM_TRIP_DIVERGENCE = 118,
     /* Output frame (contract 3.7): host positions are output-side and relative to it. */
     PARAM_OUTPUT_ZERO = 124,
+    /* CAN (contract 25): node ID, bit rate, cyclic periods; link status and raw faults. */
+    PARAM_CAN_NODE_ID = 120,
+    PARAM_CAN_BITRATE = 122,
+    PARAM_CAN_HEARTBEAT = 123,
+    PARAM_CAN_ESTIMATES = 125,
+    PARAM_CAN_STATUS = 126,
+    PARAM_RAW_FAULTS = 127,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
@@ -262,7 +269,7 @@ static int foc_serial_status(
         foc_protocol_write_u32(body + 46, view.sensor_us);
         foc_protocol_write_u32(body + 50, serial->crc_errors);
         foc_protocol_write_u32(body + 54, serial->dropped);
-        foc_protocol_write_u32(body + 58, atomic_load(&uart->rx_lost));
+        foc_protocol_write_u32(body + 58, uart != NULL ? atomic_load(&uart->rx_lost) : 0U);
         /* Bit 0 physical applied and bit 2 sensor calibrated stay false here. */
         body[62] = view.current_valid ? TELEMETRY_CURRENT_VALID : 0U;
         /* M1 append: the d/q target of that cycle and the controller tuning revision. */
@@ -921,6 +928,41 @@ static bool foc_serial_parameter_read(
             foc_serial_float_bits(runtime->config.motion.position.velocity_limit_rad_s);
         parameter->unit = UNIT_RAD_S;
         break;
+    case PARAM_CAN_NODE_ID:
+    case PARAM_CAN_BITRATE:
+    case PARAM_CAN_HEARTBEAT:
+    case PARAM_CAN_ESTIMATES:
+        /* RAM settings, saved with PARAM_SAVE; the bit rate applies at the next boot. */
+        *parameter = (struct foc_serial_parameter){
+            .value = id == PARAM_CAN_NODE_ID ? serial->can.node_id
+                : id == PARAM_CAN_BITRATE    ? serial->can.bitrate
+                : id == PARAM_CAN_HEARTBEAT  ? serial->can.heartbeat_ms
+                                             : serial->can.estimates_ms,
+            .minimum = id == PARAM_CAN_BITRATE ? 125000U : 0U,
+            .maximum = id == PARAM_CAN_NODE_ID ? 63U
+                : id == PARAM_CAN_BITRATE      ? 1000000U
+                                               : 10000U,
+            .type = PARAM_U32,
+            .unit =
+                id == PARAM_CAN_NODE_ID || id == PARAM_CAN_BITRATE ? UNIT_NONE : UNIT_MILLISECOND,
+            .writable = true,
+        };
+        break;
+    case PARAM_CAN_STATUS:
+        parameter->type = PARAM_U32;
+        parameter->value = serial->can_link.status != NULL
+            ? serial->can_link.status(serial->can_link.context)
+            : 0U;
+        break;
+    case PARAM_RAW_FAULTS: {
+        struct foc_runtime_snapshot view;
+        if (foc_runtime_read_snapshot((struct foc_runtime *)runtime, &view) != FOC_RUNTIME_OK) {
+            return false;
+        }
+        parameter->type = PARAM_U32;
+        parameter->value = view.faults;
+        break;
+    }
     default:
         return false;
     }
@@ -1004,6 +1046,21 @@ static int foc_serial_parameter(
             break;
         case PARAM_OUTPUT_ZERO:
             serial->output_zero_rad = foc_serial_bits_float(value);
+            break;
+        case PARAM_CAN_NODE_ID:
+            serial->can.node_id = value;
+            break;
+        case PARAM_CAN_BITRATE:
+            if (value != 125000U && value != 250000U && value != 500000U && value != 1000000U) {
+                return FOC_PROTO_INVALID_ARGUMENT;
+            }
+            serial->can.bitrate = value;
+            break;
+        case PARAM_CAN_HEARTBEAT:
+            serial->can.heartbeat_ms = value;
+            break;
+        case PARAM_CAN_ESTIMATES:
+            serial->can.estimates_ms = value;
             break;
         case PARAM_ELECTRICAL_OFFSET: {
             const int trimmed =
@@ -1526,6 +1583,7 @@ void foc_serial_init_with_policy(
         .current_limit_ceiling_a = runtime->pipeline.current.config.current_limit_a,
         .target_policy = policy == FOC_SERIAL_TARGET_VIRTUAL_ONLY ? FOC_SERIAL_TARGET_VIRTUAL_ONLY
                                                                   : FOC_SERIAL_TARGET_LOCKED,
+        .can = foc_serial_can_defaults(),
     };
     struct foc_runtime_lifecycle_result lifecycle;
     if (foc_runtime_read_lifecycle_result((struct foc_runtime *)runtime, &lifecycle) ==
@@ -1571,6 +1629,52 @@ void foc_serial_attach_persistence(
         serial->persistence =
             persistence != NULL ? *persistence : (struct foc_serial_persistence){0};
     }
+}
+
+struct foc_serial_can_settings foc_serial_can_defaults(void)
+{
+    return (struct foc_serial_can_settings){
+        .node_id = 63U,
+        .bitrate = 1000000U,
+        .heartbeat_ms = 100U,
+        .estimates_ms = 10U,
+    };
+}
+
+bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *settings)
+{
+    const uint32_t rate = settings->bitrate;
+    return settings->node_id <= 63U &&
+        (rate == 125000U || rate == 250000U || rate == 500000U || rate == 1000000U) &&
+        settings->heartbeat_ms <= 10000U && settings->estimates_ms <= 10000U;
+}
+
+void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link)
+{
+    if (serial != NULL) {
+        serial->can_link = link != NULL ? *link : (struct foc_serial_can_link){0};
+    }
+}
+
+int foc_serial_execute(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    const struct foc_protocol_frame *request,
+    uint32_t now_us,
+    struct foc_protocol_frame *response
+)
+{
+    *response = (struct foc_protocol_frame){
+        .type = request->type,
+        .flags = FOC_PROTOCOL_RESPONSE,
+        .length = 1,
+    };
+    const int result = foc_serial_dispatch(serial, NULL, runtime, request, now_us, response);
+    response->payload[0] = (uint8_t)result;
+    if (result != FOC_PROTO_OK && result != FOC_PROTO_APPLIED && result != FOC_PROTO_ACCEPTED) {
+        response->length = 1U;
+    }
+    return result;
 }
 
 int foc_serial_read_lifecycle_result(

@@ -146,7 +146,8 @@ SPI, Safety, UART V1 or locked output admission changes accompany this mapping.
 | USART1 | PB6 TX, PB7 RX, 115200 8N1, byte IRQ priority 2. Bounded RX ring and single complete TX buffer. |
 | Phase voltage | PA1 / IN1 = VC → logical A, PA2 / IN2 = VB → logical B, PA3 / IN3 = VA → logical C, through 10 kΩ / 1 kΩ (11:1). Not in the H0 group (the injected group holds four channels): the coast check reads them in the foreground with three software-triggered ordinary conversions, 28.5 cycles each, while the bridge is off. |
 | Driver | DRV8311H: nSLEEP pulled up (always enabled, no GPIO), MODE 47 kΩ = 6x PWM with 5 A OCP, SLEW 47 kΩ = 75 V/µs. NFAULT on PB2 is an input with the board's 10 kΩ pull-up (and LED3); H0 reads it each cycle and two low samples in a row latch DRIVER_FAULT (fault bit 16), cleared by FAULT_CLEAR once the line is high. `sil-demo --sil-scenario driver-fault` injects it with `--driver-fault-us on_us[,off_us]`. |
-| Unused pins | PA11 CAN_RX / PA12 CAN_TX (SIT3051, no CAN software yet), PB8 not connected (pulled down), BOOT0 10 kΩ to GND. |
+| CAN1 | PA11 RX / PA12 TX through the SIT3051, classic CAN, ID 122 bit rate (1 Mbit/s), RX FIFO 0 IRQ priority 2, three TX mailboxes filled by Foreground. Off on the HICK fallback clock. CANSimple adapter `foc_can.c` (protocol README, contract 25). |
+| Unused pins | PB8 not connected (pulled down), BOOT0 10 kΩ to GND. |
 | Other resources | DMA1/2, SysTick and both watchdogs are unused. No Flash persistence backend. |
 
 ADC consumes one outstanding trigger only. An overlapping trigger invalidates
@@ -438,3 +439,14 @@ References for the peripheral and encoder contracts
 - [AT32F415 reference manual](https://www.arterytek.com/download/RM/RM_AT32F415_V2.05_EN.pdf)
 - [AT32F415 datasheet](https://arterytek.com/download/DS/DS_AT32F415_V2.02_EN.pdf)
 - [KTH7823 manufacturer selection table](https://www.conntek.com.cn/html/web/product/magneticCurrentLinearSensingChip/hshrMagneticCodedAngleSensor/index.html)
+
+### CAN (CANSimple)
+
+`foc_can.c` translates CANSimple frames into the same Foreground requests as UART
+(`foc_serial_execute`), so both transports share admission, limits and the lease.
+`main.c` starts CAN1 after the settings restore (the saved bit rate applies from that
+boot) and before the IRQs; Foreground calls `foc_can_poll` after `foc_serial_poll`.
+The SIL takes `--can <serial>` to multiplex UART and CAN frames on stdio; the CLI runs a
+virtual bus of SIL nodes (`sil-demo --sil-scenario can` and `can-multi`, lockstep) and
+offers `can --can-command scan|assign|state|mode|set|read|write|watch|save` over a SIL
+node or, through python-can, a USB-CAN adapter (not exercised without hardware).

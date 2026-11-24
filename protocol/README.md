@@ -617,3 +617,67 @@ without blocking on the ordinary response. When both slots are occupied,
 further requests are unadmitted and counted. Hosts use stop-and-wait and can
 retry an unadmitted request. An admitted duplicate receives REPLAY, so it cannot
 repeat an action or renew a lease.
+
+## CAN (CANSimple)
+
+Board1 also speaks the CANSimple frame layout on CAN1 (PA11 RX, PA12 TX, SIT3051),
+classic CAN with 11-bit IDs: `node << 5 | command`. Each command becomes the same
+Foreground request a UART Host sends, so admission, limits, the output lock and the
+command lease (ID 74) are shared. UART and CAN share one control state; the last
+command wins. There are no command responses: refusals are counted (ID 126).
+
+Units are output-side: position in turns, velocity in turns/s, torque in N·m (through
+Kt = 1.5 × pole pairs × flux and the gear ratio, ID 99), relative to the output zero
+(ID 124). Floats are IEEE-754 little-endian.
+
+| Cmd | Message | FalconFOC behaviour |
+| --- | --- | --- |
+| 0x00 | Get_Version | protocol 2, hardware 1.0, firmware 2.0.0 (unreleased flag 1) |
+| 0x01 | Heartbeat | every ID 123 ms (100): errors u32, axis state, procedure result, trajectory done |
+| 0x02 | Estop | STOP; ESTOP_REQUESTED until Clear_Errors |
+| 0x03 | Get_Error | active errors, disarm reason (CANSimple bits) |
+| 0x04/0x05 | RxSdo/TxSdo | read (opcode 0) or write (1) a FalconFOC parameter by its ID; every RxSdo gets a TxSdo whose byte 0 is the V1 result code and bytes 4–7 the value |
+| 0x06 | Address | RTR or empty: reply node + 48-bit serial (MCU UID folded); 8 bytes with a matching serial (0 = any): set the node ID (ID 120) |
+| 0x07 | Set_Axis_State | 1 STOP; 8 ARM then START; 3/4/7 CALIBRATE_START all/electrical/rotor; others refused |
+| 0x09 | Get_Encoder_Estimates | every ID 125 ms (10): position, velocity |
+| 0x0B | Set_Controller_Mode | control 1 torque (CURRENT), 2 velocity, 3 position; input 1 passthrough, 2 velocity ramp, 5 trapezoidal (the ramp follows IDs 106/107); DISABLED only |
+| 0x0C/0x0D/0x0E | Set_Input_Pos/Vel/Torque | SETPOINT; nonzero feedforward is refused; torque needs Kt |
+| 0x0F | Set_Limits | IDs 72 (× 2π × gear) and 2 |
+| 0x11/0x12 | Set_Traj_Vel_Limit/Accel_Limits | ID 72; IDs 106/107 (× 2π × gear) |
+| 0x14 | Get_Iq | q target, q measured (A) |
+| 0x15 | Get_Temperature | NaN, NaN (no NTC) |
+| 0x16 | Reboot | 0 reset (DISABLED), 1 PARAM_SAVE, 2 CONFIG_ERASE, 3 refused |
+| 0x17 | Get_Bus_Voltage_Current | NaN, NaN (no live readback yet) |
+| 0x18 | Clear_Errors | FAULT_CLEAR; clears ESTOP and calibration flags |
+| 0x19 | Set_Absolute_Position | output zero (ID 124) so the present position reads the value |
+| 0x1A/0x1B | Set_Pos_Gain/Set_Vel_Gains | ID 71 as is; IDs 69/70 ÷ (2π × Kt × gear²) |
+| 0x1C | Get_Torques | target, Kt × gear × iq estimate |
+
+Get_ requests are an RTR or an empty data frame to the node; broadcast (0x3F) Get_
+requests are answered only by an unaddressed device. Commands to 0x3F reach every
+device. An unaddressed device (node 0x3F, the default) sends no cyclic frames.
+
+Heartbeat states: 0 BOOT, 1 IDLE (DISABLED, READY, FAULT_LATCHED), 8 RUNNING, 3/4/7
+while a calibration requested over CAN runs. Procedure results: 0 SUCCESS, 1 BUSY,
+2 CANCELLED, 3 DISARMED, 4 NO_RESPONSE, 5 POLE_PAIR_CPR_MISMATCH,
+6 PHASE_RESISTANCE_OUT_OF_RANGE, 11 TIMEOUT, 13 INVALID_STATE, 14 NOT_CALIBRATED,
+15 NOT_CONVERGING. A closed-loop request retries ARM/START for 250 ms (the Host keeps
+streaming setpoints) and ends in SUCCESS, NOT_CALIBRATED or INVALID_STATE; the locked
+image ends in INVALID_STATE.
+
+Error bits: COMMAND_TIMEOUT → WATCHDOG_TIMER_EXPIRED 0x1000000; OVER/UNDER_VOLTAGE →
+DC_BUS_OVER/UNDER_VOLTAGE 0x100/0x200; OVER_CURRENT, SUSTAINED_CURRENT →
+CURRENT_LIMIT_VIOLATION 0x1000; OVER_SPEED → VELOCITY_LIMIT_VIOLATION 0x8000; DRIVER →
+DRV_FAULT 0x20; SAMPLE_TIMEOUT/INVALID → MISSING_ESTIMATE 0x8; heartbeats and WDT →
+TIMING_ERROR 0x4; everything else → SYSTEM_LEVEL 0x2; Estop → ESTOP_REQUESTED
+0x2000000; a failed CAN calibration → CALIBRATION_ERROR 0x40000000. ID 127 reads the
+raw fault word.
+
+CAN parameters (contract 25): ID 120 node 0–63 (63), ID 122 bit rate 125000, 250000,
+500000 or 1000000 (1000000, applied at boot), ID 123 heartbeat and ID 125 estimate
+periods 0–10000 ms (0 off), ID 126 read-only link status (bits 0–7 state: 0 off,
+1 active, 2 error passive, 3 bus-off, 4 no crystal; 8–15 refused commands; 16–31
+dropped frames), ID 127 read-only raw faults. IDs 120–125 are saved (store format 8).
+Bit timing: APB1 75 MHz, 15 quanta (1 + 12 + 2), sample point 86.7 %, SJW 1; automatic
+bus-off recovery. The HICK fallback clock is too inaccurate for CAN: CAN stays off.
+`protocol/tests/cansimple_vectors.tsv` holds example frames.

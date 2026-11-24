@@ -1745,6 +1745,7 @@ int foc_board_calibration_reset(struct foc_board_calibration *cal, uint32_t now_
     cal->serial->current_limit_a = cal->boot_tuning.iq_limit_a;
     cal->serial->position_limit_rad = 100.0f;
     cal->serial->output_zero_rad = 0.0f;
+    cal->serial->can = foc_serial_can_defaults();
     cal->snapshot = boot != NULL ? *boot : (struct foc_calibration_snapshot){0};
     cal->active_source = boot != NULL ? FOC_BOARD_CAL_SOURCE_SUPPLY : FOC_BOARD_CAL_SOURCE_BOOT;
     cal->align_voltage_v = 0.0f;

@@ -16,6 +16,7 @@
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
 #include "foc_board_timing.h"
+#include "foc_can.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
 #endif
@@ -36,6 +37,11 @@ struct foc_board_store_driver foc_at32_store_driver(void);
 #define FOC_TMR5_EVENTS        (TMR_OVF_FLAG | TMR_C1_FLAG | TMR_C2_FLAG)
 #define FOC_ENCODER_CS         GPIO_PINS_15
 #define FOC_STARTUP_POLL_LIMIT 100000U
+/* CAN1 on APB1 (75 MHz): 15 time quanta per bit (1 + 12 + 2), sample point 86.7 %. */
+#define FOC_CAN_APB1_HZ        75000000U
+#define FOC_CAN_QUANTA         15U
+/* 96-bit MCU unique ID, folded into the 48-bit CANSimple serial number. */
+#define FOC_UID_BASE           0x1FFFF7E8U
 
 /* Check the offline route model against the vendor SDK in every ARM build. */
 _Static_assert((int)FOC_BOARD_ADC_TMR1_CH4 == (int)ADC12_PREEMPT_TRIG_TMR1CH4, "ADC CH4 selector");
@@ -78,6 +84,9 @@ static uint32_t spi_rx_us;
 static struct foc_uart_buffer uart;
 static struct foc_serial serial;
 static struct foc_board_calibration calibration;
+static struct foc_can_buffer can_buffer;
+static struct foc_can can;
+static bool can_started;
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
 static struct foc_board_persistence persistence;
 #endif
@@ -410,6 +419,96 @@ static void foc_at32_uart_init(void)
     usart_enable(USART1, TRUE);
 }
 
+static bool foc_at32_can_send(void *context, const struct foc_can_frame *frame)
+{
+    (void)context;
+    can_tx_message_type message = {
+        .standard_id = frame->id,
+        .id_type = CAN_ID_STANDARD,
+        .frame_type = frame->rtr ? CAN_TFT_REMOTE : CAN_TFT_DATA,
+        .dlc = frame->length,
+    };
+    for (unsigned int index = 0U; index < frame->length && index < 8U; ++index) {
+        message.data[index] = frame->data[index];
+    }
+    return can_message_transmit(CAN1, &message) != CAN_TX_STATUS_NO_EMPTY;
+}
+
+static uint32_t foc_at32_can_state(const void *context)
+{
+    (void)context;
+    if (!can_started) {
+        return clock_from_crystal ? FOC_CAN_STATE_OFF : FOC_CAN_STATE_NO_CRYSTAL;
+    }
+    return can_flag_get(CAN1, CAN_BOF_FLAG) == SET ? FOC_CAN_STATE_BUS_OFF
+        : can_flag_get(CAN1, CAN_EPF_FLAG) == SET  ? FOC_CAN_STATE_PASSIVE
+                                                   : FOC_CAN_STATE_ACTIVE;
+}
+
+static void foc_at32_can_reboot(void *context)
+{
+    (void)context;
+    NVIC_SystemReset();
+}
+
+/* CAN1 on PA11 (RX) / PA12 (TX) through the SIT3051. The internal RC oscillator is too
+ * inaccurate for CAN, so the HICK fallback leaves CAN off (ID 126 reads NO_CRYSTAL). */
+static void foc_at32_can_init(uint32_t bitrate)
+{
+    const volatile uint32_t *uid = (const volatile uint32_t *)FOC_UID_BASE;
+    const uint64_t folded =
+        (uint64_t)((uid[1] ^ (uid[2] >> 16)) & 0xFFFFU) << 32 | (uint64_t)(uid[0] ^ uid[2]);
+    const struct foc_can_port port = {
+        .send = foc_at32_can_send,
+        .state = foc_at32_can_state,
+        .reboot = foc_at32_can_reboot,
+        .serial_number = folded != 0U ? folded : 1U,
+    };
+    foc_can_init(&can, &can_buffer, &port);
+    const struct foc_serial_can_link link = {&can, foc_can_link_status};
+    foc_serial_attach_can_link(&serial, &link);
+    if (!clock_from_crystal || bitrate == 0U) {
+        return;
+    }
+    crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
+    crm_periph_clock_enable(CRM_CAN1_PERIPH_CLOCK, TRUE);
+    gpio_init_type pins;
+    gpio_default_para_init(&pins);
+    pins.gpio_mode = GPIO_MODE_MUX;
+    pins.gpio_pins = GPIO_PINS_12;
+    gpio_init(GPIOA, &pins);
+    pins.gpio_mode = GPIO_MODE_INPUT;
+    pins.gpio_pull = GPIO_PULL_UP;
+    pins.gpio_pins = GPIO_PINS_11;
+    gpio_init(GPIOA, &pins);
+    can_base_type base;
+    can_default_para_init(&base);
+    base.mode_selection = CAN_MODE_COMMUNICATE;
+    base.aebo_enable = TRUE;
+    base.mdrsel_selection = CAN_DISCARDING_FIRST_RECEIVED;
+    base.mmssr_selection = CAN_SENDING_BY_ID;
+    can_baudrate_type timing = {
+        .baudrate_div = (uint16_t)(FOC_CAN_APB1_HZ / (FOC_CAN_QUANTA * bitrate)),
+        .rsaw_size = CAN_RSAW_1TQ,
+        .bts1_size = CAN_BTS1_12TQ,
+        .bts2_size = CAN_BTS2_2TQ,
+    };
+    if (can_base_init(CAN1, &base) != SUCCESS || can_baudrate_set(CAN1, &timing) != SUCCESS) {
+        return;
+    }
+    /* One 32-bit mask filter that accepts everything: the IRQ drops extended frames. */
+    can_filter_init_type filter;
+    can_filter_default_para_init(&filter);
+    filter.filter_activate_enable = TRUE;
+    filter.filter_mode = CAN_FILTER_MODE_ID_MASK;
+    filter.filter_fifo = CAN_FILTER_FIFO0;
+    filter.filter_number = 0U;
+    filter.filter_bit = CAN_FILTER_32BIT;
+    can_filter_init(CAN1, &filter);
+    can_interrupt_enable(CAN1, CAN_RF0MIEN_INT, TRUE);
+    can_started = true;
+}
+
 static void foc_at32_lock_output(void)
 {
     crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
@@ -658,16 +757,21 @@ static void foc_at32_irq_enable(void)
     NVIC_SetPriority(TMR5_GLOBAL_IRQn, 1U);
     NVIC_SetPriority(SPI1_IRQn, 1U);
     NVIC_SetPriority(USART1_IRQn, 2U);
+    NVIC_SetPriority(CAN1_RX0_IRQn, 2U);
     NVIC_ClearPendingIRQ(TMR1_CH_IRQn);
     NVIC_ClearPendingIRQ(ADC1_IRQn);
     NVIC_ClearPendingIRQ(TMR5_GLOBAL_IRQn);
     NVIC_ClearPendingIRQ(SPI1_IRQn);
     NVIC_ClearPendingIRQ(USART1_IRQn);
+    NVIC_ClearPendingIRQ(CAN1_RX0_IRQn);
     NVIC_EnableIRQ(TMR1_CH_IRQn);
     NVIC_EnableIRQ(ADC1_IRQn);
     NVIC_EnableIRQ(TMR5_GLOBAL_IRQn);
     NVIC_EnableIRQ(SPI1_IRQn);
     NVIC_EnableIRQ(USART1_IRQn);
+    if (can_started) {
+        NVIC_EnableIRQ(CAN1_RX0_IRQn);
+    }
 }
 
 static void foc_at32_spi_finish(
@@ -739,6 +843,8 @@ int main(void)
         persistence.calibration_source = &calibration.snapshot;
 #endif
         foc_at32_uart_init();
+        /* After the restore: the saved bit rate applies from this boot. */
+        foc_at32_can_init(serial.can.bitrate);
         foc_at32_irq_enable();
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
         foc_at32_trace_init();
@@ -769,6 +875,9 @@ int main(void)
                 (void)foc_runtime_foreground_poll(&runtime, foc_at32_now_us(), 0U, 0U, &result);
 #endif
                 foc_serial_poll(&serial, &uart, &runtime, foc_at32_serial_now, NULL);
+                if (can_started) {
+                    foc_can_poll(&can, &serial, &runtime, foc_at32_now_us());
+                }
                 foc_board_calibration_poll(&calibration, foc_at32_now_us());
                 if (!foc_uart_tx_available(&uart)) {
                     usart_interrupt_enable(USART1, USART_TDBE_INT, TRUE);
@@ -1060,6 +1169,27 @@ void USART1_IRQHandler(void)
 #if defined(FALCONFOC_RT02_TIMING_TRACE)
     foc_at32_trace_exit(&rt_trace.usart, start, 0U, status);
 #endif
+}
+
+/* Move every pending standard frame of FIFO 0 into the RX ring; extended frames are dropped. */
+void CAN1_RX0_IRQHandler(void)
+{
+    while (can_receive_message_pending_get(CAN1, CAN_RX_FIFO0) != 0U) {
+        can_rx_message_type message;
+        can_message_receive(CAN1, CAN_RX_FIFO0, &message);
+        if (message.id_type != CAN_ID_STANDARD) {
+            continue;
+        }
+        struct foc_can_frame frame = {
+            .id = (uint16_t)(message.standard_id & 0x7FFU),
+            .length = message.dlc > 8U ? 8U : message.dlc,
+            .rtr = message.frame_type == CAN_TFT_REMOTE,
+        };
+        for (unsigned int index = 0U; index < frame.length; ++index) {
+            frame.data[index] = message.data[index];
+        }
+        foc_can_rx_push(&can_buffer, &frame);
+    }
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

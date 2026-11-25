@@ -169,7 +169,7 @@ if(PROJECT_IS_TOP_LEVEL)
     ../core/src/foc_pmsm_reachability.c
   )
   target_link_libraries(falconfoc-virtual-calibrate PRIVATE falconfoc-virtual-calibration)
-  target_include_directories(falconfoc-virtual-calibrate PRIVATE ../components/utils/crc)
+  target_include_directories(falconfoc-virtual-calibrate PRIVATE ../control_plane/src)
   add_executable(
     test-foc-virtual-calibration-electrical tests/test_foc_virtual_calibration_electrical.c
   )
@@ -207,9 +207,7 @@ if(PROJECT_IS_TOP_LEVEL)
     tests/test_foc_virtual_calibration_quality.c src/falconfoc_virtual_calibrate_bootstrap.c
     src/falconfoc_virtual_calibrate_timing.c
   )
-  target_include_directories(
-    test-foc-virtual-calibration-quality PRIVATE src ../components/utils/crc
-  )
+  target_include_directories(test-foc-virtual-calibration-quality PRIVATE src ../control_plane/src)
   target_link_libraries(test-foc-virtual-calibration-quality PRIVATE falconfoc-virtual-calibration)
   add_test(NAME test-foc-virtual-calibration-mechanical-robustness
            COMMAND test-foc-mechanical-id-virtual --quality

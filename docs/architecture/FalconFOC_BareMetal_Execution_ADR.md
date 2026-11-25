@@ -67,7 +67,7 @@ H1 依所选 Runtime 模式执行外环。速度/位置由 Board 配置接通，
 | USART1 / transport | 115200 8N1，单方向线速上限 11,520 字节/s | USART1 #37，2 | IRQ 单次取/送至多各一字节，解析在前台。无 DMA。 |
 | Foreground / supervisor | 忙轮询；监督名义 5 kHz，快照遥测 100 Hz | Thread，最低优先级 | 先监督，再有界协议收发。UART STATUS 请求的服务节拍与遥测 lane 区别对待。 |
 
-NVIC group 0 四个抢占位。NMI/HardFault 等由 vendor 向量与默认处理承接，未纳入正常控制 lane。启动失败才进入 WFI。表内速率均从配置导出，ADC 实际有效率、H0 闭环率及 PWM 生效率没有 V2 台面数字。 [平台时基](../../platform/at/at32f415/generated/inc/tm_platform_foc_timing.h) · [AT32 IRQ 枚举](../../platform/at/at32f415/vendor/cmsis/cm4/device_support/at32f415.h)
+NVIC group 0 四个抢占位。NMI/HardFault 等由 vendor 向量与默认处理承接，未纳入正常控制 lane。启动失败才进入 WFI。表内速率均从配置导出，ADC 实际有效率、H0 闭环率及 PWM 生效率没有 V2 台面数字。 [平台时基](../../firmware/at32f415/include/tm_platform_foc_timing.h) · [AT32 IRQ 枚举](../../platform/at/at32f415/vendor/cmsis/cm4/device_support/at32f415.h)
 
 | 数据/状态 | 写者 → 读者 | 当前身份与时间 | 合同与失败边界 |
 | --- | --- | --- | --- |
@@ -153,7 +153,7 @@ Legacy `03bf34f^` 的生成式 ADC 选择 **TMR3 CH4（0x04）**，生成式 TMR
 
 锁定测量用 DWT CYCCNT 与必要的标记 GPIO 对准 TMR2/ADC/逻辑分析仪。先校准探针开销并记录计数 wrap；每域保留固定大小计数、最大值、直方图或有限 trace，只在前台排空，饱和须显式报告。验收检查任务尾部、最小 deadline slack、最大采样/预测年龄、漏事件和栈 watermark，并区分测得最大值与静态最坏上界。若 SPI IRQ 在峰值 H0/UART 负载下出现超时、年龄越界或占用侵入 H0 余量，再以同一帧、相位、校验和超时条件比较 DMA。DMA 方案要测启动成本、仲裁、缓冲生命周期、完成中断时刻、残留帧隔离及栈/内存；单 16-bit 传输没有自动 DMA 收益。
 
-`sched` 裁决 **KEEP_UNUSED**。V2 CMake 没有链接它。 `sched_core_tick64` 用调用者增量推进 64 位时间，预检并提交两遍扫描，O(N)，在 32 位 MCU 上共享读写需由调用者保证串行。Tick 不自行加锁，若 ISR 发布 pending、Foreground 消费，端口要证明临界区能保存/恢复 IRQ 屏蔽状态及优先级。 `run_budget()` 限制 handler 派发次数，回调在锁外运行，耗时由调用方承担。Idle 在解锁后回调，`idle_atomic` 也是兼容包装，ready 检查到 WFI 有竞态，需要 BSP 的唤醒合同。目前与 Runtime Foreground 监督/遥测重叠。只有出现明确的低优先级周期任务和可测上界时复审，H0 与硬件 Encoder 事件仍由外设负责。 [sched 实现](../../components/utils/sched/sched.c) · [sched 调用契约](../../components/utils/sched/sched.h) · [组件设计](../../components/utils/sched/Themis_时间片调度组件设计方案.md)
+`sched` 裁决 **KEEP_UNUSED**，2026-11-24 随 Legacy 删除（源码见 tag `legacy-final` 的 `components/utils/sched/`）。V2 CMake 从未链接它；它与 Runtime Foreground 监督/遥测重叠。只有出现明确的低优先级周期任务和可测上界时才复审，H0 与硬件 Encoder 事件仍由外设负责。
 
 ## SOFT 集成与后续顺序
 

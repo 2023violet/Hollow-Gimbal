@@ -2,82 +2,26 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Themis: Firmware build MinGW Makefiles",
+      "label": "FalconFOC V2: configure ARM image",
       "type": "shell",
       "command": "cmake",
       "args": [
-        "-S",
-        ".",
-        "-B",
-        "build",
-        "-G",
-        "MinGW Makefiles",
-        "-DCMAKE_BUILD_TYPE=Debug",
-        "-DCMAKE_TOOLCHAIN_FILE=tools/cmake/arm-gcc-toolchain.cmake",
-        "-DTHEMIS_BUILD_FIRMWARE=ON",
-        "-DTHEMIS_BUILD_HOST_TESTS=OFF",
-        "-DTHEMIS_DEVDRV_PROFILE=full-diag",
-        "-DTHEMIS_PRODUCT_FLAVOR=carrier-demo",
-        "-DTHEMIS_ENABLE_BOARD_BENCH=OFF",
-        "-DTHEMIS_PLATFORM_VENDOR=at",
-        "-DTHEMIS_PLATFORM_SOC=at32f415",
-        "-DTHEMIS_FIRMWARE_TARGET_NAME=falcon-foc-at32"
-      ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": true
-      },
-      "problemMatcher": "$gcc"
-    },
-    {
-      "label": "Themis: Firmware compile MinGW Makefiles",
-      "type": "shell",
-      "command": "cmake",
-      "args": [
-        "--build",
-        "build",
-        "-j4"
-      ],
-      "group": "build",
-      "problemMatcher": "$gcc"
-    },
-    {
-      "label": "Themis: Firmware build via run.sh",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "./run.sh",
-        "build"
-      ],
-      "problemMatcher": "$gcc"
-    },
-    {
-      "label": "Themis: Firmware flash via run.sh",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "./run.sh",
-        "flash"
+        "-S", "firmware/at32f415",
+        "-B", "build/vscode-arm",
+        "-G", "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/tools/cmake/arm-gcc-toolchain.cmake",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
       ],
       "problemMatcher": []
     },
     {
-      "label": "Themis: Firmware rebuild via run.sh",
+      "label": "FalconFOC V2: build ARM image",
       "type": "shell",
-      "command": "bash",
-      "args": [
-        "./run.sh",
-        "rebuild"
-      ],
-      "problemMatcher": "$gcc"
+      "command": "cmake",
+      "args": ["--build", "build/vscode-arm"],
+      "dependsOn": "FalconFOC V2: configure ARM image",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
     }
   ]
 }

@@ -82,10 +82,6 @@ arm_configure() {
     -DMCU_CPU=cortex-m4 -DMCU_FLOAT=soft -DMCU_FPU=none "$@"
 }
 
-preset() {
-  cmake --preset "$1" && cmake --build --preset "build-$1"
-}
-
 fault_injection() {
   python -I "$HERE/test_fault_injection.py" "$OUT/fault-injection"
 }
@@ -115,12 +111,8 @@ done
 step arm-static arm-static.log python -I "$HERE/arm_static.py" "$OUT/baseline" "$OUT"
 step uart-check uart-check.log python -I "$HERE/uart_check.py" "$OUT/baseline/uart-demo.jsonl" \
   "$OUT/matrix/clang-firmware-at32f415" "$OUT/uart"
-for p in fw-full-diag-carrier-debug fw-standard-carrier-minsizerel fw-tiny-carrier-minsizerel; do
-  step "preset-$p" "preset-$p.log" preset "$p"
-done
 step quality-gate quality-gate.log pwsh -NoProfile -ExecutionPolicy Bypass \
-  -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot "$ROOT" -Scope all \
-  -RequireCMakeFormatter -Summary
+  -File scripts/gates/check_falconfoc_quality_gate.ps1 -RepoRoot "$ROOT" -RequireCMakeFormatter
 step fault-injection fault-injection.log fault_injection
 echo "FWINTEG-STEPS-END" >> "$OUT/steps.tsv"
 

@@ -626,6 +626,9 @@ Foreground request a UART Host sends, so admission, limits, the output lock and 
 command lease (ID 74) are shared. UART and CAN share one control state; the last
 command wins. There are no command responses: refusals are counted (ID 126).
 
+Each Board1 carries a 120 ohm termination. A bus needs exactly two, one at each end:
+two boards connect directly; with three or more, remove it from the boards in between.
+
 Units are output-side: position in turns, velocity in turns/s, torque in N·m (through
 Kt = 1.5 × pole pairs × flux and the gear ratio, ID 99), relative to the output zero
 (ID 124). Floats are IEEE-754 little-endian.

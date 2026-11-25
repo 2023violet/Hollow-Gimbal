@@ -485,9 +485,9 @@
   ],
   "excluded": [
     {
-      "scope": "applications/, bsp/, firmware/, protocol/",
+      "scope": "firmware/, protocol/",
       "classification": "out_of_scope",
-      "reason": "Legacy, Board1, UART and device protocol are outside the portable C11/Host closure."
+      "reason": "Board1, UART and device protocol are outside the portable C11/Host closure."
     },
     {
       "scope": "platform/at/at32f415/vendor/cmsis/",

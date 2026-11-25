@@ -96,21 +96,10 @@ themis_add_falconfoc_test(test-foc-impedance-feedforward tests/test_foc_impedanc
 add_executable(test-foc-baseline tests/test_foc_baseline.c ../g3/np/src/foc_device.c)
 target_link_libraries(test-foc-baseline PRIVATE falconfoc-core)
 target_include_directories(
-  test-foc-baseline
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../g3/np/include"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../applications/algo"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../tests/host/support"
+  test-foc-baseline PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/../g3/np/include"
 )
 add_test(NAME test-foc-baseline COMMAND test-foc-baseline --golden)
-
-add_executable(test-legacy-sincos-baseline tests/test_legacy_sincos_baseline.c)
-target_link_libraries(test-legacy-sincos-baseline PRIVATE falconfoc-core)
-target_include_directories(
-  test-legacy-sincos-baseline
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../applications/algo"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../tests/host/support"
-)
-add_test(NAME test-legacy-sincos-baseline COMMAND test-legacy-sincos-baseline)
 
 add_executable(test-foc-sector-reference tests/test_foc_sector_reference.c)
 target_link_libraries(test-foc-sector-reference PRIVATE falconfoc-core)

@@ -38,13 +38,10 @@ and costs in the frequency comparison use a synthetic clock.
 
 ## Timing ownership
 
-AT32F415 timer-clock facts are owned by
-`platform/at/at32f415/generated/inc/tm_platform_foc_timing.h` and are consumed
-by both the Legacy application configuration and this V2 Board port. The
-Legacy `PWM_FREQ_HZ`/current-step, velocity, position, and trajectory values
-remain product control policy; `PWM_FREQ_HZ` is not the generated TMR1 carrier
-frequency. This split prevents a future platform clock change from silently
-changing the Legacy control cadence or the V2 timestamp scale.
+AT32F415 timer-clock facts (150 MHz timer input, 1 MHz timestamp) live in
+`include/tm_platform_foc_timing.h`; `foc_board.h` derives the Board1 timer and
+microsecond rates from them, and the control cadence stays in `foc_board.h`.
+A clock-tree change must update both together.
 
 ## Explicit calibrated initialization
 
@@ -146,7 +143,7 @@ SPI, Safety, UART V1 or locked output admission changes accompany this mapping.
 | USART1 | PB6 TX, PB7 RX, 115200 8N1, byte IRQ priority 2. Bounded RX ring and single complete TX buffer. |
 | Phase voltage | PA1 / IN1 = VC → logical A, PA2 / IN2 = VB → logical B, PA3 / IN3 = VA → logical C, through 10 kΩ / 1 kΩ (11:1). Not in the H0 group (the injected group holds four channels): the coast check reads them in the foreground with three software-triggered ordinary conversions, 28.5 cycles each, while the bridge is off. |
 | Driver | DRV8311H: nSLEEP pulled up (always enabled, no GPIO), MODE 47 kΩ = 6x PWM with 5 A OCP, SLEW 47 kΩ = 75 V/µs. NFAULT on PB2 is an input with the board's 10 kΩ pull-up (and LED3); H0 reads it each cycle and two low samples in a row latch DRIVER_FAULT (fault bit 16), cleared by FAULT_CLEAR once the line is high. `sil-demo --sil-scenario driver-fault` injects it with `--driver-fault-us on_us[,off_us]`. |
-| CAN1 | PA11 RX / PA12 TX through the SIT3051, classic CAN, ID 122 bit rate (1 Mbit/s), RX FIFO 0 IRQ priority 2, three TX mailboxes filled by Foreground. Off on the HICK fallback clock. CANSimple adapter `foc_can.c` (protocol README, contract 25). |
+| CAN1 | PA11 RX / PA12 TX through the SIT3051 (S pin tied to GND: always normal mode; 120 ohm termination on board), classic CAN, ID 122 bit rate (1 Mbit/s), RX FIFO 0 IRQ priority 2, three TX mailboxes filled by Foreground. Off on the HICK fallback clock. CANSimple adapter `foc_can.c` (protocol README, contract 25). |
 | Unused pins | PB8 not connected (pulled down), BOOT0 10 kΩ to GND. |
 | Other resources | DMA1/2, SysTick and both watchdogs are unused. No Flash persistence backend. |
 

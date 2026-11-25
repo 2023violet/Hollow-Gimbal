@@ -3216,3 +3216,15 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 
 - 新增 `foc_can.c`：CANSimple 帧（11 位 ID = 节点 << 5 | 命令）经新的 `foc_serial_execute()` 走 UART 同一套准入；Set_Axis_State/Controller_Mode/Input_*/Limits/Traj/Gains/Absolute_Position、心跳与位置速度周期帧、Address 按序列号分配、RxSdo/TxSdo 读写 FalconFOC 参数、Estop/Clear_Errors/Reboot。`main.c` 在设置恢复后启动 CAN1（PA11/PA12，HICK 时不启用），RX FIFO0 中断优先级 2。参数 120/122/123/125（保存）、126/127（只读），存储 format 8（244 字节）。
 - SIL `--can <serial>` 复用 stdio；CLI 虚拟总线、`can` 命令、场景 `can` 与 `can-multi`，SIL 单元测试新增 2 项；`protocol/tests/cansimple_vectors.tsv` 与 Python 校验。用户决定：先 CANSimple，MIT 第二步。参数契约第 25 节。默认镜像 text 102,660 B（+6,872）、bss 15,304 B（+704）；带存储镜像余量约 19.4 KB。未上板。fwinteg：`expected_tests.tsv` 加入 `test-foc-can`；`arm_static.py` 记录两个复核过的锁定前序摘要（指令逐条相同，只有寄存器分配不同，因内联的 CAN 初始化稍后读 `clock_from_crystal`）。
+
+## 2026-11-24 · CAN：板级事实确认
+
+- 用户确认：SIT3051 的 S 脚接 GND（常处正常模式，固件无需控制引脚），板上有 120 Ω 终端电阻。多板组网时只有总线两端保留终端，三块及以上要去掉中间板的电阻。已更新参数契约 25.4、firmware README 与 protocol README。未改代码。
+
+## 2026-11-24 · 删除 Legacy，仓库统一为 V2
+
+- 用户决定删除 Legacy。删除前在 `4c4ad7e` 打 tag `legacy-final`，Legacy 源码、脚本、实板探针与文档都可从该 tag 取回。
+- 删除：`applications/`、`bsp/`、`subsys/`、`components/`、`kernel/`（FreeRTOS）、`include/`、`tests/`（Legacy Host 与脚本合同）、`work/`（旧 WorkBench 工程）、`cmake/` 与根 `CMakeLists.txt`/`CMakePresets.json`、`run.sh`、`memory.sh`、`symbols.txt`、`build/` 下跟踪的台面探针、`tools/assets/`、`platform/` 的 Themis 元数据与 `generated/`、Legacy 脚本（板级流程、Host 流程、预设/冒烟/平台/Shell 门禁、兼容包装）和 Legacy 专属文档（application、boot、overview、planning、Themis 架构文档、Shell/Transport/Utils/CMake/Windows/铁律/clang-format 评审）。约 1,420 个文件。
+- 迁入 V2：COBS → `protocol/src/`（镜像在用），CRC → `control_plane/src/`，`tm_platform_foc_timing.h` → `firmware/at32f415/include/`（去掉两个 Legacy 宏，补齐头文件合同节）。ARM 工具链不再加载 Themis 元数据，默认值直接写 AT32F415（cortex-m4 / none / soft）。删除只对照 Legacy 近似的 `test-legacy-sincos-baseline`（数据保留在 PERF-01A/B 证据），`expected_tests.tsv` 同步。
+- 门禁：新 `scripts/gates/check_falconfoc_quality_gate.ps1`（diff check、源码合同、CMake 质量）替代 `check_themis_quality_gate.ps1`；`check_cmake_quality.ps1` 只查 V2 工程。fwinteg 去掉三个 Legacy 预设步骤和 Legacy Host 计数，故障注入去掉 `legacy-fail`。`.vscode` 改为直接构建/调试 V2 镜像。AGENTS.md、README、docs/README、architecture/README、scripts/README 重写；三份保留的编码规范加 V2 适用范围说明；ADR 两处失效链接修正。
+- 验证：默认与持久化 ARM BIN 与删除前逐字节相同（`1293cc38…`、`31ad5d6f…`，不传 MCU 参数也相同）；clang Host 矩阵 11 个工程全过；g3/np、g3/safe 通过；SIL 单元测试 24 项与 CLI 测试通过；新门禁通过；SDK 打包技术检查通过（RELEASE_BLOCKED 为既有许可阻塞）；fwinteg（`build/fwinteg-legacy-rm/run1`）VERDICT PASS，0 findings，三套工具链各 126 项 CTest 全过（少了删除的 sincos 对照）。examples/parameters 等 4 个工程在 `legacy-final` 上同样有 39 个 simulation 子工程测试 Not Run，属既有问题，未改。

@@ -40,7 +40,6 @@ core	test-foc-pmsm-reference
 core	test-foc-sector-reference
 core	test-foc-svpwm
 core	test-foc-trajectory
-core	test-legacy-sincos-baseline
 examples-calibration-workflow	test-falconfoc-calibration-workflow-demo
 examples-servo	test-falconfoc-servo-configured
 examples-servo	test-falconfoc-servo-demo

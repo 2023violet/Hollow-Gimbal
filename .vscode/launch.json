@@ -2,9 +2,9 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "FalconFoc DAP-Link Debug",
+      "name": "FalconFOC V2 DAP-Link Debug",
       "cwd": "${workspaceFolder}",
-      "executable": "${workspaceFolder}/build/output/falcon-foc-at32.elf",
+      "executable": "${workspaceFolder}/build/vscode-arm/falconfoc-v2-at32f415.elf",
       "request": "launch",
       "type": "cortex-debug",
       "servertype": "openocd",
@@ -15,7 +15,7 @@
       "searchDir": [
         "${workspaceFolder}"
       ],
-      "preLaunchTask": "Themis: Firmware build MinGW Makefiles",
+      "preLaunchTask": "FalconFOC V2: build ARM image",
       "runToEntryPoint": "main",
       "showDevDebugOutput": "both",
       "svdPath": "${workspaceFolder}/platform/at/at32f415/AT32F415xx_v2.svd",

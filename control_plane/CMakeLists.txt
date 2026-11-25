@@ -25,7 +25,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-control-plane PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-set(config_crc_dir "${CMAKE_CURRENT_SOURCE_DIR}/../components/utils/crc")
+set(config_crc_dir "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_library(
   falconfoc-config-store STATIC src/foc_config_codec.c src/foc_config_store.c
                                 "${config_crc_dir}/crc.c"

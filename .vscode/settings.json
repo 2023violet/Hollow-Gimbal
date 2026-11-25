@@ -1,8 +1,12 @@
 {
-  "cmake.useCMakePresets": "always",
-  "cmake.configurePreset": "fw-full-diag-carrier-debug",
-  "cmake.buildPreset": "build-fw-full-diag-carrier-debug",
-  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.useCMakePresets": "never",
+  "cmake.sourceDirectory": "${workspaceFolder}/firmware/at32f415",
+  "cmake.buildDirectory": "${workspaceFolder}/build/vscode-arm",
+  "cmake.generator": "Ninja",
+  "cmake.configureSettings": {
+    "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/tools/cmake/arm-gcc-toolchain.cmake",
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+  },
   "cmake.configureOnOpen": false,
   "cmake.configureOnEdit": false,
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",

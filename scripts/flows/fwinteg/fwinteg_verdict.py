@@ -4,8 +4,8 @@ Usage: python -I fwinteg_verdict.py <run dir> <expected_tests.tsv>
 
 Reads only files written by run_fwinteg.sh and decides each category on its own:
 step exit codes, per-toolchain CTest inventories against the frozen expected list
-(names, not counts), witnesses, ARM images, static checks, UART, Legacy presets,
-Strict Scope all and Legacy Host. Anything failed, missing, incomplete, duplicated,
+(names, not counts), witnesses, ARM images, static checks, UART and the V2 quality
+gate. Anything failed, missing, incomplete, duplicated,
 unexpected, skipped or not run makes the exit code 1. Exit 0 needs every category.
 """
 
@@ -26,7 +26,6 @@ ARM_IMAGES = {
     "verification-capture": "falconfoc-v2-at32f415-calibration-verification",
     "default-trace": "falconfoc-v2-at32f415",
 }
-PRESETS = ("fw-full-diag-carrier-debug", "fw-standard-carrier-minsizerel", "fw-tiny-carrier-minsizerel")
 WITNESS = {
     "test-foc-board-boot": ("accepted supply 0x56464331 review 0x01210001", "reverse check",
                             "calibrated boot: FAULT_CLEAR ACCEPTED", "nominal boot: FAULT_CLEAR ACCEPTED",
@@ -39,7 +38,6 @@ REQUIRED_STEPS = (
     + [f"witness-{tc}-{test}" for tc in TOOLCHAINS for test in WITNESS]
     + [f"arm-{name}-{phase}" for name in ARM_IMAGES for phase in ("configure", "build")]
     + ["arm-static", "uart-check"]
-    + [f"preset-{preset}" for preset in PRESETS]
     + ["quality-gate", "fault-injection"]
 )
 RESULT = re.compile(r"Test +#\d+: (\S+) \.+[ *]*(Passed|\*{0,3}Failed|\*{0,3}Not Run|\*{0,3}Skipped|"
@@ -186,11 +184,9 @@ CONTENT = {
     "uart-check": (("ALL UART CHECKS PASS",), ("FAILURES",)),
     "quality-gate": (("[quality_gate] all requested checks passed.", "[Total]   PASS",
                       "[falconfoc_source_contract] checked C/H files"), ("FAIL",)),
-    "legacy-host": (("100% tests passed out of 45", "[run_host_tests] all host tests passed."),
-                    ()),
     "fault-injection": (("FAULT INJECTION PASS",), ("FAULT INJECTION FAIL",)),
 }
-LOGS = {"legacy-host": "quality-gate.log"}
+LOGS = {}
 for name, (needed, forbidden) in CONTENT.items():
     content = read(RUN / LOGS.get(name, f"{name}.log")) or ""
     for marker in needed:
@@ -201,7 +197,7 @@ for name, (needed, forbidden) in CONTENT.items():
             fail(name, f"contains '{marker}'")
 report["categories"] = {name: not any(f.split(":", 1)[0] == name for f in failures) for name in
                         ("steps", "matrix-clang", "matrix-gcc", "matrix-sanitizer", "witness", "arm",
-                         "arm-static", "uart-check", "quality-gate", "legacy-host", "fault-injection")}
+                         "arm-static", "uart-check", "quality-gate", "fault-injection")}
 report["failures"] = failures
 report["verdict"] = "PASS" if not failures else "FAIL"
 (RUN / "verdict.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

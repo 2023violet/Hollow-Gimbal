@@ -117,7 +117,6 @@ target_include_directories(
          "${repo}/runtime/include"
          "${repo}/calibration/include"
          "${repo}/sensors/include"
-         "${repo}/platform/at/at32f415/generated/inc"
 )
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-board1 PRIVATE -Wall -Wextra -Wpedantic)

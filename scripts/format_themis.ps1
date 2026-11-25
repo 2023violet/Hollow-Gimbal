@@ -136,7 +136,7 @@ function Get-ThemisOwnedCFiles
 
     $result = @()
     foreach ($path in $RepoRelativePaths) {
-        if ($path -notmatch '^(applications|bsp|calibration|components|core|firmware/at32f415|g3/(np|safe)|include|protocol|runtime|sensors|simulation|subsys|tests)/.+\.(c|h)$') {
+        if ($path -notmatch '^(calibration|control_plane|core|examples|firmware/at32f415|g3/(np|safe)|protocol|runtime|sensors|simulation|tools)/.+\.(c|h)$') {
             continue
         }
 
@@ -158,16 +158,9 @@ function Get-ThemisCMakeFiles
     )
 
     $officialPaths = @(
-        "CMakeLists.txt",
-        "applications/CMakeLists.txt",
-        "bsp/CMakeLists.txt",
-        "bsp/board/CMakeLists.txt",
-        "bsp/ports/CMakeLists.txt",
-        "components/algorithm/CMakeLists.txt",
-        "components/protocol/CMakeLists.txt",
-        "components/utils/CMakeLists.txt",
         "core/CMakeLists.txt",
         "calibration/CMakeLists.txt",
+        "control_plane/CMakeLists.txt",
         "sensors/CMakeLists.txt",
         "g3/np/CMakeLists.txt",
         "g3/safe/CMakeLists.txt",
@@ -175,12 +168,6 @@ function Get-ThemisCMakeFiles
         "simulation/CMakeLists.txt",
         "firmware/at32f415/CMakeLists.txt",
         "protocol/CMakeLists.txt",
-        "kernel/freertos/CMakeLists.txt",
-        "platform/at/at32f403a/CMakeLists.txt",
-        "platform/template/cortex_m4_ref/CMakeLists.txt",
-        "subsys/CMakeLists.txt",
-        "tests/CMakeLists.txt",
-        "cmake/ThemisBuild.cmake",
         "tools/cmake/arm-gcc-toolchain.cmake"
     )
 

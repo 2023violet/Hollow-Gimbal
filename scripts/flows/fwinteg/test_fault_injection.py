@@ -23,7 +23,7 @@ CASES = {
     "unexpected-test": ("unexpected-test", 1), "truncated-log": ("truncated-log", 1),
     "missing-log": ("missing-log", 1), "arm-build-fail": ("arm-build-fail", 1),
     "static-fail": ("static-fail", 1), "uart-fail": ("uart-fail", 1), "gate-fail": ("gate-fail", 1),
-    "legacy-fail": ("legacy-fail", 1), "empty-step": ("empty-step", 1), "skip-step": ("skip-step", 1),
+    "empty-step": ("empty-step", 1), "skip-step": ("skip-step", 1),
 }
 
 WORK.mkdir(parents=True)

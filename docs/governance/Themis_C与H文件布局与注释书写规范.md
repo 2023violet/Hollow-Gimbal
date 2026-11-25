@@ -1,5 +1,7 @@
 # Themis C 与 H 文件布局与注释书写规范
 
+> **V2 适用范围（2026-11-24）**：Legacy Themis 固件（`applications/`、`bsp/`、`components/`、`subsys/`、FreeRTOS、Shell）已删除，只保留在 Git tag `legacy-final`。本文中这些目录与分层示例属于历史背景；V2 目录与职责以 [AGENTS.md](../../AGENTS.md) 第 3 节为准。命名、注释、文件布局、错误处理与验证纪律等通用规则继续适用。
+
 ## 1. 文档定位
 
 本文只约束 Themis 自有 `.c/.h` 文件的内部组织方式、视觉节奏与注释书写方式。

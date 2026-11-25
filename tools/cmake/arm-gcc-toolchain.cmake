@@ -1,5 +1,5 @@
 # Themis ARM bare-metal toolchain baseline. Role: - locate arm-none-eabi tools and expose MCU cache
-# overrides - resolve platform and CPU-class toolchain defaults before project() - establish
+# overrides - default to the AT32F415 core (Cortex-M4 without FPU, soft-float ABI) - establish
 # compiler and linker defaults before the project configures - stay limited to toolchain facts, not
 # module ownership or product policy
 
@@ -48,27 +48,18 @@ find_program(
   DOC "ARM size utility for memory-usage reporting"
 )
 
-# Platform / CPU-class metadata -----------------------------------------------------------------
-get_filename_component(_THEMIS_TOOLCHAIN_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
-get_filename_component(_THEMIS_TOOLS_DIR "${_THEMIS_TOOLCHAIN_CMAKE_DIR}" DIRECTORY)
-get_filename_component(_THEMIS_REPO_ROOT "${_THEMIS_TOOLS_DIR}" DIRECTORY)
-include("${_THEMIS_REPO_ROOT}/cmake/ThemisPlatformMetadata.cmake")
-
-themis_metadata_declare_platform_selection_cache()
-themis_metadata_load_platform_defaults("${_THEMIS_REPO_ROOT}")
-themis_metadata_load_cpu_defaults("${_THEMIS_REPO_ROOT}")
-
 # MCU architecture flags ------------------------------------------------------------------------
+# AT32F415 is a Cortex-M4 without an FPU; firmware/at32f415 rejects any other combination.
 set(MCU_CPU
-    "${THEMIS_CPU_TOOLCHAIN_CPU_DEFAULT}"
+    "cortex-m4"
     CACHE STRING "Target CPU core. Override only for exceptional bring-up/debug."
 )
 set(MCU_FPU
-    "${THEMIS_CPU_TOOLCHAIN_FPU_DEFAULT}"
-    CACHE STRING "Target FPU. Leave empty for CPU classes without an FPU."
+    "none"
+    CACHE STRING "Target FPU. Leave empty or none for CPU classes without an FPU."
 )
 set(MCU_FLOAT
-    "${THEMIS_CPU_TOOLCHAIN_FLOAT_DEFAULT}"
+    "soft"
     CACHE STRING "Floating-point ABI (hard | soft | softfp)."
 )
 

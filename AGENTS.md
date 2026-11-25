@@ -1,222 +1,134 @@
 # AGENTS.md
 
-FalconFoc AT32 repository rules for AI and maintainers.
+FalconFOC V2 repository rules for AI and maintainers.
 
-This file is the live repo entry contract.
+This file is the live repo entry contract. The earlier Themis/FreeRTOS Legacy
+firmware was removed on 2026-11-24; it is preserved only at the Git tag
+`legacy-final`. Do not restore it, and do not cite its paths as current.
 
 ## 1. Read Order
 
 Read these first, in order:
 
-0. `docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md`
-   - Product principles govern direction; current Git/source/evidence supersede its dated progress snapshot.
-   - For V2 architecture decisions, read `docs/architecture/FalconFOC_BareMetal_Execution_ADR.md` next.
-1. `README.md`
-2. `docs/README.md`
-3. `docs/architecture/README.md`
-4. `docs/architecture/Themis_FalconFoc无devdrv模式与FOC直控分层方案.md`
-5. `docs/architecture/Themis_BSP层定位、边界与优化路线图.md`
-6. `docs/architecture/Themis_Export机制与阶段设计.md`
-7. `docs/architecture/Themis_参数持久化存储设计说明.md`
-8. `docs/boot/Themis_启动与初始化流程.md`
-9. `docs/boot/Themis_启动链回归检查表.md`
-10. `docs/governance/Themis_Transport与Shell硬化说明.md`
-11. `docs/governance/Themis_Shell与诊断输出规范.md`
-12. `docs/governance/Themis_工程维护日志.md`
-13. `docs/governance/Themis_代码规范指南.md`
-14. `docs/governance/Themis_Utils与通用组件代码规范指南.md`
-15. `docs/governance/Themis_C与H文件布局与注释书写规范.md`
-16. `docs/governance/Themis_CMake编写规范与质量门禁.md`
-17. `docs/governance/Themis_AI高质量编码必读清单.md`
+1. `docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md`
+   - Product principles govern direction; current Git/source/evidence supersede
+     its dated progress snapshot.
+2. `docs/architecture/FalconFOC_BareMetal_Execution_ADR.md`
+3. `README.md`
+4. `docs/README.md`
+5. `docs/superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md`
+   (UART/CAN parameters, calibration, persistence)
+6. `firmware/at32f415/README.md` and `protocol/README.md`
+7. `docs/governance/Themis_工程维护日志.md` (latest entries)
+8. `docs/governance/Themis_代码规范指南.md`
+9. `docs/governance/Themis_C与H文件布局与注释书写规范.md`
+10. `docs/governance/Themis_AI高质量编码必读清单.md`
 
-If touching these areas, read the matching local entry too:
+If touching these areas, read the matching local README too: `core/`,
+`runtime/`, `calibration/`, `sensors/`, `g3/`, `control_plane/`, `simulation/`,
+`protocol/`, `firmware/at32f415/`, `tools/falconfoc-cli/`, `scripts/`.
 
-- `applications/`
-  - `docs/application/README.md`
-- `bsp/`
-  - `docs/architecture/Themis_BSP层定位、边界与优化路线图.md`
-- `platform/at/at32f415/`
-  - `docs/boot/Themis_启动与初始化流程.md`
-- `scripts/` or `tests/`
-  - `scripts/README.md`
-- `include/`
-  - `include/README.md`
-- `components/`
-  - `components/README.md`
-- `core/` or `g3/`
-  - the G2/G3-NP plan and the applicable portability and C/H layout rules
-- `protocol/`
-  - `protocol/README.md` for V1 wire layout and shared vectors
-- `firmware/at32f415/` or `tools/falconfoc-cli/`
-  - the local README and `protocol/README.md` for the locked firmware and Host tests
+## 2. Product Boundary
 
-## 2. FalconFoc Boundary
+FalconFOC V2 is a portable, sensored FOC servo for swappable PMSM motors.
 
-This repo is FalconFoc-only and must stay focused on its current product
-boundary.
+- MCU: `AT32F415` (Cortex-M4 without FPU, soft-float), Board1 with DRV8311H.
+- The controller never identifies a motor by itself; the user recalibrates on
+  the MCU through a Host command after a motor swap.
+- Calibration runs on the MCU only. Host tools drive it; they never compute it.
+- Every feature needs a UART entry, a CLI command and a SIL demo scenario.
+- Physical output stays locked in ARM images until a bench sign-off.
+- There is no bench yet: all evidence is software (Host tests, Board1 SIL,
+  fwinteg). Never present it as hardware evidence.
 
-Current live product facts:
+## 3. Layer Map
 
-- MCU line: `AT32F415`
-- live platform owner: `platform/at/at32f415`
-- live board owner: `bsp/board`
-- live thin control-plane port owner: `bsp/ports`
-- live product owner: `applications/`
-- live framework owner: `subsys/`
-- live reusable code owner: `components/`
+| Directory | Owns |
+| --- | --- |
+| `core/` | Portable C11 FOC math: Clarke/Park, SVPWM, current/velocity/position control, trajectory, impedance |
+| `runtime/` | H0/H1/Foreground domains, lifecycle, Pipeline, protection, output submission |
+| `calibration/` | Motor identification algorithms (R/L, flux, J/B, encoder) |
+| `sensors/` | Encoder angle, velocity and quality |
+| `g3/` | Device mapping (`np`) and Safety (`safe`) |
+| `control_plane/` | Host parameter catalog, configuration codec and store (Host tools) |
+| `protocol/` | UART V1 wire format and COBS framing |
+| `firmware/at32f415/` | Board1 image: `main.c`, Board port, UART/CAN, MCU calibration, settings store, SIL |
+| `simulation/` | Host Virtual Motor and virtual calibration |
+| `examples/`, `tools/` | Host examples, Python CLI, replay and inspection tools |
+| `platform/at/at32f415/vendor/` | Unmodified Artery CMSIS and peripheral drivers |
+| `scripts/` | Quality gates, fwinteg, SDK packaging |
 
-Current hard boundary:
-
-- FalconFoc does not assemble Themis `device/` or `drivers/` runtime.
-- FOC hot path may directly use vendor headers, generated code, and registers.
-- soft-task and control-plane hardware access should be collected behind thin
-  BSP ports, not a generic HAL.
-- `work/` is out of scope.
-
-## 3. Layer Rules
-
-### `platform/at/at32f415`
-
-Owns:
-
-- vendor startup
-- linker script
-- generated peripheral bring-up
-- MCU headers and chip baseline
-
-Does not own:
-
-- product task orchestration
-- shell semantics
-- parameter policy
-
-### `bsp/board`
-
-Owns:
-
-- board facts
-- minimal pre-kernel glue
-- board-owned flash backend
-
-Does not own:
-
-- product tasks
-- shell commands
-- copied vendor driver stacks
-
-### `bsp/ports`
-
-Owns:
-
-- thin functional control-plane ports such as console or system reset
-
-Does not own:
-
-- FOC ISR hot path
-- generic future-proof abstraction layers
-- product policy
-
-### `applications`
-
-Owns:
-
-- app startup bridge
-- motor orchestration
-- state machine
-- product shell commands
-- parameter versioning and recovery policy
-
-### `subsys`
-
-Owns:
-
-- shared framework mechanisms
-
-Does not own:
-
-- FalconFoc product behavior
+Every directory above with a `CMakeLists.txt` is a standalone CMake project;
+there is no root CMake project.
 
 ## 4. FOC-Specific Rules
 
-Formal split:
-
-- FOC hot path:
-  - direct control is allowed
-  - vendor library or register access is allowed
-  - do not force this path through `bsp/ports`
-- soft-task peripherals:
-  - use thin function-oriented ports
-  - do not build `hal/`, vtables, device registries, or deep wrapper trees
-
-Migration rule:
-
-- portability comes from isolating the soft-task/control-plane surfaces
-- portability does not come from abstracting the full FOC hot path
+- The FOC hot path (H0 ISR, PWM, ADC, SPI encoder) may use vendor drivers and
+  registers directly. Do not wrap it in a HAL.
+- Soft-task hardware access (UART, CAN, Flash, reset) goes through the thin
+  port structs in `firmware/at32f415`.
+- Portability comes from the portable Core/Runtime, not from abstracting the hot path.
+- The command lease stays 2.5 ms by default; hosts raise parameter ID 74.
 
 ## 5. Startup Rule
 
-Current live startup chain:
-
-`platform generated main -> applications/app_main -> bsp_init -> export bring-up -> motor_task_init -> shell_task_init -> app_shell_task / motor_task / motor_safe_task / vofa_task`
-
-Do not move startup ownership back into retired BSP or historical task paths.
+`firmware/at32f415/src/main.c` is the only entry: output lock → clock (crystal
+PLL with HICK fallback) → peripherals → settings restore → CAN start → IRQ
+enable → bare-metal H0 (ADC) / H1 / Foreground loop. See the
+[execution ADR](docs/architecture/FalconFOC_BareMetal_Execution_ADR.md) and
+`firmware/at32f415/LOCKED_TIMING.md`.
 
 ## 6. Documentation Rule
 
 If you change any of these, update docs in the same round:
 
-- layer ownership
-- startup chain
-- shell transport policy
-- parameter save/recover/version strategy
-- BSP folder structure
-- script or test entry points
+- layer ownership or directory structure
+- startup chain or timing ownership
+- UART/CAN protocol, parameters, persistence format or calibration stages
+- script, gate or test entry points
 
-Always append a concise entry to:
-
-- `docs/governance/Themis_工程维护日志.md`
+Always append a concise entry to `docs/governance/Themis_工程维护日志.md`.
 
 ## 7. Verification Rule
 
-For real code changes, verify with the current live lanes when applicable:
+For real code changes, run the lanes that apply:
 
-- firmware build:
-  - `./run.sh build`
-- host tests:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/flows/host/run_host_tests.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal`
-- quality gate:
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_themis_quality_gate.ps1 -RepoRoot D:/study/Software/Hollow-Gimbal -Scope all`
+- Host lanes: each V2 project builds and tests on its own, for example
+  `cmake -S firmware/at32f415 -B build/m0-board -G Ninja -DCMAKE_C_COMPILER=clang`,
+  then `cmake --build` and `ctest --test-dir build/m0-board --output-on-failure`.
+- ARM image:
+  `cmake -S firmware/at32f415 -B build/m2-arm-default -G Ninja -DCMAKE_TOOLCHAIN_FILE=<repo>/tools/cmake/arm-gcc-toolchain.cmake`
+  (add `-DFALCONFOC_BOARD_PERSISTENCE=ON` for the persistent-settings image).
+- Board1 SIL: `FOC_BOARD1_SIL=<abs path to falconfoc-board1-sil> python -B -m unittest test_board1_sil`
+  in `tools/falconfoc-cli`.
+- Quality gate:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_falconfoc_quality_gate.ps1 -RepoRoot <repo> -RequireCMakeFormatter`
+- Full integration (run alone, it is slow): `bash scripts/flows/fwinteg/run_fwinteg.sh build/fwinteg-<name>/run1`
 
-Board facts currently documented in live docs:
-
-- debugger: `DAP-Link` (OpenOCD V2.0.6, `tools/openocd/openocd_daplink.cfg`)
-- console policy: `USART1 console-first`
-- current bench serial witness: `COM3 @ 115200`
+Board facts: debugger `DAP-Link` (OpenOCD V2.0.6, `tools/openocd/openocd_daplink.cfg`);
+UART V1 on USART1; CAN1 on PA11/PA12 through a SIT3051 (S pin grounded, 120 Ω on board).
 
 ## 8. Explicit Prohibitions
 
 Do not:
 
-- reintroduce full `device/` / `drivers/` runtime into FalconFoc
-- pollute app-layer headers with vendor MCU headers unless the file is part of
-  the FOC hardware-coupled path
-- write unrelated product docs back into live FalconFoc entry points
-- keep stale tests or scripts that reference removed product surfaces
-- expand `bsp/board` into a second platform layer
-- restore retired overview / planning / prompt / devdrv docs to the live read path
+- restore Legacy (Themis, FreeRTOS, shell, `applications/`, `bsp/`, `subsys/`,
+  `components/`) code or docs to the live tree
+- put vendor MCU headers into `core/`, `runtime/`, `calibration/`, `sensors/` or `g3/`
+- unlock physical output in ARM images without a recorded bench sign-off
+- keep stale tests or scripts that reference removed surfaces
+- run Host calibration math in place of the MCU path
 
 ## 9. Default Decision Rule
 
 For major V2 architecture changes, apply the Architecture Change Gate in
-`docs/architecture/FalconFOC_BareMetal_Execution_ADR.md` before implementation.
-Use product goals, mature engineering methods, and reproducible evidence to
-justify the decision. Record any superseding decision and its acceptance and
-rollback criteria in an ADR.
+`docs/architecture/FalconFOC_BareMetal_Execution_ADR.md` before implementation,
+and record any superseding decision with acceptance and rollback criteria.
 
 When uncertain:
 
 - prefer the smallest live owner
 - prefer explicit ownership over convenience
-- keep FOC hot path direct
+- keep the FOC hot path direct
 - keep soft-task hardware access thin
 - keep docs aligned with the real repository, not historical architecture

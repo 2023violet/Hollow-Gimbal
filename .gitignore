@@ -1,7 +1,5 @@
 # --- Build outputs ---
-# `/build/*` (not `build/`) so the bench probe scripts can stay tracked below.
-/build/*
-!/build/_*.ps1
+/build/
 build-rel/
 out/
 CMakeCache.txt

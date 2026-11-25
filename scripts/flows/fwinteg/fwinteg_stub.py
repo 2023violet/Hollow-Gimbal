@@ -105,8 +105,7 @@ def main():
         if FAULT == "gate-fail":
             print("[cmake_quality] check failed\n[Total]   FAIL")
             return 0  # lying exit
-        legacy = "100% tests passed out of 45" if FAULT != "legacy-fail" else "97% tests passed, 1 tests failed out of 45"
-        print(f"[falconfoc_source_contract] checked C/H files: 1\n{legacy}\n[run_host_tests] all host tests passed.\n"
+        print("[falconfoc_source_contract] checked C/H files: 1\n"
               "[quality_gate] all requested checks passed.\n[Total]   PASS")
         return 0
     if STEP == "fault-injection":

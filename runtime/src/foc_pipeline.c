@@ -405,6 +405,15 @@ int foc_pipeline_step_guarded(
         }
         target = derived->target_a;
     }
+    if (input->target_limited && !input->voltage_drive) {
+        const float limit = input->target_limit_a > 0.0f ? input->target_limit_a : 0.0f;
+        const float magnitude_sq = target.d * target.d + target.q * target.q;
+        if (magnitude_sq > limit * limit) {
+            const float scale = limit / sqrtf(magnitude_sq);
+            target.d *= scale;
+            target.q *= scale;
+        }
+    }
     struct foc_current_context trial = pipeline->current;
     struct foc_current_output result;
     if (input->voltage_drive) {

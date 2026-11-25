@@ -1,0 +1,71 @@
+{
+  "kind": "summary",
+  "demo": "board1-sil-thermal",
+  "scenario": "thermal",
+  "status": "SIL_PASS",
+  "simulated": true,
+  "physical_applied": false,
+  "checks": {
+    "defaults_without_sensor": true,
+    "i2t_folds_back_on_time": true,
+    "i2t_holds_rated_current": true,
+    "i2t_decays_when_stopped": true,
+    "ntc_reads_ambient": true,
+    "ntc_derates_to_equilibrium": true,
+    "ntc_trip_latched": true,
+    "ntc_clear_refused_while_hot": true,
+    "ntc_clear_applies_after_release": true
+  },
+  "failed_checks": [],
+  "metrics": {
+    "defaults": {
+      "fet-temperature": null,
+      "motor-temperature": null,
+      "i2t-load": 0.0,
+      "thermal-current-limit": 2.5
+    },
+    "i2t": {
+      "tuning": [
+        "APPLIED",
+        "APPLIED"
+      ],
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "fold_back_us": 615000,
+      "theta_peak": 1.0020829439163208,
+      "tail_mean_iq_a": 0.5000045877560729,
+      "final_limit_a": 0.5,
+      "after_2s_stopped": {
+        "i2t-load": 0.3679406940937042,
+        "thermal-current-limit": 2.5
+      }
+    },
+    "ntc": {
+      "writes": [
+        "APPLIED",
+        "APPLIED",
+        "APPLIED"
+      ],
+      "idle_motor_c": 25.0,
+      "idle_fet_c": null,
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "settled_iq_a": 0.881146001649985,
+      "settled_motor_c": 52.95093412960277,
+      "settled_limit_a": 0.8811332723673653,
+      "trip_uptime_us": 7130510,
+      "faults": [
+        "OVER_TEMPERATURE_MOTOR"
+      ],
+      "clear_after_release": {
+        "result": "ACCEPTED",
+        "clear_result": 2,
+        "motor_c": 36.54698181152344
+      }
+    }
+  }
+}

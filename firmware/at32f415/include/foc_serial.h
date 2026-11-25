@@ -195,6 +195,33 @@ struct foc_serial_can_settings {
     uint32_t mit_reply;
 };
 
+/** One NTC channel (IDs 138–140 FET, 141–143 motor). */
+struct foc_serial_thermal_sensor {
+    /** 0 off, 1 on. */
+    uint32_t enabled;
+    /** Linear derating from derate_c to zero current at limit_c; trip 5 °C above. */
+    float derate_c;
+    float limit_c;
+};
+
+/** NTC protection settings (IDs 138–146, 148); defaults from foc_serial_thermal_defaults(). */
+struct foc_serial_thermal_settings {
+    struct foc_serial_thermal_sensor fet;
+    struct foc_serial_thermal_sensor motor;
+    /** Shared β model: β in K, R25 and the divider resistor in Ω, topology 0 NTC to
+     * ground (pull-up), 1 NTC to the reference (pull-down). */
+    float beta_k;
+    float r25_ohm;
+    float pullup_ohm;
+    uint32_t topology;
+};
+
+/** Latest filtered temperatures in °C, NaN without a reading (IDs 119, 147). */
+struct foc_serial_temperatures {
+    float fet_c;
+    float motor_c;
+};
+
 /** Optional CAN link status for read-only PARAM_READ ID 126. */
 struct foc_serial_can_link {
     const void *context;
@@ -293,6 +320,10 @@ struct foc_serial {
     struct foc_serial_can_settings can;
     /** Optional CAN link status (ID 126). */
     struct foc_serial_can_link can_link;
+    /** NTC protection settings, polled by the board's foc_board_thermal. */
+    struct foc_serial_thermal_settings thermal;
+    /** Written by foc_board_thermal_poll(); NaN until then. */
+    struct foc_serial_temperatures temperature;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -338,6 +369,12 @@ struct foc_serial_can_settings foc_serial_can_defaults(void);
 
 /** True when the settings are within the ranges of their PARAM_WRITE entries. */
 bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *settings);
+
+/** Default NTC settings: both channels off, 75/95 °C, 10 kΩ β 3950 to ground, 10 kΩ pull-up. */
+struct foc_serial_thermal_settings foc_serial_thermal_defaults(void);
+
+/** True within the PARAM_WRITE ranges with each channel's derate_c below its limit_c. */
+bool foc_serial_thermal_settings_valid(const struct foc_serial_thermal_settings *settings);
 
 /** Attach the CAN link status before receiving bytes. */
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link);

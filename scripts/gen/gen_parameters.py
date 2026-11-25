@@ -25,7 +25,7 @@ UNITS = {
     "none": 0, "A": 1, "rad": 2, "rad/s": 3, "count": 4, "us": 5, "V/A": 6, "V/(A*s)": 7,
     "A/(rad/s)": 8, "A/rad": 9, "1/s": 10, "ohm": 11, "H": 12, "Wb": 13, "N*m/A": 14,
     "kg*m^2": 15, "N*m*s/rad": 16, "Hz": 17, "V": 18, "ms": 20, "rad/s^2": 21,
-    "N*m": 22, "N*m/rad": 23,
+    "N*m": 22, "N*m/rad": 23, "C": 24, "s": 25, "K": 26,
 }
 TYPES = {"u32": 1, "f32": 2}
 GROUPS = ("serial", "tuning", "receipt", "boot", "store", "commission", "rotor", "derived", "status")
@@ -62,8 +62,10 @@ def load():
         writable = entry["access"] != "ro"
         if writable != ("min" in entry and "max" in entry):
             fail(f"{pid}: writable parameters need min and max, read-only ones none")
-        if (entry["access"] in ("rw", "tuning")) != (entry["group"] in STRUCT_OF_GROUP):
+        if (entry["access"] in ("rw", "tuning")) and entry["group"] not in STRUCT_OF_GROUP:
             fail(f"{pid}: rw/tuning access needs a serial or tuning field")
+        if entry["group"] in STRUCT_OF_GROUP and entry["access"] not in ("rw", "tuning", "ro"):
+            fail(f"{pid}: a serial or tuning field is rw, tuning or a read-only serial value")
         if entry["group"] in STRUCT_OF_GROUP and "field" not in entry:
             fail(f"{pid}: missing field")
         if (entry["access"] == "tuning") != (entry["group"] == "tuning"):

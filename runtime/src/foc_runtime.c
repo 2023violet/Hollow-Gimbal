@@ -96,6 +96,12 @@ static float foc_runtime_word_float(unsigned int word)
     return value;
 }
 
+/* Longest interval one I²t update integrates, in µs. */
+#define FOC_RUNTIME_I2T_GAP_MAX_US 100000U
+/* Board-owned temperature faults carried by the fast input. */
+#define FOC_RUNTIME_THERMAL_FAULTS \
+    (FOC_SAFE_FAULT_OVER_TEMPERATURE_FET | FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR)
+
 static bool foc_runtime_lane_valid(const struct foc_runtime_lane_config *lane)
 {
     return lane->period_us > 0U && lane->period_us < FOC_RUNTIME_HALF_RANGE &&
@@ -469,7 +475,10 @@ static bool foc_runtime_timeout_clear_ready(
         (!voltage ||
          (measurement.core.vbus_v >= runtime->protect.undervoltage_v &&
           measurement.core.vbus_v <= runtime->protect.overvoltage_v)) &&
-        !input->driver_fault && sensor != FOC_RUNTIME_UNPUBLISHED &&
+        !input->driver_fault && (input->thermal_faults & FOC_RUNTIME_THERMAL_FAULTS) == 0U &&
+        ((latched & FOC_SAFE_FAULT_OVERLOAD) == 0U ||
+         runtime->i2t_theta < FOC_THERMAL_I2T_FOLDBACK) &&
+        sensor != FOC_RUNTIME_UNPUBLISHED &&
         isfinite(foc_runtime_align_angle(runtime, &runtime->sensor_slots[sensor], input));
 }
 
@@ -681,6 +690,7 @@ static bool foc_runtime_profile_valid(
         foc_runtime_unset_or(profile->current_bandwidth_hz, 10.0f, 1000.0f) &&
         foc_runtime_unset_or(profile->velocity_bandwidth_hz, 0.5f, 1000.0f) &&
         foc_runtime_unset_or(profile->inertia_travel_rad, 0.5f, 1000.0f) &&
+        foc_runtime_unset_or(profile->thermal_tau_s, 1.0f, 3600.0f) &&
         (profile->rated_current_a == 0.0f || profile->peak_current_a == 0.0f ||
          profile->rated_current_a <= profile->peak_current_a) &&
         (profile->peak_current_a == 0.0f || current_limit_a <= profile->peak_current_a) &&
@@ -722,8 +732,10 @@ static bool foc_runtime_trip_resolve(
         .voltage_samples = 3U,
         .overspeed_rad_s =
             trips->overspeed_rad_s > 0.0f ? trips->overspeed_rad_s : 1.25f * velocity_limit_rad_s,
-        .sustained_current_a =
-            profile->rated_current_a > 0.0f ? profile->rated_current_a : 0.95f * current_limit_a,
+        /* With I²t the rated current is a thermal budget, not a timed trip. */
+        .sustained_current_a = profile->rated_current_a > 0.0f && profile->thermal_tau_s == 0.0f
+            ? profile->rated_current_a
+            : 0.95f * current_limit_a,
         .sustained_us = trips->sustained_ms * 1000U,
         .stall_current_a = 0.95f * iq_basis,
         .stall_speed_rad_s = 0.05f * speed_basis,
@@ -799,6 +811,81 @@ static void foc_runtime_protect(
         foc_runtime_publish_fault_snapshot(runtime, &snapshot);
     }
     foc_runtime_request_inhibit(runtime, trips);
+}
+
+/* Prepare the I²t model from the live profile; protection must be enabled. */
+static void foc_runtime_i2t_configure(struct foc_runtime *runtime)
+{
+    const struct foc_runtime_profile *profile = &runtime->config.profile;
+    (void)foc_thermal_i2t_prepare(
+        &runtime->i2t,
+        runtime->config.trip_enabled ? profile->rated_current_a : 0.0f,
+        profile->thermal_tau_s
+    );
+    if (!(runtime->i2t.rate_per_us > 0.0f)) {
+        runtime->i2t_theta = 0.0f;
+    }
+}
+
+/* H0: this cycle's current-vector ceiling from the I²t fold-back and the board derating. */
+static float foc_runtime_thermal_limit(struct foc_runtime *runtime, float derate)
+{
+    const float ceiling = runtime->pipeline.current.config.current_limit_a;
+    float limit = ceiling;
+    if (runtime->i2t.rate_per_us > 0.0f && runtime->i2t_theta >= FOC_THERMAL_I2T_FOLDBACK &&
+        runtime->i2t.rated_a < limit) {
+        limit = runtime->i2t.rated_a;
+    }
+    if (!(derate <= 0.0f)) {
+        /* NaN fails derate < 1 and removes all current. */
+        const float kept = derate < 1.0f ? (1.0f - derate) * ceiling : 0.0f;
+        if (kept < limit) {
+            limit = kept;
+        }
+    }
+    atomic_store_explicit(
+        &runtime->thermal_limit_word,
+        foc_runtime_float_word(limit),
+        memory_order_relaxed
+    );
+    return limit;
+}
+
+/* H1: an outer-loop q-current limit reduced to the published thermal ceiling. */
+static float foc_runtime_thermal_iq(struct foc_runtime *runtime, float iq_limit_a)
+{
+    const float limit = foc_runtime_word_float(
+        atomic_load_explicit(&runtime->thermal_limit_word, memory_order_relaxed)
+    );
+    return limit < iq_limit_a ? limit : iq_limit_a;
+}
+
+/* H0, after the control step: advance θ with the measured current while conducting and
+ * request an OVERLOAD stop once θ passes the trip level. */
+static void foc_runtime_i2t_update(struct foc_runtime *runtime, bool conducting, uint32_t now_us)
+{
+    if (runtime->i2t.rate_per_us > 0.0f) {
+        uint32_t elapsed_us = runtime->i2t_seen ? now_us - runtime->i2t_us : 0U;
+        if (elapsed_us > FOC_RUNTIME_I2T_GAP_MAX_US) {
+            elapsed_us = FOC_RUNTIME_I2T_GAP_MAX_US;
+        }
+        const struct foc_vector_dq measured = runtime->pipeline.measured_dq_a;
+        const float current_sq =
+            conducting ? measured.d * measured.d + measured.q * measured.q : 0.0f;
+        runtime->i2t_theta =
+            foc_thermal_i2t_step(&runtime->i2t, runtime->i2t_theta, current_sq, elapsed_us);
+    }
+    runtime->i2t_us = now_us;
+    runtime->i2t_seen = true;
+    atomic_store_explicit(
+        &runtime->thermal_theta_word,
+        foc_runtime_float_word(runtime->i2t_theta),
+        memory_order_relaxed
+    );
+    if (runtime->i2t_theta >= FOC_THERMAL_I2T_TRIP &&
+        (runtime->pipeline.safety.latched_faults & FOC_SAFE_FAULT_OVERLOAD) == 0U) {
+        foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_OVERLOAD);
+    }
 }
 
 static int
@@ -878,6 +965,7 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
             runtime->command_slots[drive_index].mode == FOC_RUNTIME_MODE_CALIBRATION
         ? &runtime->command_slots[drive_index]
         : NULL;
+    const float thermal_limit_a = foc_runtime_thermal_limit(runtime, input->thermal_derate);
     const struct foc_pipeline_input step = {
         .adc = *adc,
         /* Without a drive command (e.g. after STOP) the cycle observes like CURRENT does. */
@@ -898,6 +986,8 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
             },
         .cycle_target = target_valid ? &sensor.target : NULL,
         .require_cycle_target = outer,
+        .target_limit_a = thermal_limit_a,
+        .target_limited = !(thermal_limit_a >= pipeline->current.config.current_limit_a),
     };
     foc_runtime_import_foreground(runtime, now_us);
     if (outer) {
@@ -957,6 +1047,7 @@ foc_runtime_control(struct foc_runtime *runtime, const struct foc_runtime_fast_i
         /* A trip joins the stop drained below, which latches it and inhibits. */
         foc_runtime_protect(runtime, &sensor, target_valid, isfinite(aligned), now_us);
     }
+    foc_runtime_i2t_update(runtime, status == FOC_PIPELINE_OK && running, now_us);
     foc_runtime_hook(runtime, FOC_RUNTIME_HOOK_AFTER_CONTROL);
     const bool stopped = foc_runtime_drain_stop(runtime, now_us);
     if (pipeline->mock.output_confirmed) {
@@ -1135,7 +1226,7 @@ static bool foc_runtime_impedance_target(
         .reference_velocity_rad_s = reference->velocity_rad_s,
         .measured_velocity_rad_s = sample->mechanical_rad_s,
         .torque_feedforward_nm = reference->torque_feedforward_nm,
-        .live_iq_limit_a = motion->iq_limit_a,
+        .live_iq_limit_a = foc_runtime_thermal_iq(runtime, motion->iq_limit_a),
     };
     if (running && policy->damping_filter_hz > 0.0f) {
         const float damping_error = foc_runtime_impedance_damping_error(
@@ -1361,11 +1452,12 @@ static void foc_runtime_prepare_outer(
         }
         struct foc_velocity_context trial = runtime->outer_velocity;
         struct foc_velocity_output output;
+        const float iq_limit_a = foc_runtime_thermal_iq(runtime, policy->iq_limit_a);
         const struct foc_velocity_input input = {
             .ref_rad_s = speed,
             .measured_rad_s = candidate->sample.mechanical_rad_s,
             .dt_s = dt_s,
-            .iq_limit_a = policy->iq_limit_a,
+            .iq_limit_a = iq_limit_a,
             .enabled = true,
         };
         if (foc_velocity_step(&trial, &input, &output) != FOC_STATUS_OK) {
@@ -1378,7 +1470,7 @@ static void foc_runtime_prepare_outer(
          * through Kt, so the PI only corrects the residual. */
         const float kt = 1.5f * (float)policy->rotor.pole_pairs * runtime->config.profile.flux_wb;
         if (planned_torque_nm != 0.0f && kt > 0.0f && isfinite(planned_torque_nm / kt)) {
-            iq = fmaxf(-policy->iq_limit_a, fminf(iq + planned_torque_nm / kt, policy->iq_limit_a));
+            iq = fmaxf(-iq_limit_a, fminf(iq + planned_torque_nm / kt, iq_limit_a));
         }
         candidate->velocity_ref_rad_s = speed;
         candidate->velocity_ref_valid = true;
@@ -1651,6 +1743,7 @@ static void foc_runtime_tuning_commit(
     }
     runtime->config.profile = tuning->profile;
     foc_runtime_impedance_refresh(&runtime->config);
+    foc_runtime_i2t_configure(runtime);
     if (runtime->config.motion.enabled) {
         runtime->outer_velocity = *velocity;
         runtime->config.motion.velocity = velocity->config;
@@ -1938,6 +2031,12 @@ int foc_runtime_init(
     runtime->config.motion.cogging.enabled = foc_runtime_cogging_valid(&config->motion);
 #endif
     foc_runtime_impedance_refresh(&runtime->config);
+    foc_runtime_i2t_configure(runtime);
+    atomic_init(&runtime->thermal_theta_word, foc_runtime_float_word(0.0f));
+    atomic_init(
+        &runtime->thermal_limit_word,
+        foc_runtime_float_word(pipeline_config->current.current_limit_a)
+    );
     runtime->config.motion.trajectory = motion_config.trajectory;
     runtime->trajectory_trial = trajectory;
     atomic_init(&runtime->sensor_slot, FOC_RUNTIME_UNPUBLISHED);
@@ -2244,6 +2343,20 @@ int foc_runtime_h1_step(
     return candidate.sample.valid ? FOC_RUNTIME_OK : FOC_RUNTIME_ERR_INPUT;
 }
 
+int foc_runtime_read_thermal(struct foc_runtime *runtime, float *theta, float *limit_a)
+{
+    if (runtime == NULL || !runtime->initialized || theta == NULL || limit_a == NULL) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    *theta = foc_runtime_word_float(
+        atomic_load_explicit(&runtime->thermal_theta_word, memory_order_relaxed)
+    );
+    *limit_a = foc_runtime_word_float(
+        atomic_load_explicit(&runtime->thermal_limit_word, memory_order_relaxed)
+    );
+    return FOC_RUNTIME_OK;
+}
+
 int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fast_input *input)
 {
     if (runtime == NULL || !runtime->initialized) {
@@ -2259,6 +2372,11 @@ int foc_runtime_h0_step(struct foc_runtime *runtime, const struct foc_runtime_fa
          * cannot resume output. Drained below in this same cycle. Once latched, H0 keeps
          * its ordinary cycle (and heartbeat) while the line stays low. */
         foc_runtime_request_inhibit(runtime, FOC_SAFE_FAULT_DRIVER);
+    }
+    const uint32_t thermal_faults = input->thermal_faults & FOC_RUNTIME_THERMAL_FAULTS;
+    if ((thermal_faults & ~runtime->pipeline.safety.latched_faults) != 0U) {
+        /* Latched once, like the driver line, so H0 keeps its heartbeat while it holds. */
+        foc_runtime_request_inhibit(runtime, thermal_faults);
     }
     const int schedule =
         foc_runtime_schedule(&runtime->h0, &runtime->config.h0, input->now_us, input->cost_us);

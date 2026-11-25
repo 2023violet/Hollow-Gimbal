@@ -73,6 +73,7 @@ add_library(
   src/foc_board_store.c
   src/foc_board_timing.c
   src/foc_board_capture.c
+  src/foc_board_thermal.c
   src/foc_serial.c
   src/foc_can.c
   src/foc_parameter_table.c
@@ -95,6 +96,7 @@ add_library(
   "${repo}/g3/np/src/foc_device_sim.c"
   "${repo}/g3/safe/src/foc_safe.c"
   "${repo}/g3/safe/src/foc_protect.c"
+  "${repo}/g3/safe/src/foc_thermal.c"
   "${repo}/runtime/src/foc_pipeline.c"
   "${repo}/runtime/src/foc_runtime.c"
 )
@@ -251,6 +253,9 @@ else()
   add_executable(test-foc-parameter-table tests/test_foc_parameter_table.c)
   target_link_libraries(test-foc-parameter-table PRIVATE falconfoc-board1)
   add_test(NAME test-foc-parameter-table COMMAND test-foc-parameter-table)
+  add_executable(test-foc-thermal "${repo}/g3/safe/tests/test_foc_thermal.c")
+  target_link_libraries(test-foc-thermal PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-thermal COMMAND test-foc-thermal)
 
   add_executable(test-foc-can tests/test_foc_can.c)
   target_link_libraries(test-foc-can PRIVATE falconfoc-board1)

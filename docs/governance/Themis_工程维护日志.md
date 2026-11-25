@@ -3252,3 +3252,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - CAN MIT（ID 128 = 1）：命令帧、FC/FD/FE/FB、回复主机 ID（ID 134：原版 6 字节默认 / 达妙 8 字节）；参数 121、128–134 进 `parameters.json`（新单位 N·m 22、N·m/rad 23），TLV 自动保存。CLI `setpoint impedance`、`can --can-command mit-*`，SIL 场景 `mit` 与 SIL 测试 `test_mit_impedance`、Python `MitCodecTests`。
 - fwinteg：`run1` 的 uart-check 失败——能力字节算法模式 7 → 15 是新差异，`uart_check.py` 尚未列为已解释；补上 `MIT_ALGORITHM_MODES` 后 `run2` VERDICT PASS，0 findings，三套工具链各 128 项全过。SDK 技术门禁 PASS。
 - 默认镜像 +2,588 B，带参数存储镜像 +2,948 B（104,060 B），RAM +48 B。证据：[MIT-01](../evidence/2026-11-25-mit-01.md)。protocol README 新增 "CAN (MIT)"，契约第 26 节，firmware/CLI README 更新。
+
+## 2026-11-25 · THERMAL-01 I²t 过载保护与 NTC 温度降额
+
+- `g3/safe` 新增 `foc_thermal`（β NTC 换算用无 libm 的 ln、两级滤波、线性降额、上限 + 5 °C 跳闸、使能通道连续 10 次无读数跳闸、I²t 步进）与单元测试；故障位 OVER_TEMPERATURE_FET 17、OVER_TEMPERATURE_MOTOR 18、OVERLOAD 19 进入 PROTECTION_MASK。
+- Runtime：`foc_runtime_profile.thermal_tau_s`（末尾，0 或 1..3600 s）；H0 每周期更新 I²t，θ ≥ 1 折返到额定电流（ID 96），θ ≥ 1.25 锁存 OVERLOAD，θ < 1 才能清除；快速输入追加 `thermal_derate`/`thermal_faults`；`foc_pipeline_input.target_limit_a` 钳位电流目标，H1 外环 q 上限取热上限，ID 68 不变；I²t 开启时 SUSTAINED_CURRENT 门限改为 0.95 × ID 68。新增 `test-foc-runtime-thermal`。
+- Board1：`foc_board_thermal` 前台 10 ms 轮询（读取端口；ARM 镜像无 NTC 通道，不传读取函数）；参数 119、135–148 进 `parameters.json`（单位 °C 24、s 25、K 26，生成器允许串口组只读字段），TLV 保存，写入与恢复校验"降额起点 < 上限"，CONFIG_ERASE 恢复默认。CAN：Get_Temperature 回温度，达妙温度字节与错误 B/C，CANSimple 0x4000/0x2000。
+- SIL `--thermal`、`--ntc-override-us`，场景 `thermal` 与 SIL 测试 `test_thermal_protection`：I²t 折返 0.500 A、停机 2 s θ = 0.368；NTC 降额平衡 0.881 A / 52.95 °C 与理论一致；80 °C 注入锁存并在回落后清除。UART 录制：新 ID 外仅 ID 60/62 各 +3（ID 135 的 3 次写入）。
+- fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 131 项；SDK 技术门禁 PASS。默认镜像 +3,076 B（102,976 B），带参数存储镜像 +2,988 B（107,048 B），RAM +160 B。证据：[THERMAL-01](../evidence/2026-11-25-thermal-01.md)。protocol README 新增 "Thermal protection"，契约第 27 节，firmware/CLI README 更新。

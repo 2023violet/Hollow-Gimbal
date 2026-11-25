@@ -106,6 +106,7 @@ enum foc_parameter_id {
     FOC_PARAM_TRIP_SUSTAINED_MS = 116,
     FOC_PARAM_TRIP_STALL_MS = 117,
     FOC_PARAM_TRIP_DIVERGENCE_MS = 118,
+    FOC_PARAM_FET_TEMPERATURE = 119,
     FOC_PARAM_CAN_NODE_ID = 120,
     FOC_PARAM_CAN_MASTER_ID = 121,
     FOC_PARAM_CAN_BITRATE = 122,
@@ -121,6 +122,20 @@ enum foc_parameter_id {
     FOC_PARAM_MIT_KP_MAX = 132,
     FOC_PARAM_MIT_KD_MAX = 133,
     FOC_PARAM_MIT_REPLY_FORMAT = 134,
+    FOC_PARAM_THERMAL_TAU = 135,
+    FOC_PARAM_I2T_LOAD = 136,
+    FOC_PARAM_THERMAL_CURRENT_LIMIT = 137,
+    FOC_PARAM_FET_NTC_ENABLE = 138,
+    FOC_PARAM_FET_DERATE_TEMP = 139,
+    FOC_PARAM_FET_LIMIT_TEMP = 140,
+    FOC_PARAM_MOTOR_NTC_ENABLE = 141,
+    FOC_PARAM_MOTOR_DERATE_TEMP = 142,
+    FOC_PARAM_MOTOR_LIMIT_TEMP = 143,
+    FOC_PARAM_NTC_BETA = 144,
+    FOC_PARAM_NTC_R25 = 145,
+    FOC_PARAM_NTC_PULLUP = 146,
+    FOC_PARAM_MOTOR_TEMPERATURE = 147,
+    FOC_PARAM_NTC_TOPOLOGY = 148,
 };
 
 /** Wire type codes. */
@@ -154,6 +169,9 @@ enum foc_parameter_unit {
     FOC_PARAM_UNIT_RAD_PER_S2 = 21,
     FOC_PARAM_UNIT_N_M = 22,
     FOC_PARAM_UNIT_N_M_PER_RAD = 23,
+    FOC_PARAM_UNIT_C = 24,
+    FOC_PARAM_UNIT_S = 25,
+    FOC_PARAM_UNIT_K = 26,
 };
 
 /** Who serves the value. */
@@ -223,8 +241,8 @@ struct foc_parameter_entry {
 
 /* Public Macros ---------------------------------------------------------------- */
 
-#define FOC_PARAMETER_COUNT         85U
-#define FOC_PARAMETER_PERSIST_COUNT 50U
+#define FOC_PARAMETER_COUNT         100U
+#define FOC_PARAMETER_PERSIST_COUNT 61U
 #define FOC_PARAM_NO_PERSIST        0xFFFFU
 
 /* Public Functions ------------------------------------------------------------ */

@@ -12,6 +12,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#include "foc_board_thermal.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
 #endif
@@ -698,6 +699,8 @@ int foc_board_adc_complete(
              token->requested_us},
         .now_us = event->now_us,
         .driver_fault = adc->driver_fault_samples >= FOC_BOARD_DRIVER_FAULT_SAMPLES,
+        .thermal_derate = adc->thermal != NULL ? foc_board_thermal_derate(adc->thermal) : 0.0f,
+        .thermal_faults = adc->thermal != NULL ? foc_board_thermal_faults(adc->thermal) : 0U,
     };
     const uint32_t updates = runtime->pipeline.mock.updates;
     const uint32_t declined = output->declined_updates;

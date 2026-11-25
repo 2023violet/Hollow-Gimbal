@@ -173,6 +173,13 @@ struct foc_pipeline_input {
      * submission are unchanged.
      */
     bool voltage_drive;
+    /**
+     * Thermal ceiling in A for the current target's magnitude, applied when target_limited
+     * is true and the cycle is not a voltage drive; a non-positive or NaN value holds the
+     * target at zero. The current loop's own current_limit_a is unchanged. Appended fields.
+     */
+    float target_limit_a;
+    bool target_limited;
 };
 
 /** Monotonic input watermark that survives fault clear and explicit disable. */

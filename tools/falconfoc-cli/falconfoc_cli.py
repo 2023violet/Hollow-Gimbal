@@ -51,7 +51,8 @@ COAST_STATUS = ["NOT_RUN", "USED", "TOO_FEW", "INCONSISTENT"]
 FAULT_BITS = ["COMMAND_TIMEOUT", "SAMPLE_TIMEOUT", "SAMPLE_INVALID", "FAST_HEARTBEAT",
               "FOREGROUND_HEARTBEAT", "INVALID_STATE", "WDT", "FLASH", "FATAL_RESET_REQUIRED",
               "OVER_CURRENT", "OVER_VOLTAGE", "UNDER_VOLTAGE", "OVER_SPEED",
-              "SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE", "DRIVER_FAULT"]
+              "SUSTAINED_CURRENT", "STALL", "TRACKING_DIVERGENCE", "DRIVER_FAULT",
+              "OVER_TEMPERATURE_FET", "OVER_TEMPERATURE_MOTOR", "OVERLOAD"]
 
 
 def fault_names(mask):
@@ -906,7 +907,7 @@ SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
-                 "dead-time", "dead-time-comp", "can", "can-multi", "mit")
+                 "dead-time", "dead-time-comp", "can", "can-multi", "mit", "thermal")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2294,6 +2295,165 @@ def run_sil_driver_fault(simulator, base_arguments, json_path=None):
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-driver-fault",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_thermal(simulator, base_arguments, json_path=None):
+    """THERMAL-01 (parameter contract section 27) in current mode on a damped rotor
+    (--motor-damping 0.021: 1 A holds about 5 rad/s). 1. Defaults: no NTC reading (NaN),
+    I2t off. 2. I2t: rated 0.5 A, tau 2 s, 1 A requested: theta reaches 1 after
+    tau ln(4/3) = 0.58 s, the current folds back to 0.5 A and theta stays near 1; stopped,
+    theta decays by e in tau. 3. Motor NTC (derating 40..60 C) on a plant of Rth 40 K/W and
+    tau 1 s: the current settles where heating and derating meet (about 0.88 A, 53 C); an
+    80 C reading latches OVER_TEMPERATURE_MOTOR, FAULT_CLEAR waits until the reading is back
+    below the limit. Nothing here is physical evidence."""
+
+    checks, metrics = {}, {}
+    on_us, off_us = 7000000, 8000000
+
+    def finite(value):
+        return None if value != value else value
+
+    def boot(arguments):
+        transport = SimulatorTransport(
+            simulator, list(base_arguments) + ["--motor-damping", "0.021"] + arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        session.tune("command-lease-us", 50000)
+        assert commission(client) == "APPLIED"
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="current")
+        return transport, session
+
+    def write(session, name, value):
+        identifier = PARAMETERS[name]
+        kind = PARAMETER_TYPES.get(identifier, "f32")
+        return session.call("param-write", parameter_write(identifier, kind, value),
+                            quiet=True)["result"]
+
+    def wait_until(session, uptime_us):
+        status = session.status()
+        for _ in range(200000):
+            if status["uptime_us_mod32"] >= uptime_us:
+                break
+            status = session.status()
+        return status
+
+    def drive(session, current_a, duration_us, reads):
+        payload = setpoint("current", 0.0, current_a)
+        steps = {"arm": session.lifecycle("arm", SIL_STATE_ARMED, payload)}
+        steps["start"] = (session.lifecycle("start", SIL_STATE_RUNNING, payload)
+                          if steps["arm"] == "APPLIED" else "SKIPPED")
+        samples, started = [], None
+        while steps["start"] == "APPLIED":
+            session.call("setpoint", payload, quiet=True)
+            telemetry = session.call("telemetry", quiet=True)
+            started = telemetry["uptime_us_mod32"] if started is None else started
+            sample = {"elapsed_us": (telemetry["uptime_us_mod32"] - started) & 0xFFFFFFFF,
+                      "uptime_us": telemetry["uptime_us_mod32"], "state": telemetry["state"],
+                      "faults": telemetry["faults"], "iq_a": telemetry["iq_a"]}
+            if len(samples) % 40 == 0:
+                sample.update({name: session.read(name) for name in reads})
+            samples.append(sample)
+            if sample["elapsed_us"] >= duration_us or telemetry["state"] != SIL_STATE_RUNNING:
+                break
+        return steps, samples
+
+    # 1-2. Defaults, then the I2t fold-back and its decay.
+    transport, session = boot([])
+    names = ("fet-temperature", "motor-temperature", "i2t-load", "thermal-current-limit")
+    defaults = {name: session.read(name) for name in names}
+    metrics["defaults"] = {name: finite(value) for name, value in defaults.items()}
+    checks["defaults_without_sensor"] = (defaults["fet-temperature"] != defaults["fet-temperature"]
+                                         and defaults["motor-temperature"]
+                                         != defaults["motor-temperature"]
+                                         and defaults["i2t-load"] == 0.0
+                                         and abs(defaults["thermal-current-limit"] - 2.5) < 1e-6)
+    tuned = [session.tune("rated-current", 0.5), session.tune("thermal-tau", 2.0)]
+    steps, samples = drive(session, 1.0, 3000000, ("i2t-load", "thermal-current-limit"))
+    read = [sample for sample in samples if "i2t-load" in sample]
+    fold = next((sample for sample in read if sample["thermal-current-limit"] <= 0.5 + 1e-6), None)
+    tail = [sample["iq_a"] for sample in samples if sample["elapsed_us"] >= 2000000]
+    peak = max((sample["i2t-load"] for sample in read), default=0.0)
+    metrics["i2t"] = {"tuning": tuned, "steps": steps,
+                      "fold_back_us": fold["elapsed_us"] if fold else None,
+                      "theta_peak": peak, "tail_mean_iq_a": sum(tail) / len(tail) if tail else None,
+                      "final_limit_a": read[-1]["thermal-current-limit"] if read else None}
+    checks["i2t_folds_back_on_time"] = (tuned == ["APPLIED", "APPLIED"]
+                                        and steps == {"arm": "APPLIED", "start": "APPLIED"}
+                                        and fold is not None
+                                        and abs(fold["elapsed_us"] - 575000) < 150000)
+    checks["i2t_holds_rated_current"] = (bool(tail) and abs(sum(tail) / len(tail) - 0.5) < 0.05
+                                         and 0.98 < peak < 1.1
+                                         and all(sample["state"] == SIL_STATE_RUNNING
+                                                 and sample["faults"] == 0 for sample in samples))
+    stopped = session.stop()
+    wait_until(session, stopped["uptime_us_mod32"] + 2000000)
+    cooled = {name: session.read(name) for name in ("i2t-load", "thermal-current-limit")}
+    metrics["i2t"]["after_2s_stopped"] = cooled
+    checks["i2t_decays_when_stopped"] = (0.3 < cooled["i2t-load"] < 0.45
+                                         and abs(cooled["thermal-current-limit"] - 2.5) < 1e-6)
+    transport.__exit__()
+
+    # 3. Motor NTC: derating against the plant's heating, then a trip and its release.
+    transport, session = boot(["--thermal", "25,40,1", "--ntc-override-us", f"{on_us},{off_us},80"])
+    configured = [write(session, "motor-derate-temp", 40.0), write(session, "motor-limit-temp", 60.0),
+                  write(session, "motor-ntc-enable", 1)]
+    for _ in range(60):
+        session.status()
+    idle = {name: session.read(name) for name in ("motor-temperature", "fet-temperature")}
+    steps, samples = drive(session, 1.0, 9000000, ("motor-temperature", "thermal-current-limit"))
+    window = [sample for sample in samples if on_us - 1500000 <= sample["uptime_us"] < on_us - 100000]
+    read = [sample for sample in window if "motor-temperature" in sample]
+    iq = sum(sample["iq_a"] for sample in window) / len(window) if window else None
+    celsius = sum(sample["motor-temperature"] for sample in read) / len(read) if read else None
+    limit = sum(sample["thermal-current-limit"] for sample in read) / len(read) if read else None
+    status = session.status()
+    trip_us = samples[-1]["uptime_us"] if samples else None
+    metrics["ntc"] = {"writes": configured, "idle_motor_c": idle["motor-temperature"],
+                      "idle_fet_c": finite(idle["fet-temperature"]), "steps": steps,
+                      "settled_iq_a": iq, "settled_motor_c": celsius, "settled_limit_a": limit,
+                      "trip_uptime_us": trip_us, "faults": status["fault_names"]}
+    checks["ntc_reads_ambient"] = (configured == ["APPLIED", "APPLIED", "APPLIED"]
+                                   and abs(idle["motor-temperature"] - 25.0) < 0.5
+                                   and idle["fet-temperature"] != idle["fet-temperature"])
+    checks["ntc_derates_to_equilibrium"] = (iq is not None and celsius is not None
+                                            and 0.8 < iq < 0.95 and 50.0 < celsius < 56.0
+                                            and abs(limit - iq) < 0.05
+                                            and all(sample["faults"] == 0 for sample in window))
+    checks["ntc_trip_latched"] = (status["state"] == SIL_STATE_FAULT
+                                  and status["fault_names"] == ["OVER_TEMPERATURE_MOTOR"]
+                                  and trip_us is not None and on_us <= trip_us < on_us + 300000)
+    clear = session.call("clear")
+    for _ in range(100):
+        refused = session.status()
+    checks["ntc_clear_refused_while_hot"] = (refused["state"] == SIL_STATE_FAULT
+                                             and refused["clear_result"] == 3)
+    wait_until(session, off_us + 400000)
+    clear = session.call("clear")
+    recovered = None
+    for _ in range(200):
+        recovered = session.status()
+        if recovered["state"] == SIL_STATE_DISABLED and recovered["faults"] == 0:
+            break
+    metrics["ntc"]["clear_after_release"] = {"result": clear["result"],
+                                             "clear_result": recovered["clear_result"],
+                                             "motor_c": session.read("motor-temperature")}
+    checks["ntc_clear_applies_after_release"] = (recovered["state"] == SIL_STATE_DISABLED
+                                                 and recovered["faults"] == 0
+                                                 and recovered["clear_result"] == 2)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-thermal", "scenario": "thermal",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -3805,6 +3965,10 @@ def main():
             if args.action == "sil-demo" and args.sil_scenario == "coast":
                 summary = run_sil_coast(os.path.abspath(args.simulator), simulator_arguments,
                                         args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
+            if args.action == "sil-demo" and args.sil_scenario == "thermal":
+                summary = run_sil_thermal(os.path.abspath(args.simulator), simulator_arguments,
+                                          args.json)
                 return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "driver-fault":
                 summary = run_sil_driver_fault(os.path.abspath(args.simulator),

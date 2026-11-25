@@ -15,6 +15,7 @@
 #include "foc_board.h"
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
+#include "foc_board_thermal.h"
 #include "foc_board_timing.h"
 #include "foc_can.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
@@ -74,6 +75,7 @@ enum foc_spi_phase {
 static struct foc_runtime runtime;
 static struct foc_board_output output;
 static struct foc_board_adc adc;
+static struct foc_board_thermal thermal;
 static struct foc_board_encoder encoder;
 static struct foc_board_boot boot;
 static enum foc_spi_phase spi_phase;
@@ -811,6 +813,9 @@ int main(void)
     foc_at32_board_pins_init();
     if (foc_at32_clock_init() && foc_at32_boot() && foc_at32_adc_init()) {
         adc.driver_fault_line = foc_at32_nfault_asserted;
+        /* Board1 has no NTC channel: no reader, so an enabled channel trips (ID 138/141). */
+        foc_board_thermal_init(&thermal, NULL, NULL);
+        adc.thermal = &thermal;
         foc_at32_spi_init();
         foc_at32_timers_init();
         foc_serial_init(&serial, &runtime);
@@ -879,6 +884,7 @@ int main(void)
                     foc_can_poll(&can, &serial, &runtime, foc_at32_now_us());
                 }
                 foc_board_calibration_poll(&calibration, foc_at32_now_us());
+                foc_board_thermal_poll(&thermal, &serial, foc_at32_now_us());
                 if (!foc_uart_tx_available(&uart)) {
                     usart_interrupt_enable(USART1, USART_TDBE_INT, TRUE);
                 }

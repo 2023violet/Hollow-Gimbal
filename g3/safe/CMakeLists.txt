@@ -23,7 +23,7 @@ target_include_directories(
                           "${CMAKE_CURRENT_SOURCE_DIR}/../../core/include"
 )
 
-add_library(falconfoc-safe STATIC src/foc_safe.c src/foc_protect.c)
+add_library(falconfoc-safe STATIC src/foc_safe.c src/foc_protect.c src/foc_thermal.c)
 target_include_directories(
   falconfoc-safe
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../../g3/np/include"
@@ -49,3 +49,4 @@ endfunction()
 
 themis_add_falconfoc_safe_test(test-foc-safe-contract tests/test_foc_safe_contract.c)
 themis_add_falconfoc_safe_test(test-foc-protect tests/test_foc_protect.c)
+themis_add_falconfoc_safe_test(test-foc-thermal tests/test_foc_thermal.c)

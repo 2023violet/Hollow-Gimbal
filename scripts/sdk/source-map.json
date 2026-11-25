@@ -419,6 +419,22 @@
       "redistribution": "terms_pending"
     },
     {
+      "source": "g3/safe/src/foc_thermal.c",
+      "path": "g3/safe/src/foc_thermal.c",
+      "module": "safety",
+      "kind": "source",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
+      "source": "g3/safe/include/foc_thermal.h",
+      "path": "g3/safe/include/foc_thermal.h",
+      "module": "safety",
+      "kind": "public_header",
+      "origin": "origin_unresolved",
+      "redistribution": "terms_pending"
+    },
+    {
       "source": "runtime/include/foc_pipeline.h",
       "path": "runtime/include/foc_pipeline.h",
       "module": "runtime",

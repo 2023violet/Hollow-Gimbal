@@ -97,6 +97,7 @@ _Static_assert(sizeof(((struct foc_runtime_tuning *)0)->trips.stall_ms) == 4U, "
 _Static_assert(sizeof(((struct foc_board_settings *)0)->tuning.trips.stall_ms) == 4U, "trip-stall-ms persist");
 _Static_assert(sizeof(((struct foc_runtime_tuning *)0)->trips.divergence_ms) == 4U, "trip-divergence-ms");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->tuning.trips.divergence_ms) == 4U, "trip-divergence-ms persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->temperature.fet_c) == 4U, "fet-temperature");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.node_id) == 4U, "can-node-id");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.node_id) == 4U, "can-node-id persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.master_id) == 4U, "can-master-id");
@@ -123,6 +124,29 @@ _Static_assert(sizeof(((struct foc_serial *)0)->can.mit_kd_max) == 4U, "mit-kd-m
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_kd_max) == 4U, "mit-kd-max persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.mit_reply) == 4U, "mit-reply-format");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_reply) == 4U, "mit-reply-format persist");
+_Static_assert(sizeof(((struct foc_runtime_tuning *)0)->profile.thermal_tau_s) == 4U, "thermal-tau");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->tuning.profile.thermal_tau_s) == 4U, "thermal-tau persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.fet.enabled) == 4U, "fet-ntc-enable");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.fet.enabled) == 4U, "fet-ntc-enable persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.fet.derate_c) == 4U, "fet-derate-temp");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.fet.derate_c) == 4U, "fet-derate-temp persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.fet.limit_c) == 4U, "fet-limit-temp");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.fet.limit_c) == 4U, "fet-limit-temp persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.motor.enabled) == 4U, "motor-ntc-enable");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.motor.enabled) == 4U, "motor-ntc-enable persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.motor.derate_c) == 4U, "motor-derate-temp");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.motor.derate_c) == 4U, "motor-derate-temp persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.motor.limit_c) == 4U, "motor-limit-temp");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.motor.limit_c) == 4U, "motor-limit-temp persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.beta_k) == 4U, "ntc-beta");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.beta_k) == 4U, "ntc-beta persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.r25_ohm) == 4U, "ntc-r25");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.r25_ohm) == 4U, "ntc-r25 persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.pullup_ohm) == 4U, "ntc-pullup");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.pullup_ohm) == 4U, "ntc-pullup persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->temperature.motor_c) == 4U, "motor-temperature");
+_Static_assert(sizeof(((struct foc_serial *)0)->thermal.topology) == 4U, "ntc-topology");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->thermal.topology) == 4U, "ntc-topology persist");
 
 /* Public Functions ------------------------------------------------------------- */
 
@@ -1108,6 +1132,20 @@ const struct foc_parameter_entry foc_parameter_table[FOC_PARAMETER_COUNT] = {
         .maximum = {.u = 10000U},
     },
     {
+        .id = FOC_PARAM_FET_TEMPERATURE,
+        .offset = offsetof(struct foc_serial, temperature.fet_c),
+        .persist_offset = FOC_PARAM_NO_PERSIST,
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = 0U,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RO,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 0U},
+    },
+    {
         .id = FOC_PARAM_CAN_NODE_ID,
         .offset = offsetof(struct foc_serial, can.node_id),
         .persist_offset = offsetof(struct foc_board_settings, can.node_id),
@@ -1307,6 +1345,202 @@ const struct foc_parameter_entry foc_parameter_table[FOC_PARAMETER_COUNT] = {
         .id = FOC_PARAM_MIT_REPLY_FORMAT,
         .offset = offsetof(struct foc_serial, can.mit_reply),
         .persist_offset = offsetof(struct foc_board_settings, can.mit_reply),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 1U},
+    },
+    {
+        .id = FOC_PARAM_THERMAL_TAU,
+        .offset = offsetof(struct foc_runtime_tuning, profile.thermal_tau_s),
+        .persist_offset = offsetof(struct foc_board_settings, tuning.profile.thermal_tau_s),
+        .unit = 25U,
+        .group = FOC_PARAM_GROUP_TUNING,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_TUNING,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.0f},
+        .maximum = {.f = 3600.0f},
+    },
+    {
+        .id = FOC_PARAM_I2T_LOAD,
+        .offset = 0U,
+        .persist_offset = FOC_PARAM_NO_PERSIST,
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_STATUS,
+        .flags = 0U,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RO,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 0U},
+    },
+    {
+        .id = FOC_PARAM_THERMAL_CURRENT_LIMIT,
+        .offset = 0U,
+        .persist_offset = FOC_PARAM_NO_PERSIST,
+        .unit = 1U,
+        .group = FOC_PARAM_GROUP_STATUS,
+        .flags = 0U,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RO,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 0U},
+    },
+    {
+        .id = FOC_PARAM_FET_NTC_ENABLE,
+        .offset = offsetof(struct foc_serial, thermal.fet.enabled),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.fet.enabled),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 1U},
+    },
+    {
+        .id = FOC_PARAM_FET_DERATE_TEMP,
+        .offset = offsetof(struct foc_serial, thermal.fet.derate_c),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.fet.derate_c),
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = -40.0f},
+        .maximum = {.f = 150.0f},
+    },
+    {
+        .id = FOC_PARAM_FET_LIMIT_TEMP,
+        .offset = offsetof(struct foc_serial, thermal.fet.limit_c),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.fet.limit_c),
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = -40.0f},
+        .maximum = {.f = 150.0f},
+    },
+    {
+        .id = FOC_PARAM_MOTOR_NTC_ENABLE,
+        .offset = offsetof(struct foc_serial, thermal.motor.enabled),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.motor.enabled),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 1U},
+    },
+    {
+        .id = FOC_PARAM_MOTOR_DERATE_TEMP,
+        .offset = offsetof(struct foc_serial, thermal.motor.derate_c),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.motor.derate_c),
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = -40.0f},
+        .maximum = {.f = 150.0f},
+    },
+    {
+        .id = FOC_PARAM_MOTOR_LIMIT_TEMP,
+        .offset = offsetof(struct foc_serial, thermal.motor.limit_c),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.motor.limit_c),
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = -40.0f},
+        .maximum = {.f = 150.0f},
+    },
+    {
+        .id = FOC_PARAM_NTC_BETA,
+        .offset = offsetof(struct foc_serial, thermal.beta_k),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.beta_k),
+        .unit = 26U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 1000.0f},
+        .maximum = {.f = 10000.0f},
+    },
+    {
+        .id = FOC_PARAM_NTC_R25,
+        .offset = offsetof(struct foc_serial, thermal.r25_ohm),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.r25_ohm),
+        .unit = 11U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 100.0f},
+        .maximum = {.f = 1000000.0f},
+    },
+    {
+        .id = FOC_PARAM_NTC_PULLUP,
+        .offset = offsetof(struct foc_serial, thermal.pullup_ohm),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.pullup_ohm),
+        .unit = 11U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 100.0f},
+        .maximum = {.f = 1000000.0f},
+    },
+    {
+        .id = FOC_PARAM_MOTOR_TEMPERATURE,
+        .offset = offsetof(struct foc_serial, temperature.motor_c),
+        .persist_offset = FOC_PARAM_NO_PERSIST,
+        .unit = 24U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = 0U,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RO,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 0U},
+    },
+    {
+        .id = FOC_PARAM_NTC_TOPOLOGY,
+        .offset = offsetof(struct foc_serial, thermal.topology),
+        .persist_offset = offsetof(struct foc_board_settings, thermal.topology),
         .unit = 0U,
         .group = FOC_PARAM_GROUP_SERIAL,
         .flags = FOC_PARAM_FLAG_PERSIST,

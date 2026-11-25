@@ -378,3 +378,10 @@ torque, output side). `can --can-command mit-enter|mit-exit|mit-zero|mit-clear|m
 talks MIT to `--node` with replies on `--master-id` (`mit-cmd` takes `--mit-position`,
 `--mit-velocity`, `--kp`, `--kd`, `--torque`). `sil-demo --sil-scenario mit
 --sil-lockstep-us 500` runs the whole flow on the Board1 SIL.
+
+## Thermal protection
+
+`param-read` IDs 136/137 show the I²t state and the effective current ceiling, IDs
+119/147 the NTC temperatures. `sil-demo --sil-scenario thermal --sil-lockstep-us 500`
+runs I²t fold-back, NTC derating and an over-temperature latch on the Board1 SIL
+(contract 27).

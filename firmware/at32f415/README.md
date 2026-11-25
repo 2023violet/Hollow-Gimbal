@@ -46,8 +46,9 @@ A clock-tree change must update both together.
 ## Flash budget
 
 The program must stay below the settings slots at `0x0801F000` (124 KB usable;
-`store-reserve.ld` asserts it). After ROM-01 the default image is 97,156 B and
-the persistent-settings image 101,972 B. AT32F415 has no FPU, so every libm call
+`store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
+the persistent-settings image 101,972 B; after THERMAL-01 they are 102,976 B and
+107,048 B. AT32F415 has no FPU, so every libm call
 is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
@@ -391,6 +392,21 @@ drives the nominal profile against six SIL motors (same, 17°, 86°, 172° offse
 lowered limits, `--motor-damping`), clears a latch and checks that a deliberate
 +5 → −5 rad/s reversal does not trip. Torque-mode reversal from a wrong offset is
 not detected.
+
+### Thermal protection
+
+Runtime H0 owns the I²t model (`foc_thermal_i2t_*` from `g3/safe/foc_thermal`):
+rated current ID 96 and τ ID 135 (Board1 default 30 s), fold-back to the rated
+current at θ = 1, OVERLOAD (bit 19) at 1.25. `foc_board_thermal` polls the FET and
+motor NTC channels from Foreground every 10 ms through a reader port, filters and
+derates them with the UART settings (IDs 138–148) and hands the derating share and
+trip bits to H0 in the fast input (`thermal_derate`, `thermal_faults`), as the nFAULT
+line is. Board1 has no NTC channel: `main.c` passes no reader, so an enabled channel
+trips. The pipeline clamps the current target's magnitude to the combined ceiling
+(`foc_pipeline_input.target_limit_a`) and H1 limits the outer loops' q current to it;
+ID 68 stays the configured value. `sil-demo --sil-scenario thermal` runs I²t fold-back
+and decay, NTC derating against a plant (`--thermal ambient_c,rth_k_per_w,tau_s`) and
+an injected over-temperature (`--ntc-override-us on_us,off_us,celsius`); contract 27.
 
 ### Motor profile
 

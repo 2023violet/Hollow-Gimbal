@@ -111,6 +111,7 @@ static const struct foc_parameter_documented foc_parameter_documented[] = {
     {116U, 0U, true, 60000U, true},
     {117U, 0U, true, 10000U, true},
     {118U, 0U, true, 10000U, true},
+    {119U, 0U, false, 0U, false},
     {120U, 0U, true, 63U, true},
     {121U, 0U, true, 2047U, true},
     {122U, 125000U, true, 1000000U, true},
@@ -126,6 +127,20 @@ static const struct foc_parameter_documented foc_parameter_documented[] = {
     {132U, 0x3A83126FU, true, 0x461C4000U, true},
     {133U, 0x3A83126FU, true, 0x447A0000U, true},
     {134U, 0U, true, 1U, true},
+    {135U, 0x00000000U, true, 0x45610000U, true},
+    {136U, 0U, false, 0U, false},
+    {137U, 0U, false, 0U, false},
+    {138U, 0U, true, 1U, true},
+    {139U, 0xC2200000U, true, 0x43160000U, true},
+    {140U, 0xC2200000U, true, 0x43160000U, true},
+    {141U, 0U, true, 1U, true},
+    {142U, 0xC2200000U, true, 0x43160000U, true},
+    {143U, 0xC2200000U, true, 0x43160000U, true},
+    {144U, 0x447A0000U, true, 0x461C4000U, true},
+    {145U, 0x42C80000U, true, 0x49742400U, true},
+    {146U, 0x42C80000U, true, 0x49742400U, true},
+    {147U, 0U, false, 0U, false},
+    {148U, 0U, true, 1U, true},
 };
 
 /* ---------------------------------------- end of file ----------------------------------------- */

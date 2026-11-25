@@ -141,10 +141,11 @@ results describe subsequent admission. Physical applied remains false.
 
 STOP revokes the reference before asking H0 to acknowledge INHIBIT. FAULT_CLEAR
 requests recovery of a latch that holds only COMMAND_TIMEOUT, motor-protection
-causes (bits 9–15, below) and DRIVER_FAULT (bit 16). H0 rechecks the fault mask, fresh ADC/angle data,
+causes (bits 9–15 and 17–19, below) and DRIVER_FAULT (bit 16). H0 rechecks the fault mask, fresh ADC/angle data,
 Foreground progress, request age and software inhibition, and for OVER_VOLTAGE or
-UNDER_VOLTAGE a fresh bus voltage back inside IDs 114–113, and for DRIVER_FAULT the
-nFAULT line released, before invoking its existing clear operation. The clear result is queryable. Other fault masks return
+UNDER_VOLTAGE a fresh bus voltage back inside IDs 114–113, for DRIVER_FAULT the
+nFAULT line released, for OVER_TEMPERATURE_FET/MOTOR the board's sensor trip released
+and for OVERLOAD the I²t state back below 1, before invoking its existing clear operation. The clear result is queryable. Other fault masks return
 BAD_STATE. Recovery ends in DISABLED with old command and sample validity cleared
 and the protection snapshot cleared.
 
@@ -153,8 +154,9 @@ and the protection snapshot cleared.
 Fault bits: COMMAND_TIMEOUT 0, SAMPLE_TIMEOUT 1, SAMPLE_INVALID 2, FAST_HEARTBEAT 3,
 FOREGROUND_HEARTBEAT 4, INVALID_STATE 5, WDT 6, FLASH 7, FATAL_RESET_REQUIRED 8,
 and the motor-protection causes OVER_CURRENT 9, OVER_VOLTAGE 10, UNDER_VOLTAGE 11,
-OVER_SPEED 12, SUSTAINED_CURRENT 13, STALL 14, TRACKING_DIVERGENCE 15, and the gate
-driver cause DRIVER_FAULT 16.
+OVER_SPEED 12, SUSTAINED_CURRENT 13, STALL 14, TRACKING_DIVERGENCE 15, the gate
+driver cause DRIVER_FAULT 16, and the thermal causes OVER_TEMPERATURE_FET 17,
+OVER_TEMPERATURE_MOTOR 18 and OVERLOAD 19 (Thermal protection, below).
 
 DRIVER_FAULT: the Board reads the DRV8311 nFAULT line (PB2) once per H0 cycle; two
 samples in a row with the line low latch DRIVER_FAULT with INHIBIT in any state,
@@ -162,6 +164,28 @@ including DISABLED and calibration. The DRV8311H disables its bridge itself on
 over-current, supply under-voltage or thermal shutdown and retries after 5 ms; the
 latch keeps the output inhibited until FAULT_CLEAR after the line is released. It
 carries no FAULT_SNAPSHOT_READ record.
+
+### Thermal protection
+
+I²t (no sensor needed): with a rated current (ID 96) and a time constant τ (ID 135,
+default 30 s, 0 off), H0 integrates θ ← θ + dt/τ · (|i|² / I_rated² − θ) from the
+measured d/q current every cycle (0 while not running, so θ decays). At θ ≥ 1 the
+current-vector ceiling folds back to the rated current; a current held there keeps θ
+at 1. θ ≥ 1.25 (the fold-back could not contain it) latches OVERLOAD 19; FAULT_CLEAR
+waits until θ < 1. With I²t on, the SUSTAINED_CURRENT rule uses 0.95 × ID 68 instead
+of the rated current. ID 136 reads θ, ID 137 the effective ceiling.
+
+NTC (code ready, Board1 has no channel): the board polls a FET and a motor NTC every
+10 ms (β model IDs 144–146, divider ID 148), filters each in two first-order stages
+and derates the ceiling linearly from its derate temperature (IDs 139/142, default
+75 °C) to zero at its limit (IDs 140/143, default 95 °C). Limit + 5 °C, or 10 polls
+without a usable reading on an enabled channel (open or shorted sensor, or Board1's
+missing channel), latch OVER_TEMPERATURE_FET 17 / OVER_TEMPERATURE_MOTOR 18; the trip
+releases below the limit. IDs 138/141 enable the channels (default off); IDs 119/147
+read the filtered temperatures (NaN when off or without a reading). A write that puts
+a channel's derate temperature at or above its limit is INVALID_ARGUMENT: raise the
+limit first. The I²t and NTC ceilings combine by minimum and apply to every mode's
+current target (and the outer loops' q limit); ID 68 itself is unchanged.
 
 H0 evaluates the rules after every accepted running cycle and latches a trip with
 INHIBIT (at most one 200 µs cycle late; the DRV8311 over-current protection is the
@@ -243,7 +267,8 @@ A parameter response is result, ID u16, type u8, unit u8, attributes u8, minimum
 maximum and value. The final three values occupy four bytes each and use the
 declared type. Types are u32 1 and f32 2. Units are dimensionless 0, A 1, rad 2,
 rad/s 3, raw ADC counts 4, ... (full list in [docs/parameters.md](../docs/parameters.md)
-and `scripts/gen/gen_parameters.py`; N·m 22 and N·m/rad 23 were added for MIT). Attribute bits are writable 0, applied to RAM 1 and
+and `scripts/gen/gen_parameters.py`; N·m 22 and N·m/rad 23 were added for MIT, °C 24,
+s 25 and K 26 for thermal protection). Attribute bits are writable 0, applied to RAM 1 and
 calibration required 2.
 
 | ID | Parameter | Type | Range / initial value |
@@ -657,7 +682,7 @@ Kt = 1.5 × pole pairs × flux and the gear ratio, ID 99), relative to the outpu
 | 0x0F | Set_Limits | IDs 72 (× 2π × gear) and 2 |
 | 0x11/0x12 | Set_Traj_Vel_Limit/Accel_Limits | ID 72; IDs 106/107 (× 2π × gear) |
 | 0x14 | Get_Iq | q target, q measured (A) |
-| 0x15 | Get_Temperature | NaN, NaN (no NTC) |
+| 0x15 | Get_Temperature | FET and motor temperature f32 °C (IDs 119/147; NaN when off or without a reading) |
 | 0x16 | Reboot | 0 reset (DISABLED), 1 PARAM_SAVE, 2 CONFIG_ERASE, 3 refused |
 | 0x17 | Get_Bus_Voltage_Current | NaN, NaN (no live readback yet) |
 | 0x18 | Clear_Errors | FAULT_CLEAR; clears ESTOP and calibration flags |
@@ -680,7 +705,8 @@ image ends in INVALID_STATE.
 Error bits: COMMAND_TIMEOUT → WATCHDOG_TIMER_EXPIRED 0x1000000; OVER/UNDER_VOLTAGE →
 DC_BUS_OVER/UNDER_VOLTAGE 0x100/0x200; OVER_CURRENT, SUSTAINED_CURRENT →
 CURRENT_LIMIT_VIOLATION 0x1000; OVER_SPEED → VELOCITY_LIMIT_VIOLATION 0x8000; DRIVER →
-DRV_FAULT 0x20; SAMPLE_TIMEOUT/INVALID → MISSING_ESTIMATE 0x8; heartbeats and WDT →
+DRV_FAULT 0x20; OVER_TEMPERATURE_FET → INVERTER_OVER_TEMP 0x4000; OVER_TEMPERATURE_MOTOR
+and OVERLOAD → MOTOR_OVER_TEMP 0x2000; SAMPLE_TIMEOUT/INVALID → MISSING_ESTIMATE 0x8; heartbeats and WDT →
 TIMING_ERROR 0x4; everything else → SYSTEM_LEVEL 0x2; Estop → ESTOP_REQUESTED
 0x2000000; a failed CAN calibration → CALIBRATION_ERROR 0x40000000. ID 127 reads the
 raw fault word.
@@ -713,8 +739,10 @@ CANSimple SDO to ID 128; back with UART or the CANSimple SDO before switching).
 - Every frame to the node is answered on the master ID (ID 121). ID 134 = 0, original,
   6 bytes: node, position 16, velocity 12, torque 12 (measured q current × Kt × gear).
   ID 134 = 1, DaMiao, 8 bytes: error << 4 | node (low 4 bits), position, velocity, torque,
-  two temperature bytes (0: no sensor). Errors: 0 disabled, 1 enabled, 8 over-voltage,
-  9 under-voltage, A over-current, D command lease expired, E any other latched fault.
+  two temperature bytes (FET and motor, whole °C 0–255; 0 without a reading). Errors:
+  0 disabled, 1 enabled, 8 over-voltage, 9 under-voltage, A over-current, B FET
+  over-temperature, C motor over-temperature, D command lease expired, E overload or any
+  other latched fault.
 
 Ranges default to P_MAX 12.5 rad, V_MAX 65 rad/s, T_MAX 1 N·m, KP_MAX 500, KD_MAX 5; the
 host must use the device's values. P_MAX × gear must stay within the Runtime's 1024 rad

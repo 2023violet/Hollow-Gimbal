@@ -547,7 +547,8 @@ static float mit_value(uint32_t code, float low, float high, unsigned int bits)
 }
 
 /* DaMiao error nibble: 0 disabled, 1 enabled, 8 over-voltage, 9 under-voltage,
- * A over-current, D communication lost, E other. */
+ * A over-current, B power-stage over-temperature, C coil over-temperature,
+ * D communication lost, E overload or any other fault. */
 static uint8_t mit_error(const struct foc_runtime_snapshot *view)
 {
     if (view->state == FOC_SAFE_STATE_FAULT_LATCHED) {
@@ -557,9 +558,17 @@ static uint8_t mit_error(const struct foc_runtime_snapshot *view)
             : (faults & FOC_SAFE_FAULT_UNDER_VOLTAGE) != 0U    ? 0x09U
             : (faults & (FOC_SAFE_FAULT_OVER_CURRENT | FOC_SAFE_FAULT_SUSTAINED_CURRENT)) != 0U
             ? 0x0AU
-            : 0x0EU;
+            : (faults & FOC_SAFE_FAULT_OVER_TEMPERATURE_FET) != 0U   ? 0x0BU
+            : (faults & FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR) != 0U ? 0x0CU
+                                                                     : 0x0EU;
     }
     return view->state == FOC_SAFE_STATE_RUNNING ? 0x01U : 0x00U;
+}
+
+/* DaMiao temperature byte: whole °C in 0..255, 0 without a reading. */
+static uint8_t mit_temperature(float celsius)
+{
+    return celsius >= 0.0f ? (celsius < 255.0f ? (uint8_t)(celsius + 0.5f) : 255U) : 0U;
 }
 
 /* Position, velocity and torque, output side, to the master ID. */
@@ -586,8 +595,8 @@ mit_reply(struct foc_can *can, const struct foc_serial *serial, struct foc_runti
         (uint8_t)(v >> 4),
         (uint8_t)((v & 0x0FU) << 4 | t >> 8),
         (uint8_t)t,
-        0U, /* DaMiao: driver and rotor temperatures; no sensor on Board1 */
-        0U,
+        mit_temperature(serial->temperature.fet_c), /* DaMiao: MOS and rotor temperatures */
+        mit_temperature(serial->temperature.motor_c),
     };
     can_queue_id(can, (uint16_t)mit->master_id, data, damiao ? 8U : 6U);
 }
@@ -1068,8 +1077,13 @@ static void can_reply_get(
         );
         can_put_f32(data + 4, viewed && view.current_valid ? view.measured_iq_a * per_amp : 0.0f);
         break;
+    case FOC_CAN_GET_TEMPERATURE:
+        /* Filtered NTC temperatures, NaN when a channel is off or has no reading. */
+        can_put_f32(data, serial->temperature.fet_c);
+        can_put_f32(data + 4, serial->temperature.motor_c);
+        break;
     default:
-        /* Temperature (no NTC) and bus voltage/current (no live readback): NaN. */
+        /* Bus voltage and current (no live readback): NaN. */
         can_put_f32(data, nan);
         can_put_f32(data + 4, nan);
         break;
@@ -1185,6 +1199,9 @@ uint32_t foc_can_errors_from_faults(uint32_t faults)
         {FOC_SAFE_FAULT_STALL, FOC_CAN_ERROR_SYSTEM_LEVEL},
         {FOC_SAFE_FAULT_TRACKING_DIVERGENCE, FOC_CAN_ERROR_SYSTEM_LEVEL},
         {FOC_SAFE_FAULT_DRIVER, FOC_CAN_ERROR_DRV_FAULT},
+        {FOC_SAFE_FAULT_OVER_TEMPERATURE_FET, FOC_CAN_ERROR_INVERTER_OVER_TEMP},
+        {FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR, FOC_CAN_ERROR_MOTOR_OVER_TEMP},
+        {FOC_SAFE_FAULT_OVERLOAD, FOC_CAN_ERROR_MOTOR_OVER_TEMP},
     };
     uint32_t errors = 0U;
     uint32_t known = 0U;

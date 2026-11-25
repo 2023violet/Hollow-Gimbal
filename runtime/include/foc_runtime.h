@@ -35,6 +35,7 @@
 #include "foc_motion_limits.h"
 #include "foc_pipeline.h"
 #include "foc_protect.h"
+#include "foc_thermal.h"
 #include "foc_trajectory.h"
 
 #include <stdatomic.h>
@@ -156,7 +157,8 @@ enum foc_runtime_request_result {
  * Motor-protection thresholds as configured. Effective foc_protect values are
  * derived from these, the tuning limits and the profile: the over-speed trip of 0
  * follows 1.25 x velocity_limit_rad_s; sustained current is the rated current, or
- * 0.95 x current_limit_a when unset; stall uses 0.95 x iq_limit_a and 5% of the
+ * 0.95 x current_limit_a when unset or when the I²t model governs the rated current
+ * (profile thermal_tau_s set); stall uses 0.95 x iq_limit_a and 5% of the
  * maximum speed (velocity_limit_rad_s when unset); divergence uses 0.95 x iq_limit_a.
  */
 struct foc_runtime_trip_limits {
@@ -203,6 +205,11 @@ struct foc_runtime_profile {
     float velocity_bandwidth_hz;
     /** Largest rotor excursion of the inertia identification, in rad; 0 not set. */
     float inertia_travel_rad;
+    /** Winding thermal time constant of the I²t model in s, 0 off, otherwise 1..3600.
+     * With a rated current and protection enabled θ follows (i² / I_rated² − θ) / τ;
+     * at 1 the current folds back to the rated value, at 1.25 FOC_SAFE_FAULT_OVERLOAD
+     * latches. Appended field. */
+    float thermal_tau_s;
 };
 
 struct foc_runtime_tuning {
@@ -584,6 +591,16 @@ struct foc_runtime_fast_input {
      * FOC_SAFE_FAULT_DRIVER and FAULT_CLEAR waits until it is false. Appended field.
      */
     bool driver_fault;
+    /**
+     * Board thermal derating, the share of current_limit_a to remove: 0 none, 1 all (NaN
+     * counts as 1). With the I²t fold-back it sets the cycle's current ceiling. Appended.
+     */
+    float thermal_derate;
+    /**
+     * FOC_SAFE_FAULT_OVER_TEMPERATURE_FET/MOTOR while the board's sensor trip holds. H0
+     * latches them and FAULT_CLEAR waits until they are released. Appended field.
+     */
+    uint32_t thermal_faults;
 };
 
 /** Result of one Foreground poll. */
@@ -816,6 +833,14 @@ struct foc_runtime {
     /** H0-written fault snapshot slots and the published slot index. */
     struct foc_runtime_fault_snapshot fault_snapshots[2];
     atomic_uint fault_snapshot_slot;
+    /** H0-owned I²t coefficients, θ and the time of its last update. */
+    struct foc_thermal_i2t i2t;
+    float i2t_theta;
+    uint32_t i2t_us;
+    bool i2t_seen;
+    /** H0-published θ and effective current-vector ceiling in A, as float words. */
+    atomic_uint thermal_theta_word;
+    atomic_uint thermal_limit_word;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -876,6 +901,13 @@ int foc_runtime_publish_tuning(struct foc_runtime *runtime,
  * request identity zero. ERR_CONFIG leaves the instance unchanged.
  */
 int foc_runtime_apply_tuning(struct foc_runtime *runtime, const struct foc_runtime_tuning *tuning);
+
+/**
+ * Read the I²t state θ (0 while the model is off) and the effective current-vector
+ * ceiling in A after the I²t fold-back and the board's thermal derating, as last
+ * published by H0. Any context.
+ */
+int foc_runtime_read_thermal(struct foc_runtime *runtime, float *theta, float *limit_a);
 
 /** Read the latest tuning result, or PENDING with the published request identity. */
 int foc_runtime_read_tuning_result(struct foc_runtime *runtime,

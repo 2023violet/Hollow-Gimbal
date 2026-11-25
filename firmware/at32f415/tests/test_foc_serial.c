@@ -12,6 +12,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#include "foc_parameter_table.h"
 #include "foc_serial.h"
 
 #include <stdio.h>
@@ -381,10 +382,57 @@ static int test_parameters(void)
     request.sequence++;
     request.payload[0] = 255;
     CHECK(transact(&test, request, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+    /* NTC thresholds: a channel's derating must start below its limit. */
     request.sequence++;
+    request.payload[0] = FOC_PARAM_MOTOR_DERATE_TEMP;
+    request.payload[2] = 2;
+    foc_protocol_write_u32(request.payload + 3, 0x42c80000U); /* 100 °C */
+    CHECK(transact(&test, request, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+    CHECK(test.serial.thermal.motor.derate_c == 75.0f);
+    request.sequence++;
+    request.payload[0] = FOC_PARAM_MOTOR_LIMIT_TEMP;
+    foc_protocol_write_u32(request.payload + 3, 0x42f00000U); /* 120 °C */
+    CHECK(transact(&test, request, &response, FOC_PROTO_APPLIED) == 0);
+    request.sequence++;
+    request.payload[0] = FOC_PARAM_MOTOR_DERATE_TEMP;
+    foc_protocol_write_u32(request.payload + 3, 0x42c80000U);
+    CHECK(transact(&test, request, &response, FOC_PROTO_APPLIED) == 0);
+    CHECK(
+        test.serial.thermal.motor.derate_c == 100.0f && test.serial.thermal.motor.limit_c == 120.0f
+    );
+    /* Temperatures read NaN without a poll; θ is 0 and the ceiling the current limit. */
+    const uint8_t reads[] = {
+        FOC_PARAM_FET_TEMPERATURE,
+        FOC_PARAM_MOTOR_TEMPERATURE,
+        FOC_PARAM_I2T_LOAD,
+        FOC_PARAM_THERMAL_CURRENT_LIMIT
+    };
+    uint32_t values[4];
+    for (unsigned int index = 0U; index < 4U; ++index) {
+        struct foc_protocol_frame read = request;
+        read.sequence = ++request.sequence;
+        read.type = FOC_MSG_PARAM_READ;
+        read.length = 2;
+        read.payload[0] = reads[index];
+        read.payload[1] = 0;
+        CHECK(transact(&test, read, &response, FOC_PROTO_OK) == 0);
+        values[index] = foc_protocol_read_u32(response.payload + 14);
+    }
+    CHECK((values[0] & 0x7f800000U) == 0x7f800000U && (values[0] & 0x007fffffU) != 0U);
+    CHECK((values[1] & 0x7f800000U) == 0x7f800000U && (values[1] & 0x007fffffU) != 0U);
+    CHECK(values[2] == 0U);
+    float ceiling;
+    memcpy(&ceiling, &values[3], sizeof ceiling);
+    CHECK(ceiling == test.runtime.pipeline.current.config.current_limit_a);
+    request.sequence++;
+    request.type = FOC_MSG_PARAM_WRITE;
+    request.length = 7;
     request.payload[0] = 1;
     request.payload[2] = 1;
     request.payload[3] = 16;
+    request.payload[4] = 0;
+    request.payload[5] = 0;
+    request.payload[6] = 0;
     foc_runtime_request_inhibit(&test.runtime, FOC_SAFE_FAULT_SAMPLE_INVALID);
     CHECK(transact(&test, request, &response, FOC_PROTO_BAD_STATE) == 0);
     return 0;

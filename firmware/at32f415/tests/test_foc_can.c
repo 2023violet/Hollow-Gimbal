@@ -264,7 +264,37 @@ static int test_error_map(void)
         foc_can_errors_from_faults(FOC_SAFE_FAULT_DRIVER | FOC_SAFE_FAULT_OVER_VOLTAGE) ==
         (FOC_CAN_ERROR_DRV_FAULT | FOC_CAN_ERROR_DC_BUS_OVER_VOLTAGE)
     );
+    CHECK(
+        foc_can_errors_from_faults(FOC_SAFE_FAULT_OVER_TEMPERATURE_FET) ==
+        FOC_CAN_ERROR_INVERTER_OVER_TEMP
+    );
+    CHECK(
+        foc_can_errors_from_faults(
+            FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR | FOC_SAFE_FAULT_OVERLOAD
+        ) == FOC_CAN_ERROR_MOTOR_OVER_TEMP
+    );
     CHECK(foc_can_errors_from_faults(1U << 20) == FOC_CAN_ERROR_SYSTEM_LEVEL);
+    return 0;
+}
+
+/* Get_Temperature returns the polled temperatures, NaN without a reading. */
+static int test_temperature(void)
+{
+    static struct fixture test;
+    CHECK(init(&test) == 0);
+    test.serial.can.node_id = 2U;
+    test.serial.can.heartbeat_ms = 0U;
+    test.serial.can.estimates_ms = 0U;
+    push(&test, 2U, FOC_CAN_GET_TEMPERATURE, true, NULL, 0U);
+    poll(&test);
+    CHECK(test.count == 1U && test.sent[0].length == 8U);
+    CHECK(isnan(get_f32(test.sent[0].data)) && isnan(get_f32(test.sent[0].data + 4)));
+    test.serial.temperature.fet_c = 41.5f;
+    test.serial.temperature.motor_c = 63.25f;
+    push(&test, 2U, FOC_CAN_GET_TEMPERATURE, true, NULL, 0U);
+    poll(&test);
+    CHECK(test.count == 2U && get_f32(test.sent[1].data) == 41.5f);
+    CHECK(get_f32(test.sent[1].data + 4) == 63.25f);
     return 0;
 }
 
@@ -308,6 +338,15 @@ static int test_mit(void)
     poll(&test);
     CHECK(test.count == 2U && test.sent[1].length == 8U && test.sent[1].data[0] == 0x05U);
     CHECK(test.sent[1].data[6] == 0U && test.sent[1].data[7] == 0U);
+    /* With readings the DaMiao bytes carry whole °C, saturating at 255. */
+    test.serial.temperature.fet_c = 41.5f;
+    test.serial.temperature.motor_c = 300.0f;
+    push_raw(&test, 5U, clear, 8U);
+    poll(&test);
+    CHECK(test.count == 3U && test.sent[2].data[6] == 42U && test.sent[2].data[7] == 255U);
+    test.count = 2U;
+    test.serial.temperature.fet_c = NAN;
+    test.serial.temperature.motor_c = NAN;
 
     /* Zero while DISABLED sets the output zero to the present position (0 here). */
     const uint8_t zero[8] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFEU};
@@ -342,7 +381,7 @@ static int test_mit(void)
 int main(void)
 {
     if (test_address_and_ids() != 0 || test_cyclic() != 0 || test_refusals_and_counters() != 0 ||
-        test_error_map() != 0 || test_mit() != 0) {
+        test_error_map() != 0 || test_temperature() != 0 || test_mit() != 0) {
         return 1;
     }
     puts("test_foc_can: PASS");

@@ -269,6 +269,7 @@ static bool settings_from_live(
     settings->remote_position_cap_rad = serial->position_limit_rad;
     settings->output_zero_rad = serial->output_zero_rad;
     settings->can = serial->can;
+    settings->thermal = serial->thermal;
     return true;
 }
 
@@ -281,7 +282,8 @@ static bool serial_caps_valid(const struct foc_board_settings *settings)
         isfinite(settings->remote_position_cap_rad) && settings->remote_position_cap_rad >= 1.0f &&
         settings->remote_position_cap_rad <= 1000.0f && isfinite(settings->output_zero_rad) &&
         fabsf(settings->output_zero_rad) <= 1000.0f &&
-        foc_serial_can_settings_valid(&settings->can);
+        foc_serial_can_settings_valid(&settings->can) &&
+        foc_serial_thermal_settings_valid(&settings->thermal);
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -634,6 +636,7 @@ void foc_board_persistence_restore(
         .remote_position_cap_rad = serial->position_limit_rad,
         .output_zero_rad = serial->output_zero_rad,
         .can = serial->can,
+        .thermal = serial->thermal,
         .calibration_present = settings.calibration_present,
         .calibration = settings.calibration,
     };
@@ -680,6 +683,7 @@ void foc_board_persistence_restore(
     serial->position_limit_rad = settings.remote_position_cap_rad;
     serial->output_zero_rad = settings.output_zero_rad;
     serial->can = settings.can;
+    serial->thermal = settings.thermal;
     persistence->loaded_sequence = sequence;
     persistence->state = FOC_BOARD_STORE_LOADED;
 }

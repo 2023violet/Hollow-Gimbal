@@ -4,7 +4,8 @@
 # Capture -> ADC candidate -> isolated Runtime) and test-foc-board1-sil (M0 Board1 SIL:
 # production Board1 path against a virtual motor over UART) and test-foc-board-store (M2
 # persistent settings record, torn saves, boot restore) and test-foc-can (CANSimple) and
-# test-foc-trig (ROM-01 foc_sincosf accuracy) and test-foc-parameter-table (PARAM-01); test-legacy-sincos-baseline left with the
+# test-foc-trig (ROM-01 foc_sincosf accuracy) and test-foc-parameter-table (PARAM-01) and
+# test-foc-thermal and test-foc-runtime-thermal (THERMAL-01 NTC, derating, I2t); test-legacy-sincos-baseline left with the
 # Legacy removal. Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
@@ -67,6 +68,7 @@ firmware-at32f415	test-foc-parameter-table
 firmware-at32f415	test-foc-pwm-port
 firmware-at32f415	test-foc-python
 firmware-at32f415	test-foc-serial
+firmware-at32f415	test-foc-thermal
 firmware-at32f415	test-foc-timing
 protocol	test-foc-protocol
 runtime	test-foc-control01b
@@ -81,6 +83,7 @@ runtime	test-foc-runtime
 runtime	test-foc-runtime-impedance
 runtime	test-foc-runtime-mailbox
 runtime	test-foc-runtime-protection
+runtime	test-foc-runtime-thermal
 runtime	test-foc-system
 sensors	test-foc-encoder
 sensors	test-foc-sensor-reference
@@ -115,6 +118,7 @@ simulation	test-foc-runtime-impedance
 simulation	test-foc-runtime-impedance-virtual
 simulation	test-foc-runtime-mailbox
 simulation	test-foc-runtime-protection
+simulation	test-foc-runtime-thermal
 simulation	test-foc-sensor-est
 simulation	test-foc-sensor-reference
 simulation	test-foc-system

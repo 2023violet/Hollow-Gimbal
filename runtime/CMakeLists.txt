@@ -32,6 +32,7 @@ add_library(
   ../g3/np/src/foc_device_sim.c
   ../g3/safe/src/foc_safe.c
   ../g3/safe/src/foc_protect.c
+  ../g3/safe/src/foc_thermal.c
 )
 target_include_directories(
   falconfoc-pipeline PUBLIC include ../core/include ../g3/np/include ../g3/safe/include
@@ -72,6 +73,9 @@ add_test(NAME test-foc-runtime-impedance COMMAND test-foc-runtime-impedance)
 add_executable(test-foc-runtime-protection tests/test_foc_runtime_protection.c)
 target_link_libraries(test-foc-runtime-protection PRIVATE falconfoc-pipeline)
 add_test(NAME test-foc-runtime-protection COMMAND test-foc-runtime-protection)
+add_executable(test-foc-runtime-thermal tests/test_foc_runtime_thermal.c)
+target_link_libraries(test-foc-runtime-thermal PRIVATE falconfoc-pipeline)
+add_test(NAME test-foc-runtime-thermal COMMAND test-foc-runtime-thermal)
 
 add_executable(test-foc-remote tests/test_foc_remote.c)
 target_link_libraries(test-foc-remote PRIVATE falconfoc-pipeline)

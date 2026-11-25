@@ -822,3 +822,45 @@ IMPEDANCE 原来要求开机时固定 Kt，并在启用时拒绝一切调参，�
 - Kd 直接放大速度估计噪声，阻尼误差低通默认关闭；实板噪声和 H1（2 kHz）离散稳定裕度需上台架确认（J 很小时 kd 过大会不稳定，约 kd·T_H1/J < 2）。
 - 达妙温度字节为 0；灵足（RobStride）MIT 细节未核实。
 - MIT 速度量化步长 2·V_MAX/4095（默认 0.032 rad/s）。
+
+## 27. 温度保护（I²t 与 NTC）
+
+### 27.1 决定
+
+2026-11-25 用户确认按方案实现：I²t 默认开启（τ = 30 s，需要设置额定电流 ID 96 才生效）；NTC 代码先写好，Board1 没有 NTC 通道，等硬件接入。
+
+### 27.2 I²t（Runtime H0）
+
+θ ← θ + dt/τ · (|i|² / I_rated² − θ)，每个 H0 周期用测得的 d/q 电流更新，不运行时电流记 0，θ 自然衰减。θ ≥ 1 时电流上限折返到额定电流（电流保持在额定值时 θ 稳定在 1），θ ≥ 1.25 说明折返也压不住，锁存 OVERLOAD（位 19），θ < 1 后才允许 FAULT_CLEAR。I²t 开启时，原来"超过额定电流持续 1 s 就跳闸"的 SUSTAINED_CURRENT 规则改用 0.95 × ID 68，否则它会抢在 I²t 之前跳闸。τ 存在 `foc_runtime_profile.thermal_tau_s`（结构体末尾），范围 0 或 1..3600 s；保护关闭（`trip_enabled = false`）时 I²t 也关闭。
+
+### 27.3 NTC（板级）
+
+`g3/safe/foc_thermal`：β 换算（无 libm 的自然对数）、两级一阶滤波（首个读数直接作为初值，读数无效时重新取初值）、降额起点到上限之间线性降额、上限 + 5 °C 跳闸（低于上限才释放）、使能的通道连续 10 次读不到有效值也跳闸（开路、短路、或 Board1 没有通道）。`foc_board_thermal` 在前台每 10 ms 通过读取端口轮询，把降额比例和跳闸位用原子量交给 ADC 完成中断，再通过快速输入送进 H0（与 nFAULT 相同的路径）。两路降额取较大者，与 I²t 上限取较小者，作用在所有模式的电流目标幅值（`foc_pipeline_input.target_limit_a`）和外环 q 电流上限上；ID 68 本身不改，`read_tuning` 读回的仍是设定值。
+
+### 27.4 参数与协议
+
+| ID | 名称 | 说明 |
+| --- | --- | --- |
+| 119 | fet-temperature | 只读，滤波后的 FET 温度，NaN = 关闭或无读数 |
+| 135 | thermal-tau | 调参，I²t 时间常数，默认 30 s，保存 |
+| 136 | i2t-load | 只读，θ |
+| 137 | thermal-current-limit | 只读，I²t 与降额之后的实际电流上限 |
+| 138–140 / 141–143 | fet / motor NTC | 使能（默认关）、降额起点（75 °C）、上限（95 °C），保存 |
+| 144–146 | ntc-beta / r25 / pullup | 3950 K、10 kΩ、10 kΩ，保存 |
+| 147 | motor-temperature | 只读 |
+| 148 | ntc-topology | 0 NTC 接地 + 上拉，1 NTC 接参考 + 下拉，保存 |
+
+新单位 °C 24、s 25、K 26。生成器允许串口组的只读字段（119、147）。写入会让某通道"降额起点 ≥ 上限"时返回 INVALID_ARGUMENT（抬高时先写上限）；存储恢复时同样校验，CONFIG_ERASE 恢复默认。CAN：Get_Temperature 返回两路温度；达妙回复的两个温度字节为整数 °C（无读数为 0），错误码 B = FET 过温、C = 线圈过温、E = 过载或其他；CANSimple 错误位 INVERTER_OVER_TEMP 0x4000（FET）、MOTOR_OVER_TEMP 0x2000（电机过温与过载）。
+
+### 27.5 验证（软件，未上板）
+
+- `test-foc-thermal`：两种分压接法的 β 换算与 libm 对照（−20..140 °C 误差 < 0.02 °C）、滤波、跳闸回差、断线跳闸、降额、I²t 时间线。
+- `test-foc-runtime-thermal`：2 倍额定电流时 θ 在 288 ms 到 1 并折返、375 ms 锁存 OVERLOAD、冷却到 θ < 1 前清除被拒；降额上限；温度故障锁存与释放；τ 范围；SUSTAINED_CURRENT 门限切换。
+- 固件：存储往返与非法组合拒绝、串口交叉校验与只读温度、`foc_board_thermal` 轮询、CAN 温度与错误位。
+- SIL `thermal`：I²t 折返到 0.500 A，停机 2 s 后 θ = 0.368（e⁻¹）；NTC 降额平衡在 0.881 A / 52.95 °C（理论 0.881 A / 52.95 °C）；注入 80 °C 锁存 OVER_TEMPERATURE_MOTOR，读数回落前清除被拒，回落后清除成功。
+
+### 27.6 局限
+
+- Board1 没有 NTC 通道；ARM 镜像不传读取函数，使能通道会直接跳闸。接入硬件时只需在 `main.c` 提供 `foc_board_ntc_reader`（ADC 读数 / 满量程）。
+- I²t 只用相电流平方，没有考虑转速相关的铁损和环境温度；τ 需要按电机实测或手册给定。
+- 降额只作用在电流上限，不改变 PI 参数；SIL 的热模型是一阶的，仅用于验证逻辑。

@@ -279,6 +279,14 @@ class Board1SilTest(unittest.TestCase):
         self.assertLess(abs(metrics["position"]["final_rad"] - 0.5), 0.02)
         self.assertLess(abs(metrics["torque"]["mean_reply_nm"] - 0.004), 0.0015)
 
+    def test_thermal_protection(self):
+        """I2t fold-back to the rated current and its decay; NTC derating against the plant's
+        heating; an over-temperature latch released only once the reading cools."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_thermal(SIL, ["--lockstep-us", "500"])
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+        self.assertLess(abs(summary["metrics"]["i2t"]["tail_mean_iq_a"] - 0.5), 0.05)
+
     def test_cansimple_single_node(self):
         """CANSimple on one node: discovery, assignment, cyclic frames, SDO, calibration
         over CAN, velocity/position/torque, lease watchdog, Estop, save and power cycle."""

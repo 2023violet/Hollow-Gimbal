@@ -1,0 +1,47 @@
+Base    falconfoc-v2-at32f415.elf  a853dd35e2e8
+Target  falconfoc-v2-at32f415.elf  2cc9a853693e
+
+Memory
+  Nonvolatile / load image: 99900 bytes → 102976 bytes   delta +3076 [exact]
+  Runtime RAM:              15436 bytes → 15596 bytes   delta +160 [exact]
+  Comparability:            exact
+  Base side states:         nonvolatile exact / RAM exact
+  Target side states:       nonvolatile exact / RAM exact
+
+Counts
+  Sections  +0 -0 ~18 (0 rows whose name repeats)
+  Symbols   +853 -800 ~522 (1630 rows whose key repeats)
+  Identical, so left out of the tables: 1 section(s), 190 symbol(s)
+
+Top section growth (Changed rows)
+      +2700  .text                        99528 bytes  [Changed]
+       +848  .symtab                      25056 bytes  [Changed]
+       +458  .strtab                      13788 bytes  [Changed]
+       +376  .rodata                      2980 bytes  [Changed]
+       +156  .bss                         14484 bytes  [Changed]
+
+Largest added sections (absence, never 0)
+  none
+
+Top symbol growth (Changed rows)
+       +308  foc_runtime_control          2568 bytes  [Changed]
+       +300  foc_parameter_table          2000 bytes  [Changed]
+       +144  foc_pipeline_step_guarded    1232 bytes  [Changed]
+       +108  foc_serial_parameter         1436 bytes  [Changed]
+       +108  mit_reply                    700 bytes  [Changed]
+
+Largest added symbols (absence, never 0)
+          -  foc_thermal_ntc_celsius      324 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_board_thermal_poll       272 bytes  [Added]
+          -  foc_thermal_sensor_update    212 bytes  [Added]
+
+Object / module attribution
+  unavailable
+
+Warnings
+  [SYMBOL-AMBIGUOUS] 1630 symbol row(s) repeat a name, kind and binding combination on one or both sides and were left unpaired; a row position is not an identity
+diagnostics: old map parsed with the gnu_ld adapter
+diagnostics: new map parsed with the gnu_ld adapter
+diagnostics: operation op-788-18eb435150e079bc

@@ -119,6 +119,7 @@ static struct foc_board_settings settings_with_kp(float kp)
         .remote_current_cap_a = 2.5f,
         .remote_position_cap_rad = 100.0f,
         .can = foc_serial_can_defaults(),
+        .thermal = foc_serial_thermal_defaults(),
     };
 }
 
@@ -343,6 +344,9 @@ static int test_restore(void)
     in.tuning.command_timeout_us = 30000U;
     in.rx_budget = 16U;
     in.remote_position_cap_rad = 50.0f;
+    in.thermal.motor = (struct foc_serial_thermal_sensor){1U, 80.0f, 110.0f};
+    in.thermal.topology = 1U;
+    in.tuning.profile.thermal_tau_s = 45.0f;
     CHECK(write_record(&fixture.flash, &boot_identity, &in) == 0);
     CHECK(restore_boot(&fixture, true) == 0);
     CHECK(fixture.persistence.state == FOC_BOARD_STORE_LOADED);
@@ -350,6 +354,11 @@ static int test_restore(void)
     CHECK(fixture.runtime.pipeline.current.config.kp_v_per_a.q == 2.2f);
     CHECK(fixture.runtime.pipeline.safety.config.command_timeout_us == 30000U);
     CHECK(fixture.serial.rx_budget == 16U && fixture.serial.position_limit_rad == 50.0f);
+    CHECK(
+        fixture.serial.thermal.motor.enabled == 1U && fixture.serial.thermal.motor.limit_c == 110.0f
+    );
+    CHECK(fixture.serial.thermal.topology == 1U && fixture.serial.thermal.fet.enabled == 0U);
+    CHECK(fixture.runtime.config.profile.thermal_tau_s == 45.0f);
     struct foc_runtime_tuning_result result;
     CHECK(foc_runtime_read_tuning_result(&fixture.runtime, &result) == FOC_RUNTIME_OK);
     CHECK(result.result == FOC_RUNTIME_REQUEST_APPLIED && result.revision == 1U);
@@ -394,6 +403,14 @@ static int test_restore(void)
     CHECK(write_record(&fixture.flash, &boot_identity, &bad) == 0);
     CHECK(restore_boot(&fixture, true) == 0);
     CHECK(fixture.persistence.state == FOC_BOARD_STORE_VALUE_REJECTED);
+    /* So is an NTC channel whose derating does not start below its limit. */
+    bad = in;
+    bad.thermal.fet.derate_c = 100.0f;
+    memset(fixture.flash.slots, 0xFF, sizeof fixture.flash.slots);
+    CHECK(write_record(&fixture.flash, &boot_identity, &bad) == 0);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.state == FOC_BOARD_STORE_VALUE_REJECTED);
+    CHECK(fixture.serial.thermal.motor.enabled == 0U);
 
     /* A record without a parameter keeps its boot value (dead-time compensation 0, CAN
      * defaults here) and still applies the rest. */

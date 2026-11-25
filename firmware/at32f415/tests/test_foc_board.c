@@ -14,6 +14,8 @@
 
 #include "foc_board.h"
 #include "foc_adc_test_clock.h"
+#include "foc_board_thermal.h"
+#include "foc_serial.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -688,11 +690,86 @@ static int test_calibration_drive(void)
 
 /* Test Entry ------------------------------------------------------------------- */
 
+/* NTC readings over full scale per channel; NaN reports no reading. */
+static bool fake_ntc(void *argument, enum foc_board_ntc channel, float *ratio)
+{
+    const float *ratios = argument;
+    *ratio = ratios[channel];
+    return !isnan(ratios[channel]);
+}
+
+/* Divider ratio of the default 10 kΩ β 3950 NTC to ground with a 10 kΩ pull-up. */
+static float ntc_ratio(float celsius)
+{
+    const float r = 10000.0f * expf(3950.0f * (1.0f / (celsius + 273.15f) - 1.0f / 298.15f));
+    return r / (r + 10000.0f);
+}
+
+static int test_thermal_poll(void)
+{
+    static struct foc_runtime runtime;
+    static struct foc_board_output output;
+    static struct foc_serial serial;
+    struct foc_board_thermal thermal;
+    float ratios[FOC_BOARD_NTC_COUNT] = {0.5f, 0.5f};
+    const uint32_t both =
+        FOC_SAFE_FAULT_OVER_TEMPERATURE_FET | FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR;
+    CHECK(foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK);
+    foc_serial_init(&serial, &runtime);
+    foc_board_thermal_init(&thermal, fake_ntc, ratios);
+
+    /* Disabled channels read NaN and neither derate nor trip. */
+    uint32_t t = 1000U;
+    foc_board_thermal_poll(&thermal, &serial, t);
+    CHECK(isnan(serial.temperature.fet_c) && isnan(serial.temperature.motor_c));
+    CHECK(foc_board_thermal_derate(&thermal) == 0.0f && foc_board_thermal_faults(&thermal) == 0U);
+    serial.thermal.fet.enabled = 1U;
+    serial.thermal.motor.enabled = 1U;
+    foc_board_thermal_poll(&thermal, &serial, t + FOC_BOARD_THERMAL_PERIOD_US - 1U);
+    CHECK(isnan(serial.temperature.fet_c));
+    t += FOC_BOARD_THERMAL_PERIOD_US;
+    foc_board_thermal_poll(&thermal, &serial, t);
+    CHECK(fabsf(serial.temperature.fet_c - 25.0f) < 0.05f);
+    CHECK(fabsf(serial.temperature.motor_c - 25.0f) < 0.05f);
+
+    /* The motor at 85 °C derates halfway across 75..95 °C. */
+    ratios[FOC_BOARD_NTC_MOTOR] = ntc_ratio(85.0f);
+    for (unsigned int poll = 0U; poll < 300U; ++poll) {
+        t += FOC_BOARD_THERMAL_PERIOD_US;
+        foc_board_thermal_poll(&thermal, &serial, t);
+    }
+    CHECK(fabsf(serial.temperature.motor_c - 85.0f) < 0.1f);
+    CHECK(fabsf(foc_board_thermal_derate(&thermal) - 0.5f) < 0.01f);
+    CHECK(foc_board_thermal_faults(&thermal) == 0U);
+
+    /* A lost FET reading derates fully and trips after FOC_THERMAL_INVALID_SAMPLES polls. */
+    ratios[FOC_BOARD_NTC_FET] = NAN;
+    for (uint32_t poll = 1U; poll <= FOC_THERMAL_INVALID_SAMPLES; ++poll) {
+        t += FOC_BOARD_THERMAL_PERIOD_US;
+        foc_board_thermal_poll(&thermal, &serial, t);
+        CHECK(foc_board_thermal_derate(&thermal) == 1.0f);
+        CHECK(
+            foc_board_thermal_faults(&thermal) ==
+            (poll == FOC_THERMAL_INVALID_SAMPLES ? FOC_SAFE_FAULT_OVER_TEMPERATURE_FET : 0U)
+        );
+    }
+    CHECK(isnan(serial.temperature.fet_c));
+
+    /* Board1 has no reader: an enabled channel trips both ways. */
+    foc_board_thermal_init(&thermal, NULL, NULL);
+    for (uint32_t poll = 0U; poll < FOC_THERMAL_INVALID_SAMPLES; ++poll) {
+        t += FOC_BOARD_THERMAL_PERIOD_US;
+        foc_board_thermal_poll(&thermal, &serial, t);
+    }
+    CHECK(foc_board_thermal_faults(&thermal) == both);
+    return 0;
+}
+
 int main(void)
 {
     return test_time() || test_adc() || test_encoder() || test_output() ||
         test_rejected_transaction() || test_output_backend() || test_applied_transaction() ||
-        test_tuning_mailbox() || test_calibration_drive();
+        test_tuning_mailbox() || test_calibration_drive() || test_thermal_poll();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

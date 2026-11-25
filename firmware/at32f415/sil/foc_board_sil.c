@@ -39,6 +39,7 @@
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
 #include "foc_board_store.h"
+#include "foc_board_thermal.h"
 #include "foc_board_timing.h"
 #include "foc_can.h"
 #include "foc_serial.h"
@@ -161,6 +162,20 @@ struct sil_device {
     /* Fault injection: the DRV8311 nFAULT line is low in [driver_fault_on_us, _off_us). */
     uint32_t driver_fault_on_us;
     uint32_t driver_fault_off_us;
+    /* NTC plant: the winding follows ambient + Rth x 1.5 Rs i^2 with time constant tau, the
+     * power stage half that rise at tau / 2. Both read through a 10 kOhm beta 3950 NTC to
+     * ground with a 10 kOhm pull-up; in [override_on_us, _off_us) both read override_c. */
+    struct foc_board_thermal thermal;
+    double rs_ohm;
+    double ambient_c;
+    double rth_k_per_w;
+    double thermal_tau_s;
+    double motor_c;
+    double fet_c;
+    uint32_t thermal_us;
+    uint32_t ntc_override_on_us;
+    uint32_t ntc_override_off_us;
+    double ntc_override_c;
     /* Fault injection: from adc_step_us on, add adc_step_counts to the first current rank. */
     uint32_t adc_step_us;
     double adc_step_counts;
@@ -636,6 +651,37 @@ static bool sil_driver_fault_line(void *argument)
         device->now_us < device->driver_fault_off_us;
 }
 
+/* Advance the NTC plant to now with the present copper loss. */
+static void sil_thermal_advance(struct sil_device *device)
+{
+    struct foc_virtual_motor_observation seen;
+    const double dt_s = (double)(device->now_us - device->thermal_us) * 1.0e-6;
+    device->thermal_us = device->now_us;
+    if (foc_virtual_motor_observe(&device->plant.motor, &seen) != 0 || !(dt_s > 0.0)) {
+        return;
+    }
+    const double rise = device->rth_k_per_w * 1.5 * device->rs_ohm *
+        (seen.id_a * seen.id_a + seen.iq_a * seen.iq_a);
+    const double motor = 1.0 - exp(-dt_s / device->thermal_tau_s);
+    const double fet = 1.0 - exp(-2.0 * dt_s / device->thermal_tau_s);
+    device->motor_c += motor * (device->ambient_c + rise - device->motor_c);
+    device->fet_c += fet * (device->ambient_c + 0.5 * rise - device->fet_c);
+}
+
+/* Board port: the channel's divider ratio from the plant temperature. */
+static bool sil_ntc_read(void *argument, enum foc_board_ntc channel, float *ratio)
+{
+    const struct sil_device *device = argument;
+    const bool override = device->now_us >= device->ntc_override_on_us &&
+        device->now_us < device->ntc_override_off_us;
+    const double celsius = override    ? device->ntc_override_c
+        : channel == FOC_BOARD_NTC_FET ? device->fet_c
+                                       : device->motor_c;
+    const double r = 10000.0 * exp(3950.0 * (1.0 / (celsius + 273.15) - 1.0 / 298.15));
+    *ratio = (float)(r / (r + 10000.0));
+    return true;
+}
+
 /* main.c foreground loop body. */
 static void sil_foreground(struct sil_device *device)
 {
@@ -646,6 +692,8 @@ static void sil_foreground(struct sil_device *device)
         foc_can_poll(&device->can, &device->serial, &device->runtime, device->now_us);
     }
     foc_board_calibration_poll(&device->calibration, device->now_us);
+    sil_thermal_advance(device);
+    foc_board_thermal_poll(&device->thermal, &device->serial, device->now_us);
     sil_drain_tx(device);
     sil_report(device);
 }
@@ -841,7 +889,8 @@ static void sil_usage(const char *name)
         "          [--motor-lq-h l] [--motor-psi-f-wb psi] [--motor-pole-pairs n]\n"
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
         "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n"
-        "          [--dead-time-v v] [--can serial]\n",
+        "          [--dead-time-v v] [--can serial] [--thermal ambient_c,rth_k_per_w,tau_s]\n"
+        "          [--ntc-override-us on_us,off_us,celsius]\n",
         name
     );
 }
@@ -941,6 +990,9 @@ int main(int argc, char **argv)
     const char *flash_path = NULL;
     struct foc_virtual_motor_params motor = sil_default_motor();
     device.trace_us = 500U;
+    device.ambient_c = 25.0;
+    device.rth_k_per_w = 10.0;
+    device.thermal_tau_s = 30.0;
 
     for (int index = 1; index < argc; ++index) {
         const char *option = argv[index];
@@ -1003,6 +1055,19 @@ int main(int argc, char **argv)
             device.driver_fault_on_us = (uint32_t)strtoul(value, &rest, 0);
             device.driver_fault_off_us =
                 rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, NULL, 0) : UINT32_MAX;
+        } else if (strcmp(option, "--thermal") == 0) {
+            /* NTC plant: ambient in degC, winding thermal resistance in K/W, time constant s. */
+            char *rest = NULL;
+            device.ambient_c = strtod(value, &rest);
+            device.rth_k_per_w = rest != NULL && *rest == ',' ? strtod(rest + 1, &rest) : -1.0;
+            device.thermal_tau_s = rest != NULL && *rest == ',' ? strtod(rest + 1, NULL) : -1.0;
+        } else if (strcmp(option, "--ntc-override-us") == 0) {
+            /* Both NTC channels read celsius from on_us until off_us. */
+            char *rest = NULL;
+            device.ntc_override_on_us = (uint32_t)strtoul(value, &rest, 0);
+            device.ntc_override_off_us =
+                rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, &rest, 0) : 0U;
+            device.ntc_override_c = rest != NULL && *rest == ',' ? strtod(rest + 1, NULL) : NAN;
         } else if (strcmp(option, "--load-torque-nm") == 0) {
             /* Constant external load torque at the rotor, opposing positive motor torque,
              * applied from plant time on_us (default 0). */
@@ -1014,7 +1079,10 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    if (!(speed > 0.0) || !isfinite(speed) || !(vbus_v > 0.0f)) {
+    if (!(speed > 0.0) || !isfinite(speed) || !(vbus_v > 0.0f) || !isfinite(device.ambient_c) ||
+        !(device.rth_k_per_w >= 0.0) || !(device.thermal_tau_s > 0.0) ||
+        (device.ntc_override_off_us > device.ntc_override_on_us &&
+         !isfinite(device.ntc_override_c))) {
         sil_usage(argv[0]);
         return 2;
     }
@@ -1071,6 +1139,11 @@ int main(int argc, char **argv)
         device.adc.driver_fault_line = sil_driver_fault_line;
         device.adc.driver_fault_argument = &device;
     }
+    device.rs_ohm = motor.rs_ohm;
+    device.motor_c = device.ambient_c;
+    device.fet_c = device.ambient_c;
+    foc_board_thermal_init(&device.thermal, sil_ntc_read, &device);
+    device.adc.thermal = &device.thermal;
     /* Single-threaded SIL: no producer runs while the manager reconfigures. */
     foc_board_calibration_bind(
         &device.calibration,

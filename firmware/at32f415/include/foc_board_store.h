@@ -84,6 +84,8 @@ struct foc_board_settings {
     float output_zero_rad;
     /** CAN settings (IDs 120, 122, 123, 125). */
     struct foc_serial_can_settings can;
+    /** NTC protection settings (IDs 138–146, 148). */
+    struct foc_serial_thermal_settings thermal;
     /** An applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;

@@ -80,6 +80,7 @@ settings record. Semantics, derivations and calibration stages are in the
 | 116 | `trip-sustained-ms` | u32 | ms | RW (DISABLED, H0) | 0 … 60000 | yes | Sustained over-current window. |
 | 117 | `trip-stall-ms` | u32 | ms | RW (DISABLED, H0) | 0 … 10000 | yes | Stall window. |
 | 118 | `trip-divergence-ms` | u32 | ms | RW (DISABLED, H0) | 0 … 10000 | yes | Following-error divergence window. |
+| 119 | `fet-temperature` | f32 | C | RO |  |  | Filtered power-stage NTC temperature; NaN when off or without a reading. |
 | 120 | `can-node-id` | u32 |  | RW | 0 … 63 | yes | CANSimple node ID; 63 (0x3F) is unaddressed. |
 | 121 | `can-master-id` | u32 |  | RW | 0 … 2047 | yes | MIT: CAN ID of the replies (the host's ID). |
 | 122 | `can-bitrate` | u32 |  | RW | 125000 / 250000 / 500000 / 1000000 | yes | CAN bit rate in bit/s; applies at the next boot. |
@@ -95,3 +96,17 @@ settings record. Semantics, derivations and calibration stages are in the
 | 132 | `mit-kp-max` | f32 | N*m/rad | RW | 0.001 … 10000 | yes | MIT: stiffness range 0..KP_MAX, output side. |
 | 133 | `mit-kd-max` | f32 | N*m*s/rad | RW | 0.001 … 1000 | yes | MIT: damping range 0..KD_MAX, output side. |
 | 134 | `mit-reply-format` | u32 |  | RW | 0 … 1 | yes | MIT reply: 0 original 6 bytes (ID, p, v, t), 1 DaMiao 8 bytes (error|ID, p, v, t, 0, 0). |
+| 135 | `thermal-tau` | f32 | s | RW (DISABLED, H0) | 0 … 3600 | yes | I2t winding time constant, 0 off or 1..3600; with ID 96 folds the current back to it. |
+| 136 | `i2t-load` | f32 |  | RO |  |  | I2t state: 1 folds the current back to ID 96, 1.25 latches OVERLOAD. |
+| 137 | `thermal-current-limit` | f32 | A | RO |  |  | Current-vector ceiling after the I2t fold-back and NTC derating. |
+| 138 | `fet-ntc-enable` | u32 |  | RW | 0 … 1 | yes | Power-stage NTC: 0 off, 1 on; on without a usable reading derates fully and trips. |
+| 139 | `fet-derate-temp` | f32 | C | RW | -40 … 150 | yes | Power-stage NTC: linear current derating starts here; below ID 140. |
+| 140 | `fet-limit-temp` | f32 | C | RW | -40 … 150 | yes | Power-stage NTC: zero current here; trips 5 C above, releases below it. |
+| 141 | `motor-ntc-enable` | u32 |  | RW | 0 … 1 | yes | Motor NTC: 0 off, 1 on; on without a usable reading derates fully and trips. |
+| 142 | `motor-derate-temp` | f32 | C | RW | -40 … 150 | yes | Motor NTC: linear current derating starts here; below ID 143. |
+| 143 | `motor-limit-temp` | f32 | C | RW | -40 … 150 | yes | Motor NTC: zero current here; trips 5 C above, releases below it. |
+| 144 | `ntc-beta` | f32 | K | RW | 1000 … 10000 | yes | NTC beta of both channels. |
+| 145 | `ntc-r25` | f32 | ohm | RW | 100 … 1e+06 | yes | NTC resistance at 25 C. |
+| 146 | `ntc-pullup` | f32 | ohm | RW | 100 … 1e+06 | yes | Fixed divider resistor of the NTC channels. |
+| 147 | `motor-temperature` | f32 | C | RO |  |  | Filtered motor NTC temperature; NaN when off or without a reading. |
+| 148 | `ntc-topology` | u32 |  | RW | 0 … 1 | yes | NTC divider: 0 NTC to ground with pull-up, 1 NTC to the reference with pull-down. |

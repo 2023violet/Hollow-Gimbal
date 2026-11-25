@@ -118,13 +118,20 @@ enum foc_safe_fault {
     FOC_SAFE_FAULT_TRACKING_DIVERGENCE = 1U << 15,
     /** The gate driver reports a fault on its nFAULT line (board input). */
     FOC_SAFE_FAULT_DRIVER = 1U << 16,
+    /** Power-stage NTC above its trip temperature or broken (board foc_thermal). */
+    FOC_SAFE_FAULT_OVER_TEMPERATURE_FET = 1U << 17,
+    /** Motor-winding NTC above its trip temperature or broken (board foc_thermal). */
+    FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR = 1U << 18,
+    /** I²t state reached FOC_THERMAL_I2T_TRIP despite the fold-back (Runtime). */
+    FOC_SAFE_FAULT_OVERLOAD = 1U << 19,
 };
 
 /** Motor-protection causes. FAULT_CLEAR may clear these, unlike the other latched causes. */
 #define FOC_SAFE_FAULT_PROTECTION_MASK                                                          \
     (FOC_SAFE_FAULT_OVER_CURRENT | FOC_SAFE_FAULT_OVER_VOLTAGE | FOC_SAFE_FAULT_UNDER_VOLTAGE | \
      FOC_SAFE_FAULT_OVER_SPEED | FOC_SAFE_FAULT_SUSTAINED_CURRENT | FOC_SAFE_FAULT_STALL |      \
-     FOC_SAFE_FAULT_TRACKING_DIVERGENCE)
+     FOC_SAFE_FAULT_TRACKING_DIVERGENCE | FOC_SAFE_FAULT_OVER_TEMPERATURE_FET |                 \
+     FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR | FOC_SAFE_FAULT_OVERLOAD)
 
 /** Timeout and invalid-sample policy owned by the safety caller. */
 struct foc_safe_config {

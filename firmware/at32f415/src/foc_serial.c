@@ -403,6 +403,14 @@ static bool foc_serial_parameter_read(
             parameter->value = serial->can_link.status != NULL
                 ? serial->can_link.status(serial->can_link.context)
                 : 0U;
+        } else if (id == FOC_PARAM_I2T_LOAD || id == FOC_PARAM_THERMAL_CURRENT_LIMIT) {
+            float theta;
+            float limit_a;
+            if (foc_runtime_read_thermal((struct foc_runtime *)runtime, &theta, &limit_a) !=
+                FOC_RUNTIME_OK) {
+                return false;
+            }
+            parameter->value = foc_serial_float_bits(id == FOC_PARAM_I2T_LOAD ? theta : limit_a);
         } else {
             struct foc_runtime_snapshot view;
             if (foc_runtime_read_snapshot((struct foc_runtime *)runtime, &view) != FOC_RUNTIME_OK) {
@@ -549,7 +557,12 @@ static int foc_serial_parameter(
                 return trimmed;
             }
         } else {
+            const struct foc_serial_thermal_settings before = serial->thermal;
             foc_serial_field_set(serial, entry->offset, value);
+            if (!foc_serial_thermal_settings_valid(&serial->thermal)) {
+                serial->thermal = before;
+                return FOC_PROTO_INVALID_ARGUMENT;
+            }
         }
         serial->dirty = true;
         parameter.value = value;
@@ -1129,6 +1142,8 @@ void foc_serial_init_with_policy(
         .target_policy = policy == FOC_SERIAL_TARGET_VIRTUAL_ONLY ? FOC_SERIAL_TARGET_VIRTUAL_ONLY
                                                                   : FOC_SERIAL_TARGET_LOCKED,
         .can = foc_serial_can_defaults(),
+        .thermal = foc_serial_thermal_defaults(),
+        .temperature = {NAN, NAN},
     };
     struct foc_runtime_lifecycle_result lifecycle;
     if (foc_runtime_read_lifecycle_result((struct foc_runtime *)runtime, &lifecycle) ==
@@ -1212,6 +1227,33 @@ bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *setting
         foc_serial_range(settings->mit_kp_max, 0.001f, 10000.0f) &&
         foc_serial_range(settings->mit_kd_max, 0.001f, 1000.0f) &&
         settings->mit_reply <= FOC_CAN_MIT_REPLY_DAMIAO;
+}
+
+struct foc_serial_thermal_settings foc_serial_thermal_defaults(void)
+{
+    return (struct foc_serial_thermal_settings){
+        .fet = {0U, 75.0f, 95.0f},
+        .motor = {0U, 75.0f, 95.0f},
+        .beta_k = 3950.0f,
+        .r25_ohm = 10000.0f,
+        .pullup_ohm = 10000.0f,
+        .topology = 0U,
+    };
+}
+
+static bool foc_serial_thermal_sensor_valid(const struct foc_serial_thermal_sensor *sensor)
+{
+    return sensor->enabled <= 1U && foc_serial_range(sensor->derate_c, -40.0f, 150.0f) &&
+        foc_serial_range(sensor->limit_c, -40.0f, 150.0f) && sensor->derate_c < sensor->limit_c;
+}
+
+bool foc_serial_thermal_settings_valid(const struct foc_serial_thermal_settings *settings)
+{
+    return foc_serial_thermal_sensor_valid(&settings->fet) &&
+        foc_serial_thermal_sensor_valid(&settings->motor) &&
+        foc_serial_range(settings->beta_k, 1000.0f, 10000.0f) &&
+        foc_serial_range(settings->r25_ohm, 100.0f, 1.0e6f) &&
+        foc_serial_range(settings->pullup_ohm, 100.0f, 1.0e6f) && settings->topology <= 1U;
 }
 
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link)

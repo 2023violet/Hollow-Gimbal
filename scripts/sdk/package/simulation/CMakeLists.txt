@@ -7,6 +7,7 @@ add_library(
   ../g3/np/src/foc_device_sim.c
   ../g3/safe/src/foc_safe.c
   ../g3/safe/src/foc_protect.c
+  ../g3/safe/src/foc_thermal.c
 )
 target_include_directories(
   falconfoc-pipeline PUBLIC ../runtime/include ../g3/np/include ../g3/safe/include

@@ -3244,3 +3244,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 存储改为 format 9 TLV（42 个保存参数 + 启动身份 + 标定快照，最大 488 B），format 1–8 不再读取（报 INVALID_RECORD，用开机默认值）；未知 ID 忽略，缺项保持开机值，以后加参数不再升格式。保存按编码长度写入、分块回读。
 - fwinteg：`run1` 失败 159 项——`simulation/` 的 `falconfoc-virtual-device` 直接编译 `foc_serial.c` 却没编参数表，链接失败导致整个 simulation 套件没跑；补上 `foc_parameter_table.c` 后 `run2` VERDICT PASS，0 findings，三套工具链各 128 项全过。SDK 技术门禁 PASS。
 - 默认镜像 +156 B，带参数存储镜像 −860 B，RAM 不变。证据：[PARAM-01](../evidence/2026-11-24-param-01.md)。AGENTS.md、firmware/protocol/scripts/docs README 与契约第 3 节已更新（契约表格以生成表为准）。
+
+## 2026-11-25 · MIT-01 MIT 模式与 UART 阻抗设定值
+
+- Runtime：IMPEDANCE 新增 `torque_constant_from_profile`（结构体末尾），Kt = 1.5 × 极对数 × 磁链随调参重算，Kt 为 0 时模式不可选，IMPEDANCE 下允许调参；固定 Kt 的旧配置行为不变。新增 runtime 单元测试。第一次把字段放在 Kt 后面，control_plane 测试里的按位置初始化整体错位（0.4f 落进 bool），已移到末尾。
+- Board1 打开 IMPEDANCE（坐标系 `FOC_BOARD_MECHANICAL_FRAME`）。UART：SET_MODE 3、SETPOINT 模式 3（21 字节，输出端）、能力字节算法模式 15；换算在 `foc_serial_impedance()`。
+- CAN MIT（ID 128 = 1）：命令帧、FC/FD/FE/FB、回复主机 ID（ID 134：原版 6 字节默认 / 达妙 8 字节）；参数 121、128–134 进 `parameters.json`（新单位 N·m 22、N·m/rad 23），TLV 自动保存。CLI `setpoint impedance`、`can --can-command mit-*`，SIL 场景 `mit` 与 SIL 测试 `test_mit_impedance`、Python `MitCodecTests`。
+- fwinteg：`run1` 的 uart-check 失败——能力字节算法模式 7 → 15 是新差异，`uart_check.py` 尚未列为已解释；补上 `MIT_ALGORITHM_MODES` 后 `run2` VERDICT PASS，0 findings，三套工具链各 128 项全过。SDK 技术门禁 PASS。
+- 默认镜像 +2,588 B，带参数存储镜像 +2,948 B（104,060 B），RAM +48 B。证据：[MIT-01](../evidence/2026-11-25-mit-01.md)。protocol README 新增 "CAN (MIT)"，契约第 26 节，firmware/CLI README 更新。

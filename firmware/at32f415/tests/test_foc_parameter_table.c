@@ -84,7 +84,7 @@ int main(void)
     }
     CHECK(persistent > 0U);
 
-    const uint16_t absent[] = {0U, 4U, 15U, 63U, 100U, 121U, 128U, 0xFFFFU};
+    const uint16_t absent[] = {0U, 4U, 15U, 63U, 100U, 119U, 135U, 0xFFFFU};
     for (size_t index = 0U; index < sizeof absent / sizeof absent[0]; ++index) {
         CHECK(foc_parameter_find(absent[index]) == NULL);
     }

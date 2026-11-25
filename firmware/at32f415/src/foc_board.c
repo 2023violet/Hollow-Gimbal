@@ -136,6 +136,22 @@ static const struct foc_runtime_config runtime_config = {
             .position = {.kp_per_s = 4.0f, .velocity_limit_rad_s = 12.0f},
             .iq_limit_a = 2.5f,
             .trajectory = {.enabled = false},
+            /*
+             * IMPEDANCE (UART SETPOINT mode 3, CAN MIT). Kt follows the identified flux
+             * (1.5 x pole pairs x flux), so the mode is refused until CAL-4 or a model write
+             * sets one. The live q-current limit bounds the torque; the caps below are
+             * rotor-side and wide, the protocols clamp to their own ranges first.
+             */
+            .impedance =
+                {
+                    .enabled = true,
+                    .mechanical_frame_id = FOC_BOARD_MECHANICAL_FRAME,
+                    .torque_constant_from_profile = true,
+                    .torque_limit_nm = 100.0f,
+                    .max_stiffness_nm_per_rad = 500.0f,
+                    .max_damping_nm_s_per_rad = 50.0f,
+                    .max_feedforward_nm = 100.0f,
+                },
         },
     /*
      * Motor protection (contract section 12.4). 3.0 A lies between the 2.5 A control
@@ -821,6 +837,7 @@ int foc_board_encoder_complete(
         sample.valid = encoder->feedback.valid;
         sample.mechanical_rad = encoder->feedback.mechanical_rad;
         sample.mechanical_rad_s = encoder->feedback.filtered_velocity_rad_s;
+        sample.mechanical_frame_id = FOC_BOARD_MECHANICAL_FRAME;
         sample.electrical_phase_valid = sample.valid &&
             encoder->feedback.captured_us == sample.captured_us &&
             foc_rotor_phase_from_counts(

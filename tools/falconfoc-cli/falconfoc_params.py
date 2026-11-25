@@ -75,12 +75,20 @@ PARAMETER_INFO = {
     'trip-stall-ms': {'id': 117, 'type': 'u32', 'unit': 'ms', 'access': 'tuning', 'group': 'tuning', 'persist': True, 'unit_code': 20, 'calibration': False, 'min': 0, 'max': 10000, 'brief': 'Stall window.'},
     'trip-divergence-ms': {'id': 118, 'type': 'u32', 'unit': 'ms', 'access': 'tuning', 'group': 'tuning', 'persist': True, 'unit_code': 20, 'calibration': False, 'min': 0, 'max': 10000, 'brief': 'Following-error divergence window.'},
     'can-node-id': {'id': 120, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 63, 'brief': 'CANSimple node ID; 63 (0x3F) is unaddressed.'},
+    'can-master-id': {'id': 121, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 2047, 'brief': "MIT: CAN ID of the replies (the host's ID)."},
     'can-bitrate': {'id': 122, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 125000, 'max': 1000000, 'brief': 'CAN bit rate in bit/s; applies at the next boot.'},
     'can-heartbeat-ms': {'id': 123, 'type': 'u32', 'unit': 'ms', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 20, 'calibration': False, 'min': 0, 'max': 10000, 'brief': 'CAN heartbeat period; 0 off.'},
     'output-zero': {'id': 124, 'type': 'f32', 'unit': 'rad', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 2, 'calibration': False, 'min': -1000.0, 'max': 1000.0, 'brief': 'Output-position zero, output rad; host positions are relative to it.'},
     'can-estimates-ms': {'id': 125, 'type': 'u32', 'unit': 'ms', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 20, 'calibration': False, 'min': 0, 'max': 10000, 'brief': 'CAN encoder-estimate period; 0 off.'},
     'can-status': {'id': 126, 'type': 'u32', 'unit': 'none', 'access': 'ro', 'group': 'status', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAN link: state | refused << 8 | dropped << 16.'},
     'raw-faults': {'id': 127, 'type': 'u32', 'unit': 'none', 'access': 'ro', 'group': 'status', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'Raw Safety fault bits.'},
+    'can-protocol': {'id': 128, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'CAN protocol: 0 CANSimple, 1 MIT; applies at once (DISABLED only).'},
+    'mit-p-max': {'id': 129, 'type': 'f32', 'unit': 'rad', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 2, 'calibration': False, 'min': 0.01, 'max': 1000.0, 'brief': 'MIT: position range +/-P_MAX, output side, relative to the output zero.'},
+    'mit-v-max': {'id': 130, 'type': 'f32', 'unit': 'rad/s', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 3, 'calibration': False, 'min': 0.01, 'max': 1000.0, 'brief': 'MIT: velocity range +/-V_MAX, output side.'},
+    'mit-t-max': {'id': 131, 'type': 'f32', 'unit': 'N*m', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 22, 'calibration': False, 'min': 0.001, 'max': 1000.0, 'brief': 'MIT: feedforward and reply torque range +/-T_MAX, output side.'},
+    'mit-kp-max': {'id': 132, 'type': 'f32', 'unit': 'N*m/rad', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 23, 'calibration': False, 'min': 0.001, 'max': 10000.0, 'brief': 'MIT: stiffness range 0..KP_MAX, output side.'},
+    'mit-kd-max': {'id': 133, 'type': 'f32', 'unit': 'N*m*s/rad', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 16, 'calibration': False, 'min': 0.001, 'max': 1000.0, 'brief': 'MIT: damping range 0..KD_MAX, output side.'},
+    'mit-reply-format': {'id': 134, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'MIT reply: 0 original 6 bytes (ID, p, v, t), 1 DaMiao 8 bytes (error|ID, p, v, t, 0, 0).'},
 }
 
 # Name -> wire ID.

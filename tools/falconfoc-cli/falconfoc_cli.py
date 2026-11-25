@@ -34,7 +34,7 @@ RESULTS = [
     "REPLAY", "BUSY", "BAD_STATE", "OUTPUT_LOCKED", "NOT_SUPPORTED", "INTERNAL_ERROR",
     "NOT_CALIBRATED",
 ]
-MODES = {"current": 0, "velocity": 1, "position": 2}
+MODES = {"current": 0, "velocity": 1, "position": 2, "impedance": 3}
 LIFECYCLE_RESULTS = ["NONE", "PENDING", "APPLIED", "REJECTED", "CANCELLED"]
 LIFECYCLE_ACTIONS = ["NONE", "ARM", "START", "CLEAR_FAULT", "SET_MODE"]
 # Parameter IDs and wire types come from the generated table (firmware/at32f415/parameters.json).
@@ -220,9 +220,15 @@ def parameter_write(identifier, kind, value):
     return struct.pack("<HBf", identifier, 2, value)
 
 
-def setpoint(mode, first, second=0.0):
-    if not math.isfinite(first) or not math.isfinite(second):
+def setpoint(mode, first, second=0.0, *extra):
+    """SETPOINT payload. impedance takes position, velocity, kp, kd, torque (output side)."""
+    values = (first, second) + extra
+    if not all(math.isfinite(value) for value in values):
         raise ValueError("Setpoint must be finite")
+    if mode == "impedance":
+        if len(values) != 5:
+            raise ValueError("impedance needs position, velocity, kp, kd and torque")
+        return struct.pack("<B5f", MODES[mode], *values)
     return struct.pack("<Bff", MODES[mode], first, second) if mode == "current" else (
         struct.pack("<Bf", MODES[mode], first)
     )
@@ -900,7 +906,7 @@ SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
-                 "dead-time", "dead-time-comp", "can", "can-multi")
+                 "dead-time", "dead-time-comp", "can", "can-multi", "mit")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -2708,6 +2714,165 @@ def run_sil_can(simulator, base_arguments, flash_path, json_path=None):
     return summary
 
 
+def run_sil_mit(simulator, base_arguments, flash_path, json_path=None):
+    """MIT impedance control on one Board1 SIL node (parameter contract section 26): calibrate
+    over CANSimple, switch to MIT, zero, enter motor mode, hold a position, damp to a speed,
+    apply a feedforward torque, let the lease trip and clear it, exit, switch back; then the
+    same impedance law through UART SETPOINT mode 3. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    serial_number, node, master = 0xF0C0A1B2C4, 3, 0x10
+    if flash_path.exists():
+        flash_path.unlink()
+    device = falconfoc_can.MuxSimulatorNode(
+        simulator, list(base_arguments) + ["--flash", str(flash_path)], serial_number)
+    bus = falconfoc_can.SilCanBus([device])
+    client = falconfoc_can.CanSimpleClient(bus)
+    uart = Client(device)
+    uart.hello()
+    session = SilSession(uart, device)
+
+    def write(name, value):
+        identifier = PARAMETERS[name]
+        return describe(uart.call("param-write", parameter_write(
+            identifier, PARAMETER_TYPES[identifier], value)))["result"]
+
+    def state():
+        return session.status()["state"]
+
+    def still(mit, limit=0.04, steps=4000):
+        # One MIT velocity step is 2 x V_MAX / 4095 (0.032 rad/s at 65 rad/s).
+        for _ in range(steps):
+            reply = mit.special("clear")
+            if reply is not None and abs(reply["velocity_rad_s"]) < limit:
+                return reply
+        return None
+
+    # 1. Node, lease and a calibration over CANSimple (as section 25).
+    checks["node_set"] = write("can-node-id", node) == "APPLIED"
+    checks["lease_raised"] = session.tune("command-lease-us", 50000) == "APPLIED"
+    checks["commissioned"] = commission(uart) == "APPLIED"
+    client.set_axis_state(node, "motor-calibration")
+    started = _can_heartbeat(client, node, lambda hb: hb["state"] == "MOTOR_CALIBRATION", 150000)
+    done = _can_heartbeat(client, node, lambda hb: hb["state"] == "IDLE"
+                          and hb["procedure"] != "BUSY", 60000000)
+    kt = describe(uart.call("param-read", parameter_read(PARAMETERS["model-kt"])))["value"]
+    metrics["kt_nm_per_a"] = kt
+    checks["calibrated"] = (started is not None and done is not None
+                            and done["procedure"] == "SUCCESS" and kt > 0.0)
+
+    # 2. Switch to MIT over SDO; a reply in the original 6-byte format.
+    ranges = {"p": 12.5, "v": 65.0, "t": 0.5, "kp": 500.0, "kd": 5.0}
+    checks["ranges_set"] = write("mit-t-max", ranges["t"]) == "APPLIED"
+    checks["master_set"] = write("can-master-id", master) == "APPLIED"
+    checks["switched_over_sdo"] = client.sdo(node, PARAMETERS["can-protocol"], 1)[0] == 2
+    mit = falconfoc_can.MitClient(bus, node, master, ranges)
+    reply = mit.command(0.0, 0.0, 0.0, 0.0, 0.0)
+    checks["original_reply"] = reply is not None and reply["format"] == "original" and reply["node"] == node
+    checks["refused_outside_motor_mode"] = state() == SIL_STATE_DISABLED
+    checks["damiao_selected"] = write("mit-reply-format", 1) == "APPLIED"
+
+    # 3. Zero once the shaft is still.
+    rest = still(mit)
+    zeroed = mit.special("zero")
+    metrics["zero"] = {"before_rad": None if rest is None else rest["position_rad"],
+                       "after_rad": None if zeroed is None else zeroed["position_rad"]}
+    checks["zeroed"] = rest is not None and zeroed is not None and abs(zeroed["position_rad"]) < 0.002
+
+    # 4. Enter motor mode, streaming a zero-torque hold until RUNNING.
+    entered = mit.special("enter")
+    running = False
+    for _ in range(400):
+        reply = mit.command(0.0, 0.0, 0.0, 0.0, 0.0)
+        if reply is not None and reply["error"] == "ENABLED":
+            running = True
+            break
+    checks["entered"] = entered is not None and running and state() == SIL_STATE_RUNNING
+
+    def stream(target, duration_us):
+        samples = []
+        for _ in range(duration_us // (2 * mit.step_us)):
+            reply = mit.command(*target)
+            if reply is not None:
+                samples.append(reply)
+        return samples
+
+    # 5. Position hold: kp and kd only.
+    hold = stream((0.5, 0.0, 0.5, 0.01, 0.0), 1500000)
+    final = hold[-1]["position_rad"] if hold else None
+    metrics["position"] = {"target_rad": 0.5, "final_rad": final,
+                           "peak_rad": max((s["position_rad"] for s in hold), default=None)}
+    checks["position_holds"] = final is not None and abs(final - 0.5) < 0.02
+    # 6. Velocity damping: kd only, toward 5 rad/s. Against the plant's viscous damping B
+    # (SIL default 0.006 N*m*s/rad, gear 1) the steady state is kd * v / (kd + B).
+    damp = stream((0.0, 5.0, 0.0, 0.02, 0.0), 1000000)
+    tail = damp[len(damp) // 2:]
+    mean_velocity = sum(s["velocity_rad_s"] for s in tail) / max(len(tail), 1)
+    expected_velocity = 0.02 * 5.0 / (0.02 + 0.006)
+    metrics["velocity"] = {"target_rad_s": 5.0, "expected_rad_s": expected_velocity,
+                           "mean_rad_s": mean_velocity}
+    checks["velocity_damps"] = bool(tail) and abs(mean_velocity / expected_velocity - 1.0) < 0.05
+    stream((0.0, 0.0, 0.0, 0.02, 0.0), 500000)
+    # 7. Feedforward torque only: the reply torque follows it.
+    push = stream((0.0, 0.0, 0.0, 0.0, 0.004), 40000)
+    torques = [s["torque_nm"] for s in push[len(push) // 2:]]
+    mean_torque = sum(torques) / max(len(torques), 1)
+    metrics["torque"] = {"target_nm": 0.004, "mean_reply_nm": mean_torque,
+                         "velocity_gain_rad_s": push[-1]["velocity_rad_s"] - push[0]["velocity_rad_s"]
+                         if push else None}
+    checks["torque_feedforward"] = bool(torques) and abs(mean_torque - 0.004) < 0.0015 and \
+        metrics["torque"]["velocity_gain_rad_s"] > 0.0
+    stream((0.0, 0.0, 0.0, 0.02, 0.0), 500000)
+    # 8. Stop streaming: the lease trips; the reply reports it and FB clears it.
+    for _ in range(200):
+        mit.step()
+    tripped = mit.command(0.0, 0.0, 0.0, 0.0, 0.0)
+    cleared = None
+    for _ in range(50):
+        cleared = mit.special("clear")
+        if cleared is not None and cleared["error"] == "DISABLED":
+            break
+    checks["lease_trip_reported"] = tripped is not None and tripped["error"] == "COMMUNICATION_LOST"
+    checks["cleared"] = cleared is not None and cleared["error"] == "DISABLED"
+    # 9. Exit answers; switching back restores the CANSimple heartbeat.
+    checks["exit_answers"] = mit.special("exit") is not None
+    checks["switched_back"] = write("can-protocol", 0) == "APPLIED"
+    beat = _can_heartbeat(client, node, lambda hb: True, 150000)
+    checks["cansimple_back"] = beat is not None
+
+    # 10. UART SETPOINT mode 3: the same law over UART.
+    still_rest = None
+    for _ in range(4000):
+        status = describe(uart.call("telemetry"))
+        if abs(status.get("velocity_rad_s", 1.0)) < 0.005:
+            still_rest = status
+            break
+    position_now = still_rest["position_rad"] if still_rest else 0.0
+    hold_payload = setpoint("impedance", position_now, 0.0, 0.0, 0.0, 0.0)
+    checks["uart_set_mode"] = session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="impedance") == "APPLIED"
+    checks["uart_arm"] = session.lifecycle("arm", SIL_STATE_ARMED, hold_payload) == "APPLIED"
+    checks["uart_start"] = session.lifecycle("start", SIL_STATE_RUNNING, hold_payload) == "APPLIED"
+    target = position_now + 0.3
+    accepted = 0
+    for _ in range(2000):
+        accepted += session.call("setpoint", setpoint("impedance", target, 0.0, 0.5, 0.01, 0.0),
+                                 quiet=True)["result"] == "ACCEPTED"
+    final_uart = describe(uart.call("telemetry")).get("position_rad")
+    metrics["uart"] = {"target_rad": target, "final_rad": final_uart, "accepted": accepted}
+    checks["uart_impedance_holds"] = final_uart is not None and abs(final_uart - target) < 0.02
+    session.stop()
+    device.__exit__()
+
+    summary = {"scenario": "mit", "status": "SIL_PASS" if all(checks.values()) else "SIL_FAIL",
+               "checks": checks, "metrics": metrics, "physical_applied": False}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2, allow_nan=False),
+                                           encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_can_multi(simulator, base_arguments, json_path=None):
     """Two Board1 SIL nodes on one virtual CAN bus: both discovered unaddressed, assigned
     nodes 1 and 2 by serial number, cyclic periods set per node, driven at different
@@ -3251,6 +3416,13 @@ def can_command(args, parser):
             client.set_input(args.node, mode, args.value)
         elif args.can_command == "save":
             client.send(args.node, "reboot", b"\x01")
+        elif args.can_command.startswith("mit-"):
+            mit = falconfoc_can.MitClient(bus, args.node, args.master_id, step_us=client.step_us)
+            if args.can_command == "mit-cmd":
+                out["reply"] = mit.command(args.position, args.velocity, args.kp, args.kd,
+                                           args.torque, steps=10)
+            else:
+                out["reply"] = mit.special(args.can_command[4:], steps=10)
         elif args.can_command in ("read", "write"):
             identifier = PARAMETERS[args.param] if args.param else args.id
             kind = PARAMETER_TYPES.get(identifier, "f32") if args.param else args.type
@@ -3389,9 +3561,18 @@ def main():
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
     parser.add_argument("--hex", default="", help="Wire hex for decode, including delimiter")
     parser.add_argument("--can-command", choices=("scan", "assign", "state", "mode", "set", "read",
-                                                  "write", "watch", "save"),
+                                                  "write", "watch", "save", "mit-enter", "mit-exit", "mit-zero", "mit-clear", "mit-cmd"),
                         help="can: CANSimple command")
     parser.add_argument("--can-interface", help="can: python-can interface (slcan, gs_usb, ...)")
+    parser.add_argument("--master-id", type=lambda text: int(text, 0), default=0,
+                        help="can mit-*: CAN ID of the replies (ID 121)")
+    parser.add_argument("--mit-position", type=float, default=0.0, dest="position",
+                        help="can mit-cmd: output position in rad")
+    parser.add_argument("--mit-velocity", type=float, default=0.0, dest="velocity",
+                        help="can mit-cmd: output velocity in rad/s")
+    parser.add_argument("--kp", type=float, default=0.0, help="can mit-cmd: stiffness N*m/rad")
+    parser.add_argument("--kd", type=float, default=0.0, help="can mit-cmd: damping N*m*s/rad")
+    parser.add_argument("--torque", type=float, default=0.0, help="can mit-cmd: torque N*m")
     parser.add_argument("--can-channel", help="can: python-can channel (COM5, can0, ...)")
     parser.add_argument("--can-bitrate", type=int, default=1000000)
     parser.add_argument("--can-serial", type=lambda value: int(value, 0), default=0xF0C0000001,
@@ -3594,10 +3775,15 @@ def main():
                 )
             if args.action == "sil-demo" and args.sil_scenario == "calibrate":
                 simulator_arguments += SIL_CALIBRATE_ARGUMENTS
-            if args.action == "sil-demo" and args.sil_scenario in ("can", "can-multi"):
+            if args.action == "sil-demo" and args.sil_scenario in ("can", "can-multi", "mit"):
                 if args.sil_lockstep_us <= 0:
                     parser.error("the CAN scenarios step a virtual bus: give --sil-lockstep-us")
-                if args.sil_scenario == "can-multi":
+                if args.sil_scenario == "mit":
+                    flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                        "sil-mit-flash.bin"))
+                    summary = run_sil_mit(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                elif args.sil_scenario == "can-multi":
                     summary = run_sil_can_multi(os.path.abspath(args.simulator),
                                                 simulator_arguments, args.json)
                 else:

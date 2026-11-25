@@ -83,7 +83,7 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 01 | HELLO | Empty, session 0 | 9-byte capability, new session in header |
 | 02 | CAPABILITY_READ | Empty | 9-byte capability |
 | 03 | STATUS_READ | Empty | 30-byte status |
-| 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), or mode u8 + reference f32 for velocity/position (5 bytes); velocity and position are output-side (see Output frame) | ACCEPTED + Runtime publication u32 (5 bytes) |
+| 10 | COMMAND_SETPOINT | mode u8 + d/q f32 for current (9 bytes), mode u8 + reference f32 for velocity/position (5 bytes), or mode 3 + position, velocity, stiffness, damping, torque f32 for impedance (21 bytes); all output-side (see Output frame) | ACCEPTED + Runtime publication u32 (5 bytes) |
 | 11 | COMMAND_STOP | Empty | ACCEPTED, query status for H0 acknowledgement |
 | 12 / 13 | COMMAND_ARM / COMMAND_START | Empty | OUTPUT_LOCKED on Board1; on Host virtual targets (virtual device, Board1 SIL) ACCEPTED + lifecycle request u32 (5 bytes) |
 | 14 | COMMAND_SET_MODE | mode u8 | ACCEPTED + lifecycle request u32 (5 bytes); BAD_STATE unless DISABLED with INHIBIT confirmed |
@@ -103,8 +103,13 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 53 | COMMUTATION_WRITE | pole pairs u16 (1–64) + encoder direction i8 (+1/−1) + electrical offset f32 rad [0, 2π) | APPLIED (group source HOST); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY during a run or pending tuning; INVALID_ARGUMENT out of range |
 | 54 | SET_ZERO | Empty | APPLIED + zero offset f32 output rad (5 bytes): the present output position becomes zero (ID 124); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY without a fresh sensor or during a calibration run; PARAM_SAVE stores it |
 
-Modes are CURRENT 0, VELOCITY 1 and POSITION 2. Units are A, mechanical rad/s
-and continuous mechanical rad. Setpoints must match the current Runtime mode.
+Modes are CURRENT 0, VELOCITY 1, POSITION 2 and IMPEDANCE 3. Units are A, mechanical rad/s
+and continuous mechanical rad. Setpoints must match the current Runtime mode. IMPEDANCE
+applies τ = Kp (p − p_meas) + Kd (v − v_meas) + τ_ff on the output side (rad, rad/s,
+N·m/rad, N·m·s/rad, N·m), converted to the rotor with the gear ratio (position and speed
+× gear, Kp and Kd ÷ gear², torque ÷ gear) and to q current with Kt = 1.5 × pole pairs ×
+flux (ID 84); the live q-current limit bounds it. It needs an identified flux: SET_MODE 3
+is refused while ID 84 is 0. The same law serves CAN MIT (contract 26).
 The reference firmware starts in CURRENT. COMMAND_SET_MODE selects another mode
 while DISABLED; it changes software control state only, so the locked Board1
 image accepts it too. Capability differentiates available algorithms from
@@ -192,7 +197,7 @@ applied clear:
 
 Capability response bytes are result, protocol version, three firmware version
 bytes, algorithm mode bitmask, physical mode bitmask, and capability u16.
-Current values are protocol 1, firmware 0.1.0, algorithms 7, physical modes 0,
+Current values are protocol 1, firmware 0.1.0, algorithms 15 (bit 3 IMPEDANCE), physical modes 0,
 and capabilities 63 plus 64 for persistent storage and 128 for on-MCU
 calibration. Capability bits are output lock 0, RAM policy parameters 1,
 polling telemetry 2, UART transport 3, remote mode switch 4, controller tuning
@@ -237,7 +242,8 @@ nothing there is implemented until it appears here.
 A parameter response is result, ID u16, type u8, unit u8, attributes u8, minimum,
 maximum and value. The final three values occupy four bytes each and use the
 declared type. Types are u32 1 and f32 2. Units are dimensionless 0, A 1, rad 2,
-rad/s 3, raw ADC counts 4. Attribute bits are writable 0, applied to RAM 1 and
+rad/s 3, raw ADC counts 4, ... (full list in [docs/parameters.md](../docs/parameters.md)
+and `scripts/gen/gen_parameters.py`; N·m 22 and N·m/rad 23 were added for MIT). Attribute bits are writable 0, applied to RAM 1 and
 calibration required 2.
 
 | ID | Parameter | Type | Range / initial value |
@@ -687,3 +693,29 @@ dropped frames), ID 127 read-only raw faults. IDs 120–125 are saved by PARAM_S
 Bit timing: APB1 75 MHz, 15 quanta (1 + 12 + 2), sample point 86.7 %, SJW 1; automatic
 bus-off recovery. The HICK fallback clock is too inaccurate for CAN: CAN stays off.
 `protocol/tests/cansimple_vectors.tsv` holds example frames.
+
+## CAN (MIT)
+
+With ID 128 = 1 the CAN port speaks the MIT (mini-cheetah) frames instead of CANSimple;
+CANSimple frames, cyclic heartbeats and estimates stop. Switch while DISABLED (UART or a
+CANSimple SDO to ID 128; back with UART or the CANSimple SDO before switching).
+
+- Command to the node ID (ID 120), standard 11-bit, 8 bytes, big-endian bit packing:
+  position 16 bits in ±P_MAX (ID 129, output rad relative to the output zero), velocity
+  12 bits in ±V_MAX (ID 130), Kp 12 bits in 0..KP_MAX (ID 132), Kd 12 bits in 0..KD_MAX
+  (ID 133), torque 12 bits in ±T_MAX (ID 131). It goes through UART SETPOINT mode 3, so
+  the command lease (ID 74, default 2.5 ms) is the watchdog: stream at 400 Hz or more, or
+  raise it. Outside motor mode a command is refused (counted in ID 126) but answered.
+- Special frames (bytes 0–6 0xFF): 0xFC enter motor mode (SET_MODE IMPEDANCE, a zero-torque
+  hold at the present position, ARM, START; refused without an identified flux), 0xFD
+  exit (STOP), 0xFE zero (DISABLED only: the present output position becomes 0, ID 124 in
+  RAM; PARAM_SAVE stores it), 0xFB clear faults (DaMiao).
+- Every frame to the node is answered on the master ID (ID 121). ID 134 = 0, original,
+  6 bytes: node, position 16, velocity 12, torque 12 (measured q current × Kt × gear).
+  ID 134 = 1, DaMiao, 8 bytes: error << 4 | node (low 4 bits), position, velocity, torque,
+  two temperature bytes (0: no sensor). Errors: 0 disabled, 1 enabled, 8 over-voltage,
+  9 under-voltage, A over-current, D command lease expired, E any other latched fault.
+
+Ranges default to P_MAX 12.5 rad, V_MAX 65 rad/s, T_MAX 1 N·m, KP_MAX 500, KD_MAX 5; the
+host must use the device's values. P_MAX × gear must stay within the Runtime's 1024 rad
+rotor range, and V_MAX × gear within the velocity limit, or the commands are refused.

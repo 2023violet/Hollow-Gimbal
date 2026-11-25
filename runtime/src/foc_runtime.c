@@ -324,11 +324,29 @@ static bool foc_runtime_outer_mode(enum foc_runtime_mode mode)
 
 static bool foc_runtime_mode_enabled(const struct foc_runtime *runtime, enum foc_runtime_mode mode)
 {
+    const struct foc_runtime_impedance_config *impedance = &runtime->config.motion.impedance;
     return ((mode == FOC_RUNTIME_MODE_CURRENT || mode == FOC_RUNTIME_MODE_CALIBRATION) &&
             !runtime->config.motion.limits.enabled) ||
         (runtime->config.motion.enabled &&
          (foc_runtime_cascade_mode(mode) ||
-          (mode == FOC_RUNTIME_MODE_IMPEDANCE && runtime->config.motion.impedance.enabled)));
+          (mode == FOC_RUNTIME_MODE_IMPEDANCE && impedance->enabled &&
+           impedance->torque_constant_nm_per_a > 0.0f)));
+}
+
+/* 1.5 x pole pairs x flux linkage of the live profile; zero without a usable flux. */
+static float foc_runtime_profile_torque_constant(const struct foc_runtime_config *config)
+{
+    const float kt = 1.5f * (float)config->motion.rotor.pole_pairs * config->profile.flux_wb;
+    return isfinite(kt) && kt > 0.0f ? kt : 0.0f;
+}
+
+/* Refresh a profile-derived impedance torque constant after the profile or rotor changed. */
+static void foc_runtime_impedance_refresh(struct foc_runtime_config *config)
+{
+    struct foc_runtime_impedance_config *impedance = &config->motion.impedance;
+    if (impedance->enabled && impedance->torque_constant_from_profile) {
+        impedance->torque_constant_nm_per_a = foc_runtime_profile_torque_constant(config);
+    }
 }
 
 static bool foc_runtime_protection_enabled(const struct foc_runtime_motion_config *motion)
@@ -1478,16 +1496,17 @@ static int foc_runtime_publish_reference(
 static bool foc_runtime_impedance_policy_valid(const struct foc_runtime_motion_config *motion)
 {
     const struct foc_runtime_impedance_config *policy = &motion->impedance;
+    const bool kt_valid = policy->torque_constant_from_profile ||
+        (isfinite(policy->torque_constant_nm_per_a) && policy->torque_constant_nm_per_a > 0.0f &&
+         isfinite(policy->torque_constant_nm_per_a * motion->iq_limit_a));
     return !policy->enabled ||
-        (motion->enabled && policy->mechanical_frame_id != 0U &&
-         isfinite(policy->torque_constant_nm_per_a) && policy->torque_constant_nm_per_a > 0.0f &&
+        (motion->enabled && policy->mechanical_frame_id != 0U && kt_valid &&
          isfinite(policy->torque_limit_nm) && policy->torque_limit_nm > 0.0f &&
          isfinite(policy->max_stiffness_nm_per_rad) && policy->max_stiffness_nm_per_rad >= 0.0f &&
          isfinite(policy->max_damping_nm_s_per_rad) && policy->max_damping_nm_s_per_rad >= 0.0f &&
          isfinite(policy->max_feedforward_nm) && policy->max_feedforward_nm >= 0.0f &&
          (policy->damping_filter_hz == 0.0f ||
-          (policy->damping_filter_hz >= 1.0f && policy->damping_filter_hz <= 200.0f)) &&
-         isfinite(policy->torque_constant_nm_per_a * motion->iq_limit_a));
+          (policy->damping_filter_hz >= 1.0f && policy->damping_filter_hz <= 200.0f)));
 }
 
 static bool foc_runtime_protection_valid(const struct foc_runtime_motion_config *motion)
@@ -1563,7 +1582,9 @@ static int foc_runtime_tuning_check(
         return FOC_RUNTIME_ERR_CONFIG;
     }
     if (tuning == NULL || runtime->pipeline.feedforward.enabled ||
-        runtime->config.motion.impedance.enabled || !isfinite(tuning->current_limit_a) ||
+        (runtime->config.motion.impedance.enabled &&
+         !runtime->config.motion.impedance.torque_constant_from_profile) ||
+        !isfinite(tuning->current_limit_a) ||
         (!runtime->config.motion.enabled &&
          (tuning->accel_rad_s2 != 0.0f || tuning->decel_rad_s2 != 0.0f)) ||
         tuning->command_timeout_us < FOC_RUNTIME_LEASE_MIN_US ||
@@ -1629,6 +1650,7 @@ static void foc_runtime_tuning_commit(
         runtime->protect = *protect;
     }
     runtime->config.profile = tuning->profile;
+    foc_runtime_impedance_refresh(&runtime->config);
     if (runtime->config.motion.enabled) {
         runtime->outer_velocity = *velocity;
         runtime->config.motion.velocity = velocity->config;
@@ -1915,6 +1937,7 @@ int foc_runtime_init(
 #if defined(FOC_RUNTIME_HOST_COGGING)
     runtime->config.motion.cogging.enabled = foc_runtime_cogging_valid(&config->motion);
 #endif
+    foc_runtime_impedance_refresh(&runtime->config);
     runtime->config.motion.trajectory = motion_config.trajectory;
     runtime->trajectory_trial = trajectory;
     atomic_init(&runtime->sensor_slot, FOC_RUNTIME_UNPUBLISHED);

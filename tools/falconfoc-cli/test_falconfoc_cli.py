@@ -241,6 +241,29 @@ class DeviceTests(unittest.TestCase):
 
 
 
+class MitCodecTests(unittest.TestCase):
+    def test_rest_command_and_reply(self):
+        """Matches the firmware test: zero targets sit mid-range, gains at zero."""
+        import falconfoc_can as can
+        self.assertEqual(can.mit_command(0.0, 0.0, 0.0, 0.0, 0.0),
+                         bytes([0x80, 0x00, 0x80, 0x00, 0x00, 0x00, 0x08, 0x00]))
+        reply = can.decode_mit_reply(can.CanFrame(0x10, bytes([5, 0x80, 0x00, 0x80, 0x08, 0x00])))
+        self.assertEqual((reply["format"], reply["node"]), ("original", 5))
+        self.assertLess(abs(reply["position_rad"]), 0.001)
+        damiao = can.decode_mit_reply(can.CanFrame(0x10, bytes([0xD5, 0x80, 0x00, 0x80, 0x08, 0x00, 0, 0])))
+        self.assertEqual((damiao["node"], damiao["error"]), (5, "COMMUNICATION_LOST"))
+
+    def test_round_trip_and_clamp(self):
+        import falconfoc_can as can
+        frame = can.CanFrame(0x10, bytes([3]) + can.mit_command(1.25, -6.5, 100.0, 1.0, 0.5)[:5])
+        data = can.mit_command(1.25, -6.5, 100.0, 1.0, 0.5)
+        p = data[0] << 8 | data[1]
+        self.assertLess(abs(can.mit_value(p, -12.5, 12.5, 16) - 1.25), 25.0 / 65535)
+        self.assertEqual(can.mit_command(99.0, 0.0, 0.0, 0.0, 0.0)[:2], b"\xff\xff")
+        self.assertEqual(can.mit_special("enter"), b"\xff" * 7 + b"\xfc")
+        self.assertIsNotNone(frame)
+
+
 class CanSimpleVectorTests(unittest.TestCase):
     """The Host CANSimple client encodes protocol/tests/cansimple_vectors.tsv."""
 

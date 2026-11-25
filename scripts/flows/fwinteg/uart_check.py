@@ -39,8 +39,10 @@ def records(text):
 # capability bits 4/5 (remote mode switch, controller tuning), the 12 bytes M1 appended
 # to TELEMETRY_READ and the 8 bytes P1 appended (rotor position and velocity; bytes
 # 38/42 are output-side but equal the rotor side at the boot gear ratio 1 and zero 0).
+# MIT-01 adds algorithm mode bit 3 (IMPEDANCE): the mode bitmask goes from 7 to 15.
 # Only these are tolerated; anything else still fails the check.
 M1_CAPABILITIES = {"baseline": 15, "current": 63}
+MIT_ALGORITHM_MODES = {"baseline": 7, "current": 15}
 M1_TELEMETRY_KEYS = ("id_target_a", "iq_target_a", "tuning_revision",
                      "rotor_position_rad", "rotor_velocity_rad_s")
 
@@ -52,6 +54,10 @@ def explained(record, role):
             return record
         record["capabilities"] = "M1"
         record.pop("payload_hex", None)
+        if "algorithm_modes" in record:
+            if record["algorithm_modes"] != MIT_ALGORITHM_MODES[role]:
+                return record
+            record["algorithm_modes"] = "MIT"
     if record.get("message") == "telemetry":
         if role == "current" and not all(key in record for key in M1_TELEMETRY_KEYS):
             return record

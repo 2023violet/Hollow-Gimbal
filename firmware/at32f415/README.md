@@ -262,6 +262,16 @@ not carry, so adding a parameter needs no new format. The fixed-offset formats 1
 are no longer read: such a record reports INVALID_RECORD (ID 48 = 3) and the boot
 configuration stays in use.
 
+### IMPEDANCE and CAN MIT
+
+Board1 enables the Runtime IMPEDANCE mode with a profile-derived torque constant
+(`torque_constant_from_profile`): Kt = 1.5 × pole pairs × flux follows every applied
+tuning, controller tuning stays available, and the mode is refused until a flux is
+identified. Samples carry `FOC_BOARD_MECHANICAL_FRAME`. UART SETPOINT mode 3 and the CAN MIT
+protocol (`foc_can.c`, ID 128 = 1) publish through `foc_serial_impedance()`, which
+converts output-side targets to the rotor. `sil-demo --sil-scenario mit` runs it end to end
+([protocol README](../../protocol/README.md#can-mit), contract 26).
+
 ### Parameter table
 
 `parameters.json` is the single source of every UART/CAN parameter: ID, CLI name,

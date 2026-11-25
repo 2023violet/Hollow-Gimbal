@@ -108,7 +108,8 @@ foc_serial_capability(const struct foc_serial *serial, struct foc_protocol_frame
         (uint8_t)(CAPABILITY_BITS |
                   (serial->persistence.save != NULL ? CAPABILITY_PERSISTENCE : 0) |
                   (serial->calibration.start != NULL ? CAPABILITY_CALIBRATION : 0));
-    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 7, 0, bits, 0};
+    /* Algorithm modes: CURRENT, VELOCITY, POSITION and IMPEDANCE (bits 0-3). */
+    const uint8_t capability[] = {FOC_PROTO_OK, 1, 0, 1, 0, 15, 0, bits, 0};
     memcpy(response->payload, capability, sizeof capability);
     response->length = sizeof capability;
 }
@@ -565,6 +566,64 @@ static int foc_serial_parameter(
     return writing ? FOC_PROTO_APPLIED : FOC_PROTO_OK;
 }
 
+int foc_serial_impedance(
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    const float target[5],
+    uint32_t now_us
+)
+{
+    /* Output side in, rotor side out: position plus the output zero and velocity scale
+     * by the gear ratio, stiffness and damping by its inverse square, torque by its
+     * inverse (output torque = gear x rotor torque). */
+    const float gear = foc_serial_gear_ratio(runtime);
+    for (unsigned int index = 0U; index < 5U; ++index) {
+        if (!isfinite(target[index])) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
+    }
+    const float position = (target[0] + serial->output_zero_rad) * gear;
+    const float velocity = target[1] * gear;
+    if (fabsf(target[0]) > serial->position_limit_rad || !isfinite(position) ||
+        fabsf(position) > FOC_RUNTIME_IMPEDANCE_POSITION_LIMIT_RAD ||
+        fabsf(velocity) > runtime->config.motion.position.velocity_limit_rad_s ||
+        !(target[2] >= 0.0f) || !(target[3] >= 0.0f)) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BUSY;
+    }
+    if (view.state == FOC_SAFE_STATE_FAULT_LATCHED || view.inhibit_pending ||
+        view.mode != FOC_RUNTIME_MODE_IMPEDANCE) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    const uint32_t seq = serial->publication_seq + 1U;
+    const struct foc_runtime_command command = {
+        .mode = FOC_RUNTIME_MODE_IMPEDANCE,
+        .seq = seq,
+        .produced_us = now_us,
+        .target.impedance = {
+            .position_rad = position,
+            .velocity_rad_s = velocity,
+            .stiffness_nm_per_rad = target[2] / (gear * gear),
+            .damping_nm_s_per_rad = target[3] / (gear * gear),
+            .torque_feedforward_nm = target[4] / gear,
+            .mechanical_frame_id = runtime->config.motion.impedance.mechanical_frame_id,
+            .source_session = view.motion_session,
+        },
+    };
+    const int result = foc_runtime_publish_impedance_command(runtime, &command, now_us);
+    if (result == FOC_RUNTIME_ERR_INPUT || result == FOC_RUNTIME_ERR_MOTION_LIMIT) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    if (result != FOC_RUNTIME_OK) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    serial->publication_seq = seq;
+    return FOC_PROTO_ACCEPTED;
+}
+
 static int foc_serial_setpoint(
     struct foc_serial *serial,
     struct foc_runtime *runtime,
@@ -572,10 +631,20 @@ static int foc_serial_setpoint(
     uint32_t now_us
 )
 {
-    if (request->length != 5U && request->length != 9U) {
-        return FOC_PROTO_INVALID_ARGUMENT;
+    const uint8_t mode = request->length > 0U ? request->payload[0] : 0xFFU;
+    if (mode == FOC_RUNTIME_MODE_IMPEDANCE) {
+        /* Mode 3: position, velocity, stiffness, damping and feedforward torque, f32 each,
+         * output side. */
+        float target[5];
+        if (request->length != 21U) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
+        for (unsigned int index = 0U; index < 5U; ++index) {
+            target[index] =
+                foc_serial_bits_float(foc_protocol_read_u32(request->payload + 1U + 4U * index));
+        }
+        return foc_serial_impedance(serial, runtime, target, now_us);
     }
-    const uint8_t mode = request->payload[0];
     if (mode > FOC_RUNTIME_MODE_POSITION ||
         request->length != (mode == FOC_RUNTIME_MODE_CURRENT ? 9U : 5U)) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -888,7 +957,7 @@ static int foc_serial_dispatch(
     }
     if (request->type == FOC_MSG_SET_MODE) {
         /* Mode selection changes software control state only; output policy is unchanged. */
-        if (request->length != 1U || request->payload[0] > FOC_RUNTIME_MODE_POSITION) {
+        if (request->length != 1U || request->payload[0] > FOC_RUNTIME_MODE_IMPEDANCE) {
             return FOC_PROTO_INVALID_ARGUMENT;
         }
         return foc_serial_lifecycle(
@@ -1114,7 +1183,20 @@ struct foc_serial_can_settings foc_serial_can_defaults(void)
         .bitrate = 1000000U,
         .heartbeat_ms = 100U,
         .estimates_ms = 10U,
+        .protocol = FOC_CAN_PROTOCOL_CANSIMPLE,
+        .master_id = 0U,
+        .mit_p_max = 12.5f,
+        .mit_v_max = 65.0f,
+        .mit_t_max = 1.0f,
+        .mit_kp_max = 500.0f,
+        .mit_kd_max = 5.0f,
+        .mit_reply = FOC_CAN_MIT_REPLY_ORIGINAL,
     };
+}
+
+static bool foc_serial_range(float value, float minimum, float maximum)
+{
+    return isfinite(value) && value >= minimum && value <= maximum;
 }
 
 bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *settings)
@@ -1122,7 +1204,14 @@ bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *setting
     const uint32_t rate = settings->bitrate;
     return settings->node_id <= 63U &&
         (rate == 125000U || rate == 250000U || rate == 500000U || rate == 1000000U) &&
-        settings->heartbeat_ms <= 10000U && settings->estimates_ms <= 10000U;
+        settings->heartbeat_ms <= 10000U && settings->estimates_ms <= 10000U &&
+        settings->protocol <= FOC_CAN_PROTOCOL_MIT && settings->master_id <= 2047U &&
+        foc_serial_range(settings->mit_p_max, 0.01f, 1000.0f) &&
+        foc_serial_range(settings->mit_v_max, 0.01f, 1000.0f) &&
+        foc_serial_range(settings->mit_t_max, 0.001f, 1000.0f) &&
+        foc_serial_range(settings->mit_kp_max, 0.001f, 10000.0f) &&
+        foc_serial_range(settings->mit_kd_max, 0.001f, 1000.0f) &&
+        settings->mit_reply <= FOC_CAN_MIT_REPLY_DAMIAO;
 }
 
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link)

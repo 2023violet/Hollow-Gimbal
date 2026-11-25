@@ -367,7 +367,8 @@ struct foc_runtime_impedance_config {
     bool enabled;
     /** Expected nonzero identity of the shared continuous mechanical frame. */
     uint32_t mechanical_frame_id;
-    /** Caller-qualified positive motor torque constant, in N*m/A. */
+    /** Caller-qualified positive motor torque constant, in N*m/A. Ignored on input and
+     * maintained by the Runtime when torque_constant_from_profile is set. */
     float torque_constant_nm_per_a;
     /** Positive symmetric torque cap, in N*m. */
     float torque_limit_nm;
@@ -379,6 +380,14 @@ struct foc_runtime_impedance_config {
     float max_feedforward_nm;
     /** Optional H1 damping error cutoff in Hz. Zero preserves unfiltered damping. */
     float damping_filter_hz;
+    /**
+     * Last so positional initializers of the fields above keep their meaning.
+     * Derive the torque constant from the live profile and rotor: 1.5 x pole pairs x flux
+     * linkage, at init and on every applied tuning. Controller tuning stays available, and
+     * IMPEDANCE is refused while the derived value is zero (no flux yet). Without it the
+     * constant is fixed and tuning is refused while impedance is enabled.
+     */
+    bool torque_constant_from_profile;
 };
 
 #if defined(FOC_RUNTIME_HOST_COGGING)

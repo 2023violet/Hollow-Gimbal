@@ -267,6 +267,18 @@ class Board1SilTest(unittest.TestCase):
                                                  Path(folder) / "flash.bin")
         self.assertEqual(summary["status"], "SIL_PASS", summary)
 
+    def test_mit_impedance(self):
+        """MIT on CAN: switch over SDO, zero, enter, position hold, velocity damping, torque
+        feedforward, lease trip in the DaMiao error nibble, clear, exit, switch back; and the
+        same law over UART SETPOINT mode 3."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_mit(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+        metrics = summary["metrics"]
+        self.assertLess(abs(metrics["position"]["final_rad"] - 0.5), 0.02)
+        self.assertLess(abs(metrics["torque"]["mean_reply_nm"] - 0.004), 0.0015)
+
     def test_cansimple_single_node(self):
         """CANSimple on one node: discovery, assignment, cyclic frames, SDO, calibration
         over CAN, velocity/position/torque, lease watchdog, Estop, save and power cycle."""

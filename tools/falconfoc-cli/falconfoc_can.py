@@ -288,6 +288,90 @@ class PythonCanBus:
         self.bus.shutdown()
 
 
+# MIT protocol (ID 128 = 1) ----------------------------------------------------------------
+
+MIT_SPECIAL = {"enter": 0xFC, "exit": 0xFD, "zero": 0xFE, "clear": 0xFB}
+# Defaults of IDs 129-133; a host must use the device's values.
+MIT_RANGES = {"p": 12.5, "v": 65.0, "t": 1.0, "kp": 500.0, "kd": 5.0}
+DAMIAO_ERRORS = {0x0: "DISABLED", 0x1: "ENABLED", 0x8: "OVER_VOLTAGE", 0x9: "UNDER_VOLTAGE",
+                 0xA: "OVER_CURRENT", 0xD: "COMMUNICATION_LOST", 0xE: "OTHER"}
+
+
+def mit_quantize(value, low, high, bits):
+    top = (1 << bits) - 1
+    scaled = (value - low) * top / (high - low)
+    return int(min(max(scaled, 0.0), top) + 0.5)
+
+
+def mit_value(code, low, high, bits):
+    return low + code * (high - low) / ((1 << bits) - 1)
+
+
+def mit_command(position, velocity, kp, kd, torque, ranges=MIT_RANGES):
+    """8-byte MIT command: p 16 bits, v 12, kp 12, kd 12, t 12, output side."""
+    p = mit_quantize(position, -ranges["p"], ranges["p"], 16)
+    v = mit_quantize(velocity, -ranges["v"], ranges["v"], 12)
+    a = mit_quantize(kp, 0.0, ranges["kp"], 12)
+    d = mit_quantize(kd, 0.0, ranges["kd"], 12)
+    t = mit_quantize(torque, -ranges["t"], ranges["t"], 12)
+    return bytes([p >> 8, p & 0xFF, v >> 4, (v & 0xF) << 4 | a >> 8, a & 0xFF, d >> 4,
+                  (d & 0xF) << 4 | t >> 8, t & 0xFF])
+
+
+def mit_special(name):
+    return b"\xff" * 7 + bytes([MIT_SPECIAL[name]])
+
+
+def decode_mit_reply(frame, ranges=MIT_RANGES):
+    """Original 6-byte or DaMiao 8-byte reply to the master ID."""
+    data = frame.data
+    if len(data) not in (6, 8):
+        return None
+    p = data[1] << 8 | data[2]
+    v = data[3] << 4 | data[4] >> 4
+    t = (data[4] & 0xF) << 8 | data[5]
+    damiao = len(data) == 8
+    return {"format": "damiao" if damiao else "original",
+            "node": data[0] & 0x0F if damiao else data[0],
+            "error": DAMIAO_ERRORS.get(data[0] >> 4, data[0] >> 4) if damiao else None,
+            "position_rad": mit_value(p, -ranges["p"], ranges["p"], 16),
+            "velocity_rad_s": mit_value(v, -ranges["v"], ranges["v"], 12),
+            "torque_nm": mit_value(t, -ranges["t"], ranges["t"], 12)}
+
+
+class MitClient:
+    """MIT frames to one node; replies arrive on the master ID."""
+
+    def __init__(self, bus, node, master, ranges=None, step_us=500):
+        self.bus, self.node, self.master, self.step_us = bus, node, master, step_us
+        self.ranges = dict(MIT_RANGES if ranges is None else ranges)
+
+    def send(self, data):
+        self.bus.send(CanFrame(self.node, data))
+
+    def step(self, us=None):
+        self.bus.step(self.step_us if us is None else us)
+
+    def replies_since(self, mark):
+        return [(time, decode_mit_reply(frame, self.ranges)) for time, frame in self.bus.inbox[mark:]
+                if frame.id == self.master and not frame.rtr]
+
+    def exchange(self, data, steps=2):
+        """Send one frame, step, and return the newest decoded reply (or None)."""
+        mark = len(self.bus.inbox)
+        self.send(data)
+        for _ in range(steps):
+            self.step()
+        replies = self.replies_since(mark)
+        return replies[-1][1] if replies else None
+
+    def command(self, position, velocity, kp, kd, torque, steps=2):
+        return self.exchange(mit_command(position, velocity, kp, kd, torque, self.ranges), steps)
+
+    def special(self, name, steps=2):
+        return self.exchange(mit_special(name), steps)
+
+
 class CanSimpleClient:
     """CANSimple requests over a bus (SilCanBus or PythonCanBus)."""
 

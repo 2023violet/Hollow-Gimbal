@@ -107,12 +107,20 @@ enum foc_parameter_id {
     FOC_PARAM_TRIP_STALL_MS = 117,
     FOC_PARAM_TRIP_DIVERGENCE_MS = 118,
     FOC_PARAM_CAN_NODE_ID = 120,
+    FOC_PARAM_CAN_MASTER_ID = 121,
     FOC_PARAM_CAN_BITRATE = 122,
     FOC_PARAM_CAN_HEARTBEAT_MS = 123,
     FOC_PARAM_OUTPUT_ZERO = 124,
     FOC_PARAM_CAN_ESTIMATES_MS = 125,
     FOC_PARAM_CAN_STATUS = 126,
     FOC_PARAM_RAW_FAULTS = 127,
+    FOC_PARAM_CAN_PROTOCOL = 128,
+    FOC_PARAM_MIT_P_MAX = 129,
+    FOC_PARAM_MIT_V_MAX = 130,
+    FOC_PARAM_MIT_T_MAX = 131,
+    FOC_PARAM_MIT_KP_MAX = 132,
+    FOC_PARAM_MIT_KD_MAX = 133,
+    FOC_PARAM_MIT_REPLY_FORMAT = 134,
 };
 
 /** Wire type codes. */
@@ -144,6 +152,8 @@ enum foc_parameter_unit {
     FOC_PARAM_UNIT_V = 18,
     FOC_PARAM_UNIT_MS = 20,
     FOC_PARAM_UNIT_RAD_PER_S2 = 21,
+    FOC_PARAM_UNIT_N_M = 22,
+    FOC_PARAM_UNIT_N_M_PER_RAD = 23,
 };
 
 /** Who serves the value. */
@@ -213,8 +223,8 @@ struct foc_parameter_entry {
 
 /* Public Macros ---------------------------------------------------------------- */
 
-#define FOC_PARAMETER_COUNT         77U
-#define FOC_PARAMETER_PERSIST_COUNT 42U
+#define FOC_PARAMETER_COUNT         85U
+#define FOC_PARAMETER_PERSIST_COUNT 50U
 #define FOC_PARAM_NO_PERSIST        0xFFFFU
 
 /* Public Functions ------------------------------------------------------------ */

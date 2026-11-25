@@ -25,6 +25,7 @@ UNITS = {
     "none": 0, "A": 1, "rad": 2, "rad/s": 3, "count": 4, "us": 5, "V/A": 6, "V/(A*s)": 7,
     "A/(rad/s)": 8, "A/rad": 9, "1/s": 10, "ohm": 11, "H": 12, "Wb": 13, "N*m/A": 14,
     "kg*m^2": 15, "N*m*s/rad": 16, "Hz": 17, "V": 18, "ms": 20, "rad/s^2": 21,
+    "N*m": 22, "N*m/rad": 23,
 }
 TYPES = {"u32": 1, "f32": 2}
 GROUPS = ("serial", "tuning", "receipt", "boot", "store", "commission", "rotor", "derived", "status")

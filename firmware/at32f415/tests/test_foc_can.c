@@ -268,12 +268,81 @@ static int test_error_map(void)
     return 0;
 }
 
+/* MIT (ID 128 = 1): raw-ID frames to the node, a reply to the master ID for each one,
+ * special commands, refusals outside motor mode and both reply formats. */
+static void push_raw(struct fixture *test, uint16_t id, const uint8_t *data, uint8_t length)
+{
+    struct foc_can_frame frame = {.id = id, .length = length};
+    memcpy(frame.data, data, length);
+    foc_can_rx_push(&test->buffer, &frame);
+}
+
+static int test_mit(void)
+{
+    static struct fixture test;
+    CHECK(init(&test) == 0);
+    test.serial.can.protocol = FOC_CAN_PROTOCOL_MIT;
+    test.serial.can.node_id = 5U;
+    test.serial.can.master_id = 0x10U;
+    /* No cyclic CANSimple frames in MIT; a CANSimple frame to the node is ignored. */
+    test.time = 500000U;
+    push(&test, 5U, FOC_CAN_GET_VERSION, true, NULL, 0U);
+    poll(&test);
+    CHECK(test.count == 0U);
+
+    /* A command outside motor mode is refused but still answered: original 6 bytes. */
+    const uint8_t command[8] = {0x80U, 0x00U, 0x80U, 0x00U, 0x00U, 0x00U, 0x08U, 0x00U};
+    push_raw(&test, 5U, command, 8U);
+    push_raw(&test, 6U, command, 8U); /* another node */
+    poll(&test);
+    CHECK(test.count == 1U && test.sent[0].id == 0x10U && test.sent[0].length == 6U);
+    /* At rest the position, velocity and torque codes sit mid-range. */
+    const uint8_t rest[6] = {5U, 0x80U, 0x00U, 0x80U, 0x08U, 0x00U};
+    CHECK(memcmp(test.sent[0].data, rest, sizeof rest) == 0);
+    CHECK((foc_can_link_status(&test.can) >> 8 & 0xFFU) == 1U);
+
+    /* DaMiao replies: 8 bytes, error nibble 0 (disabled) above the node. */
+    test.serial.can.mit_reply = FOC_CAN_MIT_REPLY_DAMIAO;
+    const uint8_t clear[8] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFBU};
+    push_raw(&test, 5U, clear, 8U);
+    poll(&test);
+    CHECK(test.count == 2U && test.sent[1].length == 8U && test.sent[1].data[0] == 0x05U);
+    CHECK(test.sent[1].data[6] == 0U && test.sent[1].data[7] == 0U);
+
+    /* Zero while DISABLED sets the output zero to the present position (0 here). */
+    const uint8_t zero[8] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFEU};
+    test.serial.output_zero_rad = 0.25f;
+    push_raw(&test, 5U, zero, 8U);
+    poll(&test);
+    CHECK(test.count == 3U && test.serial.output_zero_rad == 0.0f);
+
+    /* Enter without an identified flux: IMPEDANCE is unavailable, the attempt times out. */
+    const uint8_t enter[8] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFCU};
+    push_raw(&test, 5U, enter, 8U);
+    poll(&test);
+    CHECK(test.count == 4U && test.can.mit_stage == 1U);
+    test.time += 300000U;
+    poll(&test);
+    CHECK(test.can.mit_stage == 0U && (foc_can_link_status(&test.can) >> 8 & 0xFFU) == 2U);
+
+    /* Exit answers too, and the CANSimple heartbeat returns with protocol 0. */
+    const uint8_t leave[8] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFDU};
+    push_raw(&test, 5U, leave, 8U);
+    poll(&test);
+    CHECK(test.count == 5U);
+    test.serial.can.protocol = FOC_CAN_PROTOCOL_CANSIMPLE;
+    test.time += 200000U;
+    poll(&test);
+    CHECK(count_id(&test, (uint16_t)(5U << 5 | FOC_CAN_HEARTBEAT)) == 1U);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
 {
     if (test_address_and_ids() != 0 || test_cyclic() != 0 || test_refusals_and_counters() != 0 ||
-        test_error_map() != 0) {
+        test_error_map() != 0 || test_mit() != 0) {
         return 1;
     }
     puts("test_foc_can: PASS");

@@ -643,6 +643,57 @@ static int test_source_order_across_modes(void)
     return 0;
 }
 
+/* A profile-derived torque constant follows the live flux; tuning stays available. */
+static int test_profile_torque_constant(void)
+{
+    static struct foc_runtime runtime;
+    struct foc_runtime_config derived = config;
+    derived.motion.impedance.torque_constant_from_profile = true;
+    derived.motion.impedance.torque_constant_nm_per_a = 0.0f;
+    CHECK(foc_runtime_init(&runtime, &pipeline_config, &derived, 0U) == FOC_RUNTIME_OK);
+    CHECK(runtime.config.motion.impedance.torque_constant_nm_per_a == 0.0f);
+    CHECK(sense(&runtime, 0U, 0.0f, 0.0f, 0U) == FOC_RUNTIME_OK);
+    CHECK(cycle(&runtime, 0U, FOC_RUNTIME_IDLE) == 0);
+    /* No flux yet: IMPEDANCE is not available. */
+    CHECK(
+        request(&runtime, 100U, FOC_RUNTIME_ACTION_SET_MODE, FOC_RUNTIME_MODE_IMPEDANCE) ==
+        FOC_RUNTIME_OK
+    );
+    CHECK(sense(&runtime, 100U, 0.0f, 0.0f, 7U) == FOC_RUNTIME_OK);
+    {
+        struct foc_runtime_fast_input input = adc(100U);
+        struct foc_runtime_foreground_result result;
+        (void)foc_runtime_h0_step(&runtime, &input);
+        (void)foc_runtime_foreground_poll(&runtime, 100U, 0U, 0U, &result);
+    }
+    CHECK(runtime.mode == FOC_RUNTIME_MODE_CURRENT);
+    /* Tuning is accepted while impedance is enabled; the flux sets Kt = 1.5 x 4 x flux. */
+    struct foc_runtime_tuning tuning;
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    tuning.command_timeout_us = FOC_RUNTIME_LEASE_MIN_US; /* the fixture's 1.5 ms is below it */
+    tuning.profile.flux_wb = 0.01f;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(fabsf(runtime.config.motion.impedance.torque_constant_nm_per_a - 0.06f) < 1.0e-7f);
+    CHECK(
+        request(&runtime, 200U, FOC_RUNTIME_ACTION_SET_MODE, FOC_RUNTIME_MODE_IMPEDANCE) ==
+        FOC_RUNTIME_OK
+    );
+    CHECK(sense(&runtime, 200U, 0.0f, 0.0f, 7U) == FOC_RUNTIME_OK);
+    CHECK(cycle(&runtime, 200U, FOC_RUNTIME_IDLE) == 0);
+    CHECK(runtime.mode == FOC_RUNTIME_MODE_IMPEDANCE);
+    tuning.profile.flux_wb = 0.02f;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(fabsf(runtime.config.motion.impedance.torque_constant_nm_per_a - 0.12f) < 1.0e-7f);
+
+    /* A fixed torque constant keeps the old rule: tuning is refused. */
+    CHECK(foc_runtime_init(&runtime, &pipeline_config, &config, 0U) == FOC_RUNTIME_OK);
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    tuning.command_timeout_us = FOC_RUNTIME_LEASE_MIN_US;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_ERR_CONFIG);
+    CHECK(runtime.config.motion.impedance.torque_constant_nm_per_a == 0.25f);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
@@ -651,7 +702,7 @@ int main(void)
         test_stop_preemption(FOC_RUNTIME_HOOK_COMMAND_WRITING) ||
         test_stop_preemption(FOC_RUNTIME_HOOK_SENSOR_WRITING) ||
         test_disabled_set_mode_observes_adc() || test_source_order_across_modes() ||
-        test_damping_capture_and_session();
+        test_damping_capture_and_session() || test_profile_torque_constant();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

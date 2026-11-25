@@ -99,6 +99,8 @@ _Static_assert(sizeof(((struct foc_runtime_tuning *)0)->trips.divergence_ms) == 
 _Static_assert(sizeof(((struct foc_board_settings *)0)->tuning.trips.divergence_ms) == 4U, "trip-divergence-ms persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.node_id) == 4U, "can-node-id");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.node_id) == 4U, "can-node-id persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.master_id) == 4U, "can-master-id");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.master_id) == 4U, "can-master-id persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.bitrate) == 4U, "can-bitrate");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.bitrate) == 4U, "can-bitrate persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.heartbeat_ms) == 4U, "can-heartbeat-ms");
@@ -107,6 +109,20 @@ _Static_assert(sizeof(((struct foc_serial *)0)->output_zero_rad) == 4U, "output-
 _Static_assert(sizeof(((struct foc_board_settings *)0)->output_zero_rad) == 4U, "output-zero persist");
 _Static_assert(sizeof(((struct foc_serial *)0)->can.estimates_ms) == 4U, "can-estimates-ms");
 _Static_assert(sizeof(((struct foc_board_settings *)0)->can.estimates_ms) == 4U, "can-estimates-ms persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.protocol) == 4U, "can-protocol");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.protocol) == 4U, "can-protocol persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_p_max) == 4U, "mit-p-max");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_p_max) == 4U, "mit-p-max persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_v_max) == 4U, "mit-v-max");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_v_max) == 4U, "mit-v-max persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_t_max) == 4U, "mit-t-max");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_t_max) == 4U, "mit-t-max persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_kp_max) == 4U, "mit-kp-max");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_kp_max) == 4U, "mit-kp-max persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_kd_max) == 4U, "mit-kd-max");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_kd_max) == 4U, "mit-kd-max persist");
+_Static_assert(sizeof(((struct foc_serial *)0)->can.mit_reply) == 4U, "mit-reply-format");
+_Static_assert(sizeof(((struct foc_board_settings *)0)->can.mit_reply) == 4U, "mit-reply-format persist");
 
 /* Public Functions ------------------------------------------------------------- */
 
@@ -1106,6 +1122,20 @@ const struct foc_parameter_entry foc_parameter_table[FOC_PARAMETER_COUNT] = {
         .maximum = {.u = 63U},
     },
     {
+        .id = FOC_PARAM_CAN_MASTER_ID,
+        .offset = offsetof(struct foc_serial, can.master_id),
+        .persist_offset = offsetof(struct foc_board_settings, can.master_id),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 2047U},
+    },
+    {
         .id = FOC_PARAM_CAN_BITRATE,
         .offset = offsetof(struct foc_serial, can.bitrate),
         .persist_offset = offsetof(struct foc_board_settings, can.bitrate),
@@ -1188,6 +1218,104 @@ const struct foc_parameter_entry foc_parameter_table[FOC_PARAMETER_COUNT] = {
         .max_bound = FOC_PARAM_BOUND_CONST,
         .minimum = {.u = 0U},
         .maximum = {.u = 0U},
+    },
+    {
+        .id = FOC_PARAM_CAN_PROTOCOL,
+        .offset = offsetof(struct foc_serial, can.protocol),
+        .persist_offset = offsetof(struct foc_board_settings, can.protocol),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 1U},
+    },
+    {
+        .id = FOC_PARAM_MIT_P_MAX,
+        .offset = offsetof(struct foc_serial, can.mit_p_max),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_p_max),
+        .unit = 2U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.01f},
+        .maximum = {.f = 1000.0f},
+    },
+    {
+        .id = FOC_PARAM_MIT_V_MAX,
+        .offset = offsetof(struct foc_serial, can.mit_v_max),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_v_max),
+        .unit = 3U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.01f},
+        .maximum = {.f = 1000.0f},
+    },
+    {
+        .id = FOC_PARAM_MIT_T_MAX,
+        .offset = offsetof(struct foc_serial, can.mit_t_max),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_t_max),
+        .unit = 22U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.001f},
+        .maximum = {.f = 1000.0f},
+    },
+    {
+        .id = FOC_PARAM_MIT_KP_MAX,
+        .offset = offsetof(struct foc_serial, can.mit_kp_max),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_kp_max),
+        .unit = 23U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.001f},
+        .maximum = {.f = 10000.0f},
+    },
+    {
+        .id = FOC_PARAM_MIT_KD_MAX,
+        .offset = offsetof(struct foc_serial, can.mit_kd_max),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_kd_max),
+        .unit = 16U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_F32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.f = 0.001f},
+        .maximum = {.f = 1000.0f},
+    },
+    {
+        .id = FOC_PARAM_MIT_REPLY_FORMAT,
+        .offset = offsetof(struct foc_serial, can.mit_reply),
+        .persist_offset = offsetof(struct foc_board_settings, can.mit_reply),
+        .unit = 0U,
+        .group = FOC_PARAM_GROUP_SERIAL,
+        .flags = FOC_PARAM_FLAG_PERSIST,
+        .type = FOC_PARAM_TYPE_U32,
+        .access = FOC_PARAM_ACCESS_RW,
+        .min_bound = FOC_PARAM_BOUND_CONST,
+        .max_bound = FOC_PARAM_BOUND_CONST,
+        .minimum = {.u = 0U},
+        .maximum = {.u = 1U},
     },
 };
 

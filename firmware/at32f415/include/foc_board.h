@@ -44,6 +44,8 @@ enum foc_board_limits {
     FOC_BOARD_ADC_BRACKET_US = 2,
     /** Nominal TMR5 event interval in microseconds. */
     FOC_BOARD_H1_US = 500,
+    /** Identity of Board1's continuous rotor frame (encoder zero and direction) for IMPEDANCE. */
+    FOC_BOARD_MECHANICAL_FRAME = 1,
     /** TMR1 period and maximum diagnostic compare. */
     FOC_BOARD_COMPARE_MAX = FOC_BOARD_TIMER_HZ / FOC_BOARD_US_HZ * FOC_BOARD_H0_US - 1,
 };

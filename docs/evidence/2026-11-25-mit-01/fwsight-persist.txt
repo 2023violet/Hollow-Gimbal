@@ -1,0 +1,47 @@
+Base    falconfoc-v2-at32f415.elf  26acbfa7641b
+Target  falconfoc-v2-at32f415.elf  e2d4900cb260
+
+Memory
+  Nonvolatile / load image: 101112 bytes → 104060 bytes   delta +2948 [exact]
+  Runtime RAM:              15516 bytes → 15564 bytes   delta +48 [exact]
+  Comparability:            exact
+  Base side states:         nonvolatile exact / RAM exact
+  Target side states:       nonvolatile exact / RAM exact
+
+Counts
+  Sections  +0 -0 ~18 (0 rows whose name repeats)
+  Symbols   +857 -837 ~384 (1686 rows whose key repeats)
+  Identical, so left out of the tables: 1 section(s), 362 symbol(s)
+
+Top section growth (Changed rows)
+      +2752  .text                        100964 bytes  [Changed]
+       +320  .symtab                      25664 bytes  [Changed]
+       +196  .rodata                      2628 bytes  [Changed]
+       +144  .strtab                      14059 bytes  [Changed]
+        +52  .bss                         14456 bytes  [Changed]
+
+Largest added sections (absence, never 0)
+  none
+
+Top symbol growth (Changed rows)
+       +752  foc_can_poll                 3096 bytes  [Changed]
+       +308  foc_serial_can_settings_valid 384 bytes  [Changed]
+       +160  foc_parameter_table          1700 bytes  [Changed]
+        +56  foc_board_init_with_calibration 696 bytes  [Changed]
+        +48  foc_board_persistence_restore 684 bytes  [Changed]
+
+Largest added symbols (absence, never 0)
+          -  mit_reply                    592 bytes  [Added]
+          -  foc_runtime_publish_impedance_command 448 bytes  [Added]
+          -  foc_serial_impedance         364 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+
+Object / module attribution
+  unavailable
+
+Warnings
+  [SYMBOL-AMBIGUOUS] 1686 symbol row(s) repeat a name, kind and binding combination on one or both sides and were left unpaired; a row position is not an identity
+diagnostics: old map parsed with the gnu_ld adapter
+diagnostics: new map parsed with the gnu_ld adapter
+diagnostics: operation op-844c-18eb3b57259b5954

@@ -1,0 +1,58 @@
+{
+  "scenario": "mit",
+  "status": "SIL_PASS",
+  "checks": {
+    "node_set": true,
+    "lease_raised": true,
+    "commissioned": true,
+    "calibrated": true,
+    "ranges_set": true,
+    "master_set": true,
+    "switched_over_sdo": true,
+    "original_reply": true,
+    "refused_outside_motor_mode": true,
+    "damiao_selected": true,
+    "zeroed": true,
+    "entered": true,
+    "position_holds": true,
+    "velocity_damps": true,
+    "torque_feedforward": true,
+    "lease_trip_reported": true,
+    "cleared": true,
+    "exit_answers": true,
+    "switched_back": true,
+    "cansimple_back": true,
+    "uart_set_mode": true,
+    "uart_arm": true,
+    "uart_start": true,
+    "uart_impedance_holds": true
+  },
+  "metrics": {
+    "kt_nm_per_a": 0.10493997484445572,
+    "zero": {
+      "before_rad": -4.541657129777981,
+      "after_rad": 0.0001907377737087046
+    },
+    "position": {
+      "target_rad": 0.5,
+      "final_rad": 0.5018310826276036,
+      "peak_rad": 0.728809033340962
+    },
+    "velocity": {
+      "target_rad_s": 5.0,
+      "expected_rad_s": 3.846153846153846,
+      "mean_rad_s": 3.823619047619045
+    },
+    "torque": {
+      "target_nm": 0.004,
+      "mean_reply_nm": 0.004029304029304015,
+      "velocity_gain_rad_s": 0.06349206349206327
+    },
+    "uart": {
+      "target_rad": 4.656026172637939,
+      "final_rad": 4.661575794219971,
+      "accepted": 2000
+    }
+  },
+  "physical_applied": false
+}

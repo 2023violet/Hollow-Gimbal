@@ -165,6 +165,14 @@ struct foc_serial_calibration {
 };
 
 /** CAN settings (contract 25), owned by Foreground and saved with the parameters. */
+/** CAN protocol (ID 128) and MIT reply format (ID 134). */
+enum foc_serial_can_protocol {
+    FOC_CAN_PROTOCOL_CANSIMPLE = 0,
+    FOC_CAN_PROTOCOL_MIT = 1,
+    FOC_CAN_MIT_REPLY_ORIGINAL = 0,
+    FOC_CAN_MIT_REPLY_DAMIAO = 1,
+};
+
 struct foc_serial_can_settings {
     /** CANSimple node ID 0-63; 63 (0x3F) is unaddressed. */
     uint32_t node_id;
@@ -173,6 +181,18 @@ struct foc_serial_can_settings {
     /** Heartbeat and encoder-estimate periods in ms, 0 off. */
     uint32_t heartbeat_ms;
     uint32_t estimates_ms;
+    /** 0 CANSimple, 1 MIT (ID 128). */
+    uint32_t protocol;
+    /** MIT: CAN ID of the replies (ID 121). */
+    uint32_t master_id;
+    /** MIT ranges, output side (IDs 129-133). */
+    float mit_p_max;
+    float mit_v_max;
+    float mit_t_max;
+    float mit_kp_max;
+    float mit_kd_max;
+    /** MIT reply: 0 original 6 bytes, 1 DaMiao 8 bytes (ID 134). */
+    uint32_t mit_reply;
 };
 
 /** Optional CAN link status for read-only PARAM_READ ID 126. */
@@ -321,6 +341,19 @@ bool foc_serial_can_settings_valid(const struct foc_serial_can_settings *setting
 
 /** Attach the CAN link status before receiving bytes. */
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link);
+
+/**
+ * Foreground only. Publish an IMPEDANCE command from output-side values: target[0]
+ * position in rad (relative to the output zero, ID 124), [1] velocity in rad/s, [2]
+ * stiffness in N*m/rad, [3] damping in N*m*s/rad, [4] feedforward torque in N*m. The
+ * gear ratio converts them to the rotor side. Returns ACCEPTED, INVALID_ARGUMENT (range),
+ * BAD_STATE (not in IMPEDANCE, faulted, inhibiting, or refused) or BUSY. Used by UART
+ * SETPOINT mode 3 and the CAN MIT protocol.
+ */
+int foc_serial_impedance(struct foc_serial *serial,
+                         struct foc_runtime *runtime,
+                         const float target[5],
+                         uint32_t now_us);
 
 /**
  * Foreground only. Run one decoded request for another transport (CAN) without a wire

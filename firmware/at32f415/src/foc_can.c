@@ -106,6 +106,19 @@ can_queue(struct foc_can *can, uint8_t node, uint8_t command, const uint8_t *dat
     can->tx_count++;
 }
 
+/* A frame with a raw 11-bit ID (MIT replies to the master ID). */
+static void can_queue_id(struct foc_can *can, uint16_t id, const uint8_t *data, uint8_t length)
+{
+    if (can->tx_count == FOC_CAN_TX_CAPACITY) {
+        can->dropped++;
+        return;
+    }
+    struct foc_can_frame *frame = &can->tx[(can->tx_head + can->tx_count) % FOC_CAN_TX_CAPACITY];
+    *frame = (struct foc_can_frame){.id = (uint16_t)(id & 0x7FFU), .length = length};
+    memcpy(frame->data, data, length);
+    can->tx_count++;
+}
+
 static void can_flush(struct foc_can *can)
 {
     while (can->tx_count != 0U && can->port.send != NULL &&
@@ -502,6 +515,210 @@ static bool can_length_is(struct foc_can *can, const struct foc_can_frame *frame
     return true;
 }
 
+/* Present output position relative to the output zero; 0 without a snapshot. */
+static float can_snapshot_output(const struct foc_serial *serial, struct foc_runtime *runtime)
+{
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return 0.0f;
+    }
+    return view.mechanical_rad / can_gear(runtime) - serial->output_zero_rad;
+}
+
+/* MIT protocol (ID 128 = 1) ------------------------------------------------------- */
+
+/* x in [-span, span] (or [0, span] when unsigned) to an unsigned integer of bits. */
+static uint32_t mit_quantize(float value, float low, float high, unsigned int bits)
+{
+    const float top = (float)((1U << bits) - 1U);
+    float scaled = (value - low) * top / (high - low);
+    if (!(scaled >= 0.0f)) {
+        scaled = 0.0f;
+    }
+    if (scaled > top) {
+        scaled = top;
+    }
+    return (uint32_t)(scaled + 0.5f);
+}
+
+static float mit_value(uint32_t code, float low, float high, unsigned int bits)
+{
+    return low + (float)code * (high - low) / (float)((1U << bits) - 1U);
+}
+
+/* DaMiao error nibble: 0 disabled, 1 enabled, 8 over-voltage, 9 under-voltage,
+ * A over-current, D communication lost, E other. */
+static uint8_t mit_error(const struct foc_runtime_snapshot *view)
+{
+    if (view->state == FOC_SAFE_STATE_FAULT_LATCHED) {
+        const uint32_t faults = view->faults;
+        return (faults & FOC_SAFE_FAULT_COMMAND_TIMEOUT) != 0U ? 0x0DU
+            : (faults & FOC_SAFE_FAULT_OVER_VOLTAGE) != 0U     ? 0x08U
+            : (faults & FOC_SAFE_FAULT_UNDER_VOLTAGE) != 0U    ? 0x09U
+            : (faults & (FOC_SAFE_FAULT_OVER_CURRENT | FOC_SAFE_FAULT_SUSTAINED_CURRENT)) != 0U
+            ? 0x0AU
+            : 0x0EU;
+    }
+    return view->state == FOC_SAFE_STATE_RUNNING ? 0x01U : 0x00U;
+}
+
+/* Position, velocity and torque, output side, to the master ID. */
+static void
+mit_reply(struct foc_can *can, const struct foc_serial *serial, struct foc_runtime *runtime)
+{
+    const struct foc_serial_can_settings *mit = &serial->can;
+    struct foc_runtime_snapshot view;
+    const bool viewed = foc_runtime_read_snapshot(runtime, &view) == FOC_RUNTIME_OK;
+    const float gear = can_gear(runtime);
+    const float position = viewed ? view.mechanical_rad / gear - serial->output_zero_rad : 0.0f;
+    const float velocity = viewed ? view.mechanical_rad_s / gear : 0.0f;
+    const float torque =
+        viewed && view.current_valid ? view.measured_iq_a * can_torque_constant(runtime) : 0.0f;
+    const uint32_t p = mit_quantize(position, -mit->mit_p_max, mit->mit_p_max, 16U);
+    const uint32_t v = mit_quantize(velocity, -mit->mit_v_max, mit->mit_v_max, 12U);
+    const uint32_t t = mit_quantize(torque, -mit->mit_t_max, mit->mit_t_max, 12U);
+    const uint8_t node = can_node(serial);
+    const bool damiao = mit->mit_reply == FOC_CAN_MIT_REPLY_DAMIAO;
+    const uint8_t data[8] = {
+        damiao ? (uint8_t)((viewed ? mit_error(&view) : 0x0EU) << 4 | (node & 0x0FU)) : node,
+        (uint8_t)(p >> 8),
+        (uint8_t)p,
+        (uint8_t)(v >> 4),
+        (uint8_t)((v & 0x0FU) << 4 | t >> 8),
+        (uint8_t)t,
+        0U, /* DaMiao: driver and rotor temperatures; no sensor on Board1 */
+        0U,
+    };
+    can_queue_id(can, (uint16_t)mit->master_id, data, damiao ? 8U : 6U);
+}
+
+/* Zero-torque hold at the present output position, so ARM and START see a fresh command. */
+static void mit_hold(struct foc_serial *serial, struct foc_runtime *runtime, uint32_t now_us)
+{
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return;
+    }
+    const float target[5] = {
+        view.mechanical_rad / can_gear(runtime) - serial->output_zero_rad,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+    };
+    (void)foc_serial_impedance(serial, runtime, target, now_us);
+}
+
+/* Enter: SET_MODE IMPEDANCE, then the closed-loop ARM/START sequence with a held command. */
+static void mit_poll(
+    struct foc_can *can,
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    uint32_t now_us
+)
+{
+    if (can->mit_stage == 0U) {
+        return;
+    }
+    struct foc_runtime_snapshot view;
+    if (foc_runtime_read_snapshot(runtime, &view) != FOC_RUNTIME_OK) {
+        return;
+    }
+    if (can->mit_stage == 1U) {
+        if (now_us - can->mit_started_us > CAN_SEQUENCE_US) {
+            can->mit_stage = 0U;
+            can->refused++;
+            return;
+        }
+        if (view.mode != FOC_RUNTIME_MODE_IMPEDANCE) {
+            if (now_us - can->mit_retry_us >= CAN_SEQUENCE_RETRY_US) {
+                struct foc_protocol_frame response;
+                const uint8_t mode = FOC_RUNTIME_MODE_IMPEDANCE;
+                can->mit_retry_us = now_us;
+                (void)can_run(serial, runtime, FOC_MSG_SET_MODE, &mode, 1U, now_us, &response);
+            }
+            return;
+        }
+        can->mit_stage = 2U;
+        can->sequence = 1U;
+        can->sequence_request = 0U;
+        can->sequence_started_us = now_us;
+        can->sequence_retry_us = now_us - CAN_SEQUENCE_RETRY_US;
+    }
+    if (can->sequence == 0U) {
+        can->mit_stage = 0U;
+        return;
+    }
+    mit_hold(serial, runtime, now_us);
+}
+
+static void mit_handle(
+    struct foc_can *can,
+    struct foc_serial *serial,
+    struct foc_runtime *runtime,
+    const struct foc_can_frame *frame,
+    uint32_t now_us
+)
+{
+    if (frame->rtr || frame->id != can_node(serial) || frame->length != 8U) {
+        return;
+    }
+    const uint8_t *d = frame->data;
+    const bool special =
+        (d[0] & d[1] & d[2] & d[3] & d[4] & d[5] & d[6]) == 0xFFU && d[7] >= 0xFBU && d[7] <= 0xFEU;
+    struct foc_protocol_frame response;
+    if (special) {
+        switch (d[7]) {
+        case 0xFCU: /* enter motor mode */
+            if (can->mit_stage == 0U) {
+                can->mit_stage = 1U;
+                can->mit_started_us = now_us;
+                can->mit_retry_us = now_us - CAN_SEQUENCE_RETRY_US;
+            }
+            break;
+        case 0xFDU: /* exit motor mode */
+            can->mit_stage = 0U;
+            can->sequence = 0U;
+            (void)can_run(serial, runtime, FOC_MSG_STOP, NULL, 0U, now_us, &response);
+            break;
+        case 0xFEU: /* zero: the present output position becomes 0 (DISABLED only, RAM) */
+            if (!can_accepted(can_param_write_f32(
+                    serial,
+                    runtime,
+                    FOC_PARAM_OUTPUT_ZERO,
+                    serial->output_zero_rad + (can_snapshot_output(serial, runtime)),
+                    now_us
+                ))) {
+                can->refused++;
+            }
+            break;
+        default: /* 0xFB, DaMiao: clear faults */
+            (void)can_run(serial, runtime, FOC_MSG_FAULT_CLEAR, NULL, 0U, now_us, &response);
+            break;
+        }
+        mit_reply(can, serial, runtime);
+        return;
+    }
+    const struct foc_serial_can_settings *mit = &serial->can;
+    const uint32_t p = (uint32_t)d[0] << 8 | d[1];
+    const uint32_t v = (uint32_t)d[2] << 4 | d[3] >> 4;
+    const uint32_t kp = ((uint32_t)d[3] & 0x0FU) << 8 | d[4];
+    const uint32_t kd = (uint32_t)d[5] << 4 | d[6] >> 4;
+    const uint32_t t = ((uint32_t)d[6] & 0x0FU) << 8 | d[7];
+    const float target[5] = {
+        mit_value(p, -mit->mit_p_max, mit->mit_p_max, 16U),
+        mit_value(v, -mit->mit_v_max, mit->mit_v_max, 12U),
+        mit_value(kp, 0.0f, mit->mit_kp_max, 12U),
+        mit_value(kd, 0.0f, mit->mit_kd_max, 12U),
+        mit_value(t, -mit->mit_t_max, mit->mit_t_max, 12U),
+    };
+    if (can->mit_stage == 0U &&
+        !can_accepted(foc_serial_impedance(serial, runtime, target, now_us))) {
+        can->refused++;
+    }
+    mit_reply(can, serial, runtime);
+}
+
 static void can_handle(
     struct foc_can *can,
     struct foc_serial *serial,
@@ -510,6 +727,10 @@ static void can_handle(
     uint32_t now_us
 )
 {
+    if (serial->can.protocol == FOC_CAN_PROTOCOL_MIT) {
+        mit_handle(can, serial, runtime, frame, now_us);
+        return;
+    }
     const uint8_t node = (uint8_t)(frame->id >> 5);
     const uint8_t command = (uint8_t)(frame->id & 0x1FU);
     const bool mine = node == can_node(serial);
@@ -904,6 +1125,7 @@ void foc_can_poll(
         atomic_store_explicit(&can->buffer->rx_tail, tail + 1U, memory_order_release);
         can_handle(can, serial, runtime, &frame, now_us);
     }
+    mit_poll(can, serial, runtime, now_us);
     can_sequence_poll(can, serial, runtime, now_us);
     can_calibration_poll(can, serial);
     struct foc_runtime_snapshot view;
@@ -911,8 +1133,9 @@ void foc_can_poll(
         (view.state == FOC_SAFE_STATE_FAULT_LATCHED || can->estop)) {
         can->disarm_reason = can_errors(can, view.faults);
     }
-    /* An unaddressed device sends no cyclic frames. */
-    if (can_node(serial) != FOC_CAN_NODE_UNADDRESSED) {
+    /* An unaddressed device sends no cyclic frames, nor does MIT (it answers every frame). */
+    if (can_node(serial) != FOC_CAN_NODE_UNADDRESSED &&
+        serial->can.protocol == FOC_CAN_PROTOCOL_CANSIMPLE) {
         if (can_due(now_us, can->heartbeat_us, serial->can.heartbeat_ms)) {
             can->heartbeat_us = now_us;
             can_reply_get(can, serial, runtime, FOC_CAN_HEARTBEAT, now_us);

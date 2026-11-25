@@ -370,3 +370,11 @@ Quick and Full with `--json` collect a final JSON report and print the events
 after the runner exits. User interaction and ETA remain unmeasured. FCAL
 restore emits `PRODUCT_FCAL_SOURCE` with `SOURCE_CONFIDENCE_INSUFFICIENT`
 for historical evidence. [Quality acceptance](../../docs/evidence/2026-11-21-next-cal-quality-01.md)
+
+## MIT and impedance
+
+`setpoint` with mode `impedance` sends UART SETPOINT mode 3 (position, velocity, kp, kd,
+torque, output side). `can --can-command mit-enter|mit-exit|mit-zero|mit-clear|mit-cmd`
+talks MIT to `--node` with replies on `--master-id` (`mit-cmd` takes `--mit-position`,
+`--mit-velocity`, `--kp`, `--kd`, `--torque`). `sil-demo --sil-scenario mit
+--sil-lockstep-us 500` runs the whole flow on the Board1 SIL.

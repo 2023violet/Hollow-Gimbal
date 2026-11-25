@@ -1048,7 +1048,8 @@ static int check_locked_uart(struct foc_boot_test *test, bool calibrated)
      * The request waits for H0; its receipt is readable through LIFECYCLE_READ. */
     /* CURRENT is the active mode: the receipt path is exercised without side effects. */
     const uint8_t current_mode[] = {FOC_RUNTIME_MODE_CURRENT};
-    const uint8_t bad_mode[] = {FOC_RUNTIME_MODE_POSITION + 1U};
+    /* IMPEDANCE (3) is a mode since MIT; CALIBRATION stays internal. */
+    const uint8_t bad_mode[] = {FOC_RUNTIME_MODE_IMPEDANCE + 1U};
     CHECK(
         foc_boot_test_call(test, FOC_MSG_SET_MODE, bad_mode, 1U, &response) ==
         FOC_PROTO_INVALID_ARGUMENT

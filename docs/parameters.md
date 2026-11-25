@@ -81,9 +81,17 @@ settings record. Semantics, derivations and calibration stages are in the
 | 117 | `trip-stall-ms` | u32 | ms | RW (DISABLED, H0) | 0 … 10000 | yes | Stall window. |
 | 118 | `trip-divergence-ms` | u32 | ms | RW (DISABLED, H0) | 0 … 10000 | yes | Following-error divergence window. |
 | 120 | `can-node-id` | u32 |  | RW | 0 … 63 | yes | CANSimple node ID; 63 (0x3F) is unaddressed. |
+| 121 | `can-master-id` | u32 |  | RW | 0 … 2047 | yes | MIT: CAN ID of the replies (the host's ID). |
 | 122 | `can-bitrate` | u32 |  | RW | 125000 / 250000 / 500000 / 1000000 | yes | CAN bit rate in bit/s; applies at the next boot. |
 | 123 | `can-heartbeat-ms` | u32 | ms | RW | 0 … 10000 | yes | CAN heartbeat period; 0 off. |
 | 124 | `output-zero` | f32 | rad | RW | -1000 … 1000 | yes | Output-position zero, output rad; host positions are relative to it. |
 | 125 | `can-estimates-ms` | u32 | ms | RW | 0 … 10000 | yes | CAN encoder-estimate period; 0 off. |
 | 126 | `can-status` | u32 |  | RO |  |  | CAN link: state | refused << 8 | dropped << 16. |
 | 127 | `raw-faults` | u32 |  | RO |  |  | Raw Safety fault bits. |
+| 128 | `can-protocol` | u32 |  | RW | 0 … 1 | yes | CAN protocol: 0 CANSimple, 1 MIT; applies at once (DISABLED only). |
+| 129 | `mit-p-max` | f32 | rad | RW | 0.01 … 1000 | yes | MIT: position range +/-P_MAX, output side, relative to the output zero. |
+| 130 | `mit-v-max` | f32 | rad/s | RW | 0.01 … 1000 | yes | MIT: velocity range +/-V_MAX, output side. |
+| 131 | `mit-t-max` | f32 | N*m | RW | 0.001 … 1000 | yes | MIT: feedforward and reply torque range +/-T_MAX, output side. |
+| 132 | `mit-kp-max` | f32 | N*m/rad | RW | 0.001 … 10000 | yes | MIT: stiffness range 0..KP_MAX, output side. |
+| 133 | `mit-kd-max` | f32 | N*m*s/rad | RW | 0.001 … 1000 | yes | MIT: damping range 0..KD_MAX, output side. |
+| 134 | `mit-reply-format` | u32 |  | RW | 0 … 1 | yes | MIT reply: 0 original 6 bytes (ID, p, v, t), 1 DaMiao 8 bytes (error|ID, p, v, t, 0, 0). |

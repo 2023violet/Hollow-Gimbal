@@ -183,6 +183,10 @@ struct foc_can {
     uint32_t sequence_request;
     uint32_t sequence_started_us;
     uint32_t sequence_retry_us;
+    /** MIT enter: 0 idle, 1 waiting for IMPEDANCE, 2 in the ARM/START sequence. */
+    uint8_t mit_stage;
+    uint32_t mit_started_us;
+    uint32_t mit_retry_us;
     /** Last torque and output-position targets for Get_Torques and the heartbeat. */
     float torque_target_nm;
     float position_target_rad;

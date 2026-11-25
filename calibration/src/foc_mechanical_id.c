@@ -13,6 +13,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_mechanical_id.h"
+#include "foc_calibration_math.h"
 
 #include <float.h>
 #include <math.h>
@@ -152,17 +153,17 @@ static enum foc_calibration_failure foc_mechanical_id_fit(struct foc_mechanical_
     const struct foc_mechanical_id_config *cfg = &ctx->config;
     const struct foc_mechanical_id_gram *g = &ctx->gram;
     const double count = result->windows;
-    result->accel_rms_rad_s2 = sqrt(g->xx / count);
-    result->speed_rms_rad_s = sqrt(g->yy / count);
+    result->accel_rms_rad_s2 = foc_calibration_sqrt(g->xx / count);
+    result->speed_rms_rad_s = foc_calibration_sqrt(g->yy / count);
     if (result->accel_rms_rad_s2 < cfg->min_accel_rms_rad_s2 ||
         result->speed_rms_rad_s < cfg->min_speed_rms_rad_s || result->accel_windows == 0U ||
         result->decel_windows == 0U) {
         return FOC_CALIBRATION_FAILURE_UNIDENTIFIABLE;
     }
-    const double sx = sqrt(g->xx);
-    const double sy = sqrt(g->yy);
+    const double sx = foc_calibration_sqrt(g->xx);
+    const double sy = foc_calibration_sqrt(g->yy);
     const double r = g->xy / sx / sy;
-    result->excitation = fmax(0.0, 1.0 - r * r);
+    result->excitation = foc_calibration_fmax(0.0, 1.0 - r * r);
     if (fabs(r) < 1.0) {
         result->gram_condition = (1.0 + fabs(r)) / (1.0 - fabs(r));
     }
@@ -198,7 +199,8 @@ static enum foc_calibration_failure foc_mechanical_id_fit(struct foc_mechanical_
     if (!isfinite(residual2) || !isfinite(roundoff) || residual2 < -roundoff) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
-    result->residual_rms_nm = sqrt((fmax(0.0, residual2) + roundoff) / count);
+    result->residual_rms_nm =
+        foc_calibration_sqrt((foc_calibration_fmax(0.0, residual2) + roundoff) / count);
     if (result->residual_rms_nm > cfg->max_residual_rms_nm) {
         return FOC_CALIBRATION_FAILURE_RESIDUAL;
     }

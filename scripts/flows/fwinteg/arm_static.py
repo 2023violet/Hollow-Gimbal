@@ -43,6 +43,20 @@ EXPLAINED_REMOVALS = {
         "P1 step B: Runtime POSITION mode tracks the planned reference "
         "(foc_trajectory_track_step); the measured-position planner stays for Host "
         "callers and is garbage-collected from the ARM images",
+    "sinf": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "cosf": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "__ieee754_rem_pio2f": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "__kernel_rem_pio2f": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "__kernel_sinf": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "__kernel_cosf": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "scalbnf": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "finitef": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "PIo2": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "init_jk": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "npio2_hw": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "two_over_pi": "ROM-01: every sinf()/cosf() call now goes through foc_sincosf() (core/src/foc_trig.c), so newlib's Payne-Hanek reduction is no longer linked",
+    "hypotf": "ROM-01: hypotf() calls were replaced by sqrtf(x*x + y*y); the operands are volts and amps, far from overflow",
+    "__ieee754_hypotf": "ROM-01: hypotf() calls were replaced by sqrtf(x*x + y*y); the operands are volts and amps, far from overflow",
 }
 
 # M0 Board1 SIL added an optional output backend to foc_board_output_submit. The ARM
@@ -55,6 +69,12 @@ REVIEWED_ADAPTERS = {
         "M0: backend branch for UPDATE/INHIBIT; locked dispositions unchanged without a backend",
 }
 BACKEND_ATTACH = "foc_board_output_attach"
+
+# ROM-01: the image avoids libm's large-argument trig reduction (use foc_sincosf) and the
+# double sqrt/hypot/fmax/fmin (calibration uses foc_calibration_math.c). Any of these
+# symbols returning means a sinf/cosf/hypotf or double libm call slipped back in.
+HEAVY_LIBM = {"__ieee754_rem_pio2f", "__kernel_rem_pio2f", "__ieee754_hypotf", "__ieee754_hypot",
+              "__ieee754_sqrt", "fmax", "fmin"}
 
 
 # Reviewed locked main() prologues (up to system_core_clock_update) that intentionally differ
@@ -223,6 +243,7 @@ for name, elf in IMAGES.items():
         "verification_supply_only_in_verification": supply_ok,
         "calibration_init_reachable": reach_ok,
         "no_unexplained_symbols_removed": not (set(removed) - set(EXPLAINED_REMOVALS)),
+        "no_libm_heavy_math": not (syms & HEAVY_LIBM),
     }
     lines = [f"{key}: {'PASS' if value else 'FAIL'}" for key, value in checks.items()]
     lines.append(f"baseline: {base_folder}")

@@ -39,6 +39,7 @@
 #pragma once
 
 #include "foc_core.h"
+#include "foc_trig.h"
 
 #include <math.h>
 
@@ -73,8 +74,7 @@ static inline int foc_angle_cache_prepare(float angle_rad, struct foc_angle_cach
         wrapped += two_pi;
     }
     cache->angle_rad = wrapped >= two_pi ? 0.0f : wrapped;
-    cache->sine = sinf(cache->angle_rad);
-    cache->cosine = cosf(cache->angle_rad);
+    foc_sincosf(cache->angle_rad, &cache->sine, &cache->cosine);
     if (!isfinite(cache->sine) || !isfinite(cache->cosine)) {
         *cache = (struct foc_angle_cache){0};
         return FOC_STATUS_ERR_NONFINITE;

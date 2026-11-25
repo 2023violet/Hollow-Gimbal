@@ -43,6 +43,18 @@ AT32F415 timer-clock facts (150 MHz timer input, 1 MHz timestamp) live in
 microsecond rates from them, and the control cadence stays in `foc_board.h`.
 A clock-tree change must update both together.
 
+## Flash budget
+
+The program must stay below the settings slots at `0x0801F000` (124 KB usable;
+`store-reserve.ld` asserts it). After ROM-01 the default image is 97,156 B and
+the persistent-settings image 101,972 B. AT32F415 has no FPU, so every libm call
+is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
+instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
+calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
+`sqrt`/`hypot`/`fmax`/`fmin`. fwinteg's `no_libm_heavy_math` check fails if those
+libm objects return. Measure changes with FirmwareSight `fwsight diff`
+([ROM-01](../../docs/evidence/2026-11-24-rom-01.md)).
+
 ## Explicit calibrated initialization
 
 `foc_board_init()` keeps the nominal Board1 values (2048-count ADC offsets,

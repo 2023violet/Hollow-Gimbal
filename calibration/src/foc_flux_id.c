@@ -13,6 +13,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_flux_id.h"
+#include "foc_calibration_math.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -99,8 +100,12 @@ check_interval(const struct foc_flux_id *ctx, const struct foc_flux_id_interval 
     if (!s->current_valid || !s->voltage_valid || !s->speed_valid || !isfinite(s->id_begin_a) ||
         !isfinite(s->iq_begin_a) || !isfinite(s->id_end_a) || !isfinite(s->iq_end_a) ||
         !isfinite(s->mean_vq_v) || !isfinite(s->mean_omega_e_rad_s) ||
-        hypot(s->id_begin_a, s->iq_begin_a) > c->max_abs_current_a ||
-        hypot(s->id_end_a, s->iq_end_a) > c->max_abs_current_a ||
+        foc_calibration_sqrt(
+            (double)s->id_begin_a * s->id_begin_a + (double)s->iq_begin_a * s->iq_begin_a
+        ) > c->max_abs_current_a ||
+        foc_calibration_sqrt(
+            (double)s->id_end_a * s->id_end_a + (double)s->iq_end_a * s->iq_end_a
+        ) > c->max_abs_current_a ||
         fabs(s->mean_vq_v) > c->max_abs_vq_v ||
         fabs(s->mean_omega_e_rad_s) > c->max_abs_speed_rad_s) {
         return FOC_CALIBRATION_FAILURE_INVALID_SAMPLE;
@@ -145,8 +150,10 @@ static enum foc_calibration_failure close_window(struct foc_flux_id *ctx)
         direction->minimum_abs_speed_rad_s = magnitude;
         direction->maximum_abs_speed_rad_s = magnitude;
     } else {
-        direction->minimum_abs_speed_rad_s = fmin(direction->minimum_abs_speed_rad_s, magnitude);
-        direction->maximum_abs_speed_rad_s = fmax(direction->maximum_abs_speed_rad_s, magnitude);
+        direction->minimum_abs_speed_rad_s =
+            foc_calibration_fmin(direction->minimum_abs_speed_rad_s, magnitude);
+        direction->maximum_abs_speed_rad_s =
+            foc_calibration_fmax(direction->maximum_abs_speed_rad_s, magnitude);
     }
     ++direction->windows;
     fit->speed2 += speed * speed;
@@ -169,7 +176,8 @@ static bool direction_result(const struct foc_flux_id_fit *fit, struct foc_flux_
         return false;
     }
     out->flux_wb = flux;
-    out->residual_rms_v = sqrt(fmax(0.0, error_energy) / out->windows);
+    out->residual_rms_v =
+        foc_calibration_sqrt(foc_calibration_fmax(0.0, error_energy) / out->windows);
     return true;
 }
 
@@ -190,7 +198,7 @@ static enum foc_calibration_failure calculate(struct foc_flux_id *ctx)
     if (!isfinite(speed2)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
-    out->omega_e_rms_rad_s = sqrt(speed2 / windows);
+    out->omega_e_rms_rad_s = foc_calibration_sqrt(speed2 / windows);
     if (fit[0].speed2 <= 0.0 || fit[1].speed2 <= 0.0 ||
         out->omega_e_rms_rad_s < c->min_speed_rms_rad_s ||
         out->positive.maximum_abs_speed_rad_s - out->positive.minimum_abs_speed_rad_s <
@@ -207,7 +215,7 @@ static enum foc_calibration_failure calculate(struct foc_flux_id *ctx)
         !direction_result(&fit[1], &out->negative)) {
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
-    out->residual_rms_v = sqrt(fmax(0.0, error_energy) / windows);
+    out->residual_rms_v = foc_calibration_sqrt(foc_calibration_fmax(0.0, error_energy) / windows);
     if (flux < c->min_flux_wb || flux > c->max_flux_wb) {
         return FOC_CALIBRATION_FAILURE_RANGE;
     }

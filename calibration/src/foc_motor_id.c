@@ -12,6 +12,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_motor_id.h"
+#include "foc_calibration_math.h"
 
 #include <float.h>
 #include <math.h>
@@ -178,8 +179,8 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     }
 
     /* Normalize the columns before testing their mutual independence. */
-    const double i_norm = sqrt(context->i2);
-    const double slew_norm = sqrt(context->slew2);
+    const double i_norm = foc_calibration_sqrt(context->i2);
+    const double slew_norm = foc_calibration_sqrt(context->slew2);
     const double correlation = context->i_slew / (i_norm * slew_norm);
     const double iv = context->i_v / i_norm;
     const double sv = context->slew_v / slew_norm;
@@ -193,7 +194,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
     if (motion && config->known_rs_ohm > 0.0f) {
         /* The shaft turns: R comes from the still d axis, the q data fit L and ke. On a light
          * rotor i follows di/dt within a long level, so a free R separates poorly from L. */
-        const double m_norm = sqrt(context->m2);
+        const double m_norm = foc_calibration_sqrt(context->m2);
         const double sm = context->slew_m / (slew_norm * m_norm);
         rs = config->known_rs_ohm;
         const double ys = (context->slew_v - rs * context->i_slew) / slew_norm;
@@ -204,7 +205,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
         rs_fixed = true;
     } else if (motion) {
         /* Three terms R, L, ke. */
-        const double m_norm = sqrt(context->m2);
+        const double m_norm = foc_calibration_sqrt(context->m2);
         const double norms[3] = {i_norm, slew_norm, m_norm};
         const double y[3] = {iv, sv, context->m_v / m_norm};
         double x[3];
@@ -224,7 +225,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
         l = (sv - correlation * iv) / (excitation * slew_norm);
         if (config->fit_dead_time && context->u2 > 0.0 && isfinite(context->u2)) {
             /* Three terms R, L, Vdt; kept only when the columns are independent enough. */
-            const double u_norm = sqrt(context->u2);
+            const double u_norm = foc_calibration_sqrt(context->u2);
             const double norms[3] = {i_norm, slew_norm, u_norm};
             const double y[3] = {iv, sv, context->u_v / u_norm};
             double x[3];
@@ -294,7 +295,7 @@ static enum foc_calibration_failure foc_motor_id_fit(struct foc_motor_id_context
         return FOC_CALIBRATION_FAILURE_NUMERIC;
     }
     const double residual_upper = (residual2 > 0.0 ? residual2 : 0.0) + roundoff;
-    result->residual_rms_v = sqrt(residual_upper / count);
+    result->residual_rms_v = foc_calibration_sqrt(residual_upper / count);
     if (result->residual_rms_v > config->max_residual_rms_v) {
         return FOC_CALIBRATION_FAILURE_RESIDUAL;
     }

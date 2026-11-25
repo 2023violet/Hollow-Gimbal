@@ -28,6 +28,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_calibration.h"
+#include "foc_trig.h"
 
 #include <float.h>
 #include <math.h>
@@ -186,8 +187,12 @@ static float foc_calibration_candidate_offset(
     for (uint32_t index = 0U; index < count; ++index) {
         const float phase = samples[index].electrical_rad -
             (float)direction * (float)pole_pairs * samples[index].mechanical_rad;
-        sum_sine += sinf(phase);
-        sum_cosine += cosf(phase);
+        float sine;
+        float cosine;
+
+        foc_sincosf(phase, &sine, &cosine);
+        sum_sine += sine;
+        sum_cosine += cosine;
     }
     return atan2f(sum_sine, sum_cosine);
 }

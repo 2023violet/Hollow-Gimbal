@@ -32,6 +32,7 @@
 #include "foc_board_calibrate.h"
 #include "foc_board_boot.h"
 #include "foc_board_profile.h"
+#include "foc_trig.h"
 
 #include <math.h>
 
@@ -560,8 +561,10 @@ static struct foc_vector_dq cal_dead_time_basis(
         ) != FOC_STATUS_OK) {
         return (struct foc_vector_dq){0};
     }
-    const float c = cosf(electrical.angle_rad);
-    const float s = sinf(electrical.angle_rad);
+    float s;
+    float c;
+
+    foc_sincosf(electrical.angle_rad, &s, &c);
     const float alpha = c * record->current_a.d - s * record->current_a.q;
     const float beta = s * record->current_a.d + c * record->current_a.q;
     const float phase[3] = {
@@ -749,7 +752,9 @@ cal_record_estimate(struct foc_board_calibration *cal, const struct foc_board_ca
     const float basis_q = 0.5f * (basis_begin.q + basis_end.q);
     const float vq =
         cal_mean(older->voltage_v.q, begin->voltage_v.q) - cal_dead_time_v(cal) * basis_q;
-    const bool saturated = hypotf(begin->voltage_v.d, begin->voltage_v.q) >= 0.98f * limit;
+    const bool saturated =
+        sqrtf(begin->voltage_v.d * begin->voltage_v.d + begin->voltage_v.q * begin->voltage_v.q) >=
+        0.98f * limit;
     bool ok = true;
     if (cal->state == FOC_BOARD_CAL_RL_D || cal->state == FOC_BOARD_CAL_RL_Q) {
         const bool d_axis = cal->state == FOC_BOARD_CAL_RL_D;
@@ -899,7 +904,9 @@ static bool cal_drain(struct foc_board_calibration *cal)
     bool ok = true;
     while (tail != head && ok) {
         const struct foc_board_cal_record *record = &cal->ring[tail % FOC_BOARD_CAL_RING];
-        cal->probe_current_a = hypotf(record->current_a.d, record->current_a.q);
+        cal->probe_current_a = sqrtf(
+            record->current_a.d * record->current_a.d + record->current_a.q * record->current_a.q
+        );
         cal->flux_angle = record->mechanical_rad;
         cal->flux_angle_us = record->sensor_us;
         ok = cal_record(cal, record);
@@ -932,8 +939,12 @@ cal_coast_begin(struct foc_board_calibration *cal, const struct foc_runtime_snap
 /* Line-to-line voltage of logical phases x and y for a unit EMF on the given axis. */
 static float cal_coast_basis(float theta, float d, float q, unsigned int x, unsigned int y)
 {
-    const float alpha = d * cosf(theta) - q * sinf(theta);
-    const float beta = d * sinf(theta) + q * cosf(theta);
+    float s;
+    float c;
+
+    foc_sincosf(theta, &s, &c);
+    const float alpha = d * c - q * s;
+    const float beta = d * s + q * c;
     const float phase[3] = {
         alpha,
         -0.5f * alpha + 0.8660254f * beta,
@@ -953,7 +964,7 @@ static void cal_coast_finish(struct foc_board_calibration *cal, uint32_t now_us)
         const double a = (cal->coast_qv * cal->coast_dd - cal->coast_dv * cal->coast_qd) / det;
         const double b = (cal->coast_dv * cal->coast_qq - cal->coast_qv * cal->coast_qd) / det;
         const double residual = cal->coast_vv - a * cal->coast_qv - b * cal->coast_dv;
-        const float flux = hypotf((float)a, (float)b);
+        const float flux = sqrtf((float)a * (float)a + (float)b * (float)b);
         cal->coast_flux_wb = flux;
         cal->coast_angle_error_rad = atan2f((float)b, (float)a);
         if (!isfinite(flux) || !(cal->coast_vv > 0.0) ||

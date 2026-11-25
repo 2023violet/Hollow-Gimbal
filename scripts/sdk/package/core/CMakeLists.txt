@@ -2,6 +2,7 @@
 add_library(
   falconfoc-core STATIC
   src/foc_core.c
+  src/foc_trig.c
   src/foc_current.c
   src/foc_impedance.c
   src/foc_impedance_feasibility.c

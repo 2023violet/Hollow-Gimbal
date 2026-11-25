@@ -1,0 +1,67 @@
+calibrate-persist: numeric 27, identical 20, changed 7
+    2.395e-02  metrics.velocity_after_restore.max_plant_firmware_delta: 0.031278539999999744 -> 0.03204591999999984
+    1.557e-02  metrics.velocity_after_restore.tail_mean_abs_error: 0.09938963201661773 -> 0.09784210280866812
+    6.691e-03  metrics.velocity_after_restore.final_value: 5.043150901794434 -> 5.009408473968506
+    8.133e-04  metrics.electrical_after_restore.flux_wb: 0.007984442636370659 -> 0.007990941405296326
+    4.733e-04  metrics.electrical_after_restore.rs_ohm: 0.4500335156917572 -> 0.4502466022968292
+    9.764e-08  boots[1].current_kp_q: 1.2208471298217773 -> 1.2208470106124878
+calibrate: numeric 50, identical 42, changed 8
+    1.103e-01  metrics.current.tail_mean_abs_error: 0.0032662143309911316 -> 0.0029059936602910583
+    2.361e-02  metrics.current.max_plant_firmware_delta: 0.0008294229999999958 -> 0.0008494820000000125
+    1.171e-03  metrics.velocity.tail_mean_abs_error: 0.13404895769839256 -> 0.1338920309054141
+    6.740e-04  metrics.electrical_only_flux_wb: 0.007990999147295952 -> 0.00798561330884695
+    2.567e-04  metrics.velocity.final_value: 5.0097975730896 -> 5.011084079742432
+    1.999e-04  metrics.electrical_relative_error.flux: 0.0005822619423270434 -> 0.0005823783576488703
+can: numeric 14, identical 9, changed 5
+    4.998e-01  metrics.position.zeroed_turns: 3.051766543649137e-05 -> 1.526357482362073e-05
+    1.462e-03  metrics.torque.final_turns_s: 0.17218780517578125 -> 0.1724398285150528
+    1.224e-04  metrics.position.final_turns: 0.2493896335363388 -> 0.2493591159582138
+    8.101e-05  metrics.velocity.mean_turns_s: 0.4986861079931259 -> 0.49864571034908295
+    2.511e-06  metrics.torque.estimate_nm: 0.01001342199742794 -> 0.010013447143137455
+coast: numeric 16, identical 14, changed 2
+    8.640e-06  metrics.dead_time.coast-angle-error: 0.0005659263697452843 -> 0.0005659214803017676
+    8.254e-06  metrics.ideal.coast-angle-error: 0.0005712116835638881 -> 0.0005712069687433541
+current: numeric 9023, identical 8985, changed 38
+    1.536e-03  metadata[367].plant_id_a: -2.65224124e-05 -> -2.6563215e-05
+    1.060e-03  metadata[367].sample_plant_id_a: 4.19630919e-05 -> 4.1918619e-05
+    1.016e-03  metadata[365].plant_id_a: -2.35664645e-05 -> -2.3590441e-05
+    8.699e-04  metadata[368].sample_plant_id_a: 3.771281e-05 -> 3.76800031e-05
+    7.346e-04  metadata[364].plant_id_a: 4.20299394e-05 -> 4.19990647e-05
+    5.651e-04  metadata[366].sample_plant_id_a: 9.63552868e-05 -> 9.63008325e-05
+dead-time: numeric 16, identical 16, changed 0
+inertia: numeric 26, identical 22, changed 4
+    1.159e-02  metrics.feedforward_move.final_error_rad: 3.827329891831128e-05 -> 3.782967429849046e-05
+    9.221e-08  metrics.heavy_rotor.model-inertia: 0.010100160725414753 -> 0.010100159794092178
+    8.036e-08  metrics.heavy_rotor.velocity-ki: 94.93771362304688 -> 94.93770599365234
+    7.890e-08  metrics.heavy_rotor.velocity-kp: 6.043922424316406 -> 6.043921947479248
+position: numeric 94949, identical 67715, changed 27234
+    2.000e+00  samples[1480].iq_a: -0.0015878075500950217 -> 0.0015875953249633312
+    2.000e+00  metadata[3292].firmware_iq_a: -0.00158780755 -> 0.00158759532
+    1.998e+00  samples[1152].id_a: -0.0006539553869515657 -> 0.0006552102277055383
+    1.998e+00  metadata[2636].firmware_id_a: -0.000653955387 -> 0.000655210228
+    1.997e+00  metadata[1041].sample_plant_id_a: -0.000185692925 -> 0.000186266937
+    1.996e+00  metadata[2926].plant_id_a: -0.000212188664 -> 0.000211407639
+rotor-range: numeric 63, identical 60, changed 3
+    1.576e-01  metrics.heavy_0.02.relative_error.flux: -1.0453164577484131e-05 -> -1.2408941984176636e-05
+    7.528e-04  metrics.heavy_0.05.relative_error.flux: 0.0017320513725280762 -> 0.0017307475209236145
+    1.889e-05  metrics.high_r_3e-6.relative_error.flux: -0.004108676066001293 -> -0.004108598455786705
+swap: numeric 30, identical 16, changed 14
+    2.746e-03  metrics.restored_a.tail_error: 0.013036901084937859 -> 0.013001102713210073
+    1.271e-03  metrics.setup_b.calibration.kp_q_v_per_a: 1.41329824924469 -> 1.411502480506897
+    1.271e-03  metrics.setup_b.calibration.lq_h: 0.0014995560050010681 -> 0.0014976506354287267
+    7.211e-04  metrics.setup_b.calibration.flux_wb: 0.009987189434468746 -> 0.009979987516999245
+    1.855e-04  metrics.setup_a.calibration.flux_wb: 0.007994728162884712 -> 0.007993245497345924
+    1.851e-04  metrics.motor_b_on_profile_a.tail_error: 4.941746303283676 -> 4.940831589600526
+trajectory: numeric 12, identical 7, changed 5
+    3.953e-03  metrics.accel_t50_s: 0.252 -> 0.253
+    2.628e-03  metrics.position_move.final_error_rad: 0.0005055327913654384 -> 0.0005042042898301462
+    2.448e-03  metrics.load_hold.tail_error_rad: 0.00031269020258036336 -> 0.00031192474351975574
+    7.820e-05  metrics.load_hold.tail_iq_a: 0.3809899295161584 -> 0.38101972511666504
+    7.803e-08  metrics.position_move.peak_velocity: 12.221609115600586 -> 12.221610069274902
+velocity: numeric 42749, identical 33818, changed 8931
+    1.996e+00  metadata[1099].firmware_id_a: 0.000103741884 -> -0.00010420382
+    1.994e+00  metadata[1176].sample_plant_id_a: 0.000138898777 -> -0.000139765882
+    1.987e+00  metadata[1160].sample_plant_id_a: -2.67078785e-05 -> 2.70619876e-05
+    1.983e+00  metadata[947].plant_id_a: -0.000102757436 -> 0.000100996669
+    1.982e+00  samples[262].id_a: 0.0005936920642852783 -> -0.0006048530340194702
+    1.982e+00  metadata[856].firmware_id_a: 0.000593692064 -> -0.000604853034

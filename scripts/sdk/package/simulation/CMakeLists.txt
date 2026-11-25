@@ -24,8 +24,10 @@ add_library(
   falconfoc-calibration STATIC
   ../calibration/src/foc_calibration.c ../calibration/src/foc_encoder_calibration.c
   ../calibration/src/foc_mechanical_id.c ../calibration/src/foc_motor_id.c
+  ../calibration/src/foc_calibration_math.c ../core/src/foc_trig.c
 )
 target_include_directories(falconfoc-calibration PUBLIC ../calibration/include)
+target_include_directories(falconfoc-calibration PRIVATE ../core/include)
 target_link_libraries(falconfoc-calibration PUBLIC falconfoc-encoder)
 
 add_library(falconfoc-virtual-motor STATIC src/foc_virtual_current.c src/foc_virtual_motor.c)

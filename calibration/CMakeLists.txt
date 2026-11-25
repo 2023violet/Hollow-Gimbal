@@ -27,9 +27,14 @@ add_library(
   src/foc_flux_id.c
   src/foc_encoder_calibration.c
   src/foc_mechanical_id.c
+  src/foc_calibration_math.c
+  # One foc_sincosf() definition; Calibration links no Core library.
+  ../core/src/foc_trig.c
 )
 target_link_libraries(falconfoc-calibration PUBLIC falconfoc-encoder)
 target_include_directories(falconfoc-calibration PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# Header-only foc_trig.h; Calibration links no Core library.
+target_include_directories(falconfoc-calibration PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../core/include")
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(falconfoc-calibration PRIVATE -Wall -Wextra -Wpedantic)

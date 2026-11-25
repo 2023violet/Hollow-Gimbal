@@ -83,6 +83,22 @@
       "redistribution": "owner_pending"
     },
     {
+      "source": "calibration/src/foc_calibration_math.c",
+      "path": "calibration/src/foc_calibration_math.c",
+      "module": "calibration",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "calibration/src/foc_calibration_math.h",
+      "path": "calibration/src/foc_calibration_math.h",
+      "module": "calibration",
+      "kind": "private_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
       "source": "calibration/src/foc_motor_id.c",
       "path": "calibration/src/foc_motor_id.c",
       "module": "calibration",
@@ -171,6 +187,14 @@
       "redistribution": "owner_pending"
     },
     {
+      "source": "core/include/foc_trig.h",
+      "path": "core/include/foc_trig.h",
+      "module": "core",
+      "kind": "public_header",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
       "source": "core/src/foc_core.c",
       "path": "core/src/foc_core.c",
       "module": "core",
@@ -237,6 +261,14 @@
     {
       "source": "core/src/foc_trajectory.c",
       "path": "core/src/foc_trajectory.c",
+      "module": "core",
+      "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "core/src/foc_trig.c",
+      "path": "core/src/foc_trig.c",
       "module": "core",
       "kind": "source",
       "origin": "project_repository",
@@ -463,6 +495,14 @@
       "path": "simulation/src/foc_virtual_current.c",
       "module": "virtual_motor",
       "kind": "source",
+      "origin": "project_repository",
+      "redistribution": "owner_pending"
+    },
+    {
+      "source": "simulation/src/foc_virtual_bootstrap_instrument.h",
+      "path": "simulation/src/foc_virtual_bootstrap_instrument.h",
+      "module": "virtual_motor",
+      "kind": "private_header",
       "origin": "project_repository",
       "redistribution": "owner_pending"
     },

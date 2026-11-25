@@ -21,6 +21,7 @@ add_library(
   src/foc_pipeline.c
   src/foc_runtime.c
   ../core/src/foc_core.c
+  ../core/src/foc_trig.c
   ../core/src/foc_current.c
   ../core/src/foc_impedance.c
   ../core/src/foc_motion.c

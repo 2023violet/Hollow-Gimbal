@@ -1,0 +1,44 @@
+Base    falconfoc-v2-at32f415.elf  acef8d7c92f0
+Target  falconfoc-v2-at32f415.elf  75e4e25c6ead
+
+Memory
+  Nonvolatile / load image: 107560 bytes → 101972 bytes   delta -5588 [exact]
+  Runtime RAM:              15516 bytes → 15516 bytes   delta 0 [exact]
+  Comparability:            exact
+  Base side states:         nonvolatile exact / RAM exact
+  Target side states:       nonvolatile exact / RAM exact
+
+Counts
+  Sections  +0 -0 ~17 (0 rows whose name repeats)
+  Symbols   +852 -918 ~324 (1724 rows whose key repeats)
+  Identical, so left out of the tables: 2 section(s), 407 symbol(s)
+
+Top section growth (Changed rows)
+  none
+
+Largest added sections (absence, never 0)
+  none
+
+Top symbol growth (Changed rows)
+        +68  foc_park                     396 bytes  [Changed]
+        +44  foc_current_modulate         588 bytes  [Changed]
+        +28  foc_flux_id_push             1908 bytes  [Changed]
+        +24  cal_drain                    586 bytes  [Changed]
+        +24  cal_record_estimate          1176 bytes  [Changed]
+
+Largest added symbols (absence, never 0)
+          -  foc_sincosf                  424 bytes  [Added]
+          -  foc_calibration_sqrt         300 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_calibration_fmax         58 bytes  [Added]
+
+Object / module attribution
+  unavailable
+
+Warnings
+  [SYMBOL-AMBIGUOUS] 1724 symbol row(s) repeat a name, kind and binding combination on one or both sides and were left unpaired; a row position is not an identity
+diagnostics: old map parsed with the gnu_ld adapter
+diagnostics: new map parsed with the gnu_ld adapter
+diagnostics: html written to the requested file
+diagnostics: operation op-4e64-18eb2d51a29f8ce0

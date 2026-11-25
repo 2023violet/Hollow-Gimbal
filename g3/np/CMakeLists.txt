@@ -17,7 +17,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 enable_testing()
 
-add_library(falconfoc-core STATIC ../../core/src/foc_core.c)
+add_library(falconfoc-core STATIC ../../core/src/foc_core.c ../../core/src/foc_trig.c)
 target_include_directories(falconfoc-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../core/include")
 
 add_library(falconfoc-device STATIC src/foc_device.c)

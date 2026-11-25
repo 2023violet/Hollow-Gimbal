@@ -131,7 +131,8 @@ static int foc_current_modulate(
         return status;
     }
     /* Permit float roundoff at the envelope, but reject materially coarse duties. */
-    const float voltage_magnitude = hypotf(voltage.alpha, voltage.beta);
+    const float voltage_magnitude =
+        sqrtf(voltage.alpha * voltage.alpha + voltage.beta * voltage.beta);
     const float rounding_slack = 16.0f * FLT_EPSILON * voltage_limit_v;
     const float excess_v = voltage_magnitude - voltage_limit_v;
     if (excess_v > (*voltage_repaired ? -rounding_slack : rounding_slack)) {
@@ -151,7 +152,8 @@ static int foc_current_modulate(
         duty->duty_c = minimum + (duty->duty_c - minimum) * scale;
         duty->saturated = 1U;
         voltage = foc_current_duty_voltage(duty, input->vbus_v);
-        if (hypotf(voltage.alpha, voltage.beta) > voltage_limit_v - rounding_slack) {
+        if (sqrtf(voltage.alpha * voltage.alpha + voltage.beta * voltage.beta) >
+            voltage_limit_v - rounding_slack) {
             return FOC_STATUS_ERR_VOLTAGE_LIMIT;
         }
         /* Preserve the inward voltage margin if anti-windup remodulates this step. */

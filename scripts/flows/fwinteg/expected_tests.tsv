@@ -3,7 +3,9 @@
 # plus test-foc-capture-boot-import (01R item A) and test-foc-adc-candidate (FW-ADC-01
 # Capture -> ADC candidate -> isolated Runtime) and test-foc-board1-sil (M0 Board1 SIL:
 # production Board1 path against a virtual motor over UART) and test-foc-board-store (M2
-# persistent settings record, torn saves, boot restore). Any change must be explained here.
+# persistent settings record, torn saves, boot restore) and test-foc-can (CANSimple) and
+# test-foc-trig (ROM-01 foc_sincosf accuracy); test-legacy-sincos-baseline left with the
+# Legacy removal. Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
 calibration	test-foc-calibration
@@ -40,6 +42,7 @@ core	test-foc-pmsm-reference
 core	test-foc-sector-reference
 core	test-foc-svpwm
 core	test-foc-trajectory
+core	test-foc-trig
 examples-calibration-workflow	test-falconfoc-calibration-workflow-demo
 examples-servo	test-falconfoc-servo-configured
 examples-servo	test-falconfoc-servo-demo

@@ -77,6 +77,7 @@ add_library(
   src/foc_can.c
   src/foc_uart_buffer.c
   "${repo}/core/src/foc_core.c"
+  "${repo}/core/src/foc_trig.c"
   "${repo}/core/src/foc_current.c"
   "${repo}/core/src/foc_impedance.c"
   "${repo}/core/src/foc_motion.c"
@@ -87,6 +88,7 @@ add_library(
   "${repo}/calibration/src/foc_motor_id.c"
   "${repo}/calibration/src/foc_flux_id.c"
   "${repo}/calibration/src/foc_mechanical_id.c"
+  "${repo}/calibration/src/foc_calibration_math.c"
   "${repo}/sensors/src/foc_encoder.c"
   "${repo}/g3/np/src/foc_device.c"
   "${repo}/g3/np/src/foc_device_sim.c"

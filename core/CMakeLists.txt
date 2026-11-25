@@ -21,6 +21,7 @@ option(BUILD_TESTING "Build FalconFOC Core tests" ON)
 add_library(
   falconfoc-core STATIC
   src/foc_core.c
+  src/foc_trig.c
   src/foc_current.c
   src/foc_motion.c
   src/foc_motion_limits.c
@@ -78,6 +79,7 @@ endfunction()
 
 themis_add_falconfoc_test(test-foc-math tests/test_foc_math.c)
 themis_add_falconfoc_test(test-foc-math-reference tests/test_foc_math_reference.c)
+themis_add_falconfoc_test(test-foc-trig tests/test_foc_trig.c)
 themis_add_falconfoc_test(test-foc-svpwm tests/test_foc_svpwm.c)
 themis_add_falconfoc_test(test-foc-core tests/test_foc_core.c)
 themis_add_falconfoc_test(test-foc-current tests/test_foc_current.c)

@@ -294,6 +294,16 @@ foc_serial_commission_value(const struct foc_serial_commission_view *view, uint1
         return foc_serial_float_bits(view->coast_angle_error_rad);
     case FOC_PARAM_DRIVEN_FLUX:
         return foc_serial_float_bits(view->driven_flux_wb);
+    case FOC_PARAM_COGGING_STATUS:
+        return view->cogging_status;
+    case FOC_PARAM_COGGING_PEAK:
+        return foc_serial_float_bits(view->cogging_peak_a);
+    case FOC_PARAM_COGGING_RMS:
+        return foc_serial_float_bits(view->cogging_rms_a);
+    case FOC_PARAM_COGGING_FRICTION:
+        return foc_serial_float_bits(view->cogging_friction_a);
+    case FOC_PARAM_COGGING_CONSISTENCY:
+        return foc_serial_float_bits(view->cogging_consistency);
     default:
         return foc_serial_float_bits(view->dead_time_v);
     }
@@ -860,6 +870,39 @@ static bool foc_serial_controls(uint8_t type)
         type == FOC_MSG_SET_ZERO;
 }
 
+/* COGGING_READ: 64 codes of the cogging table from an offset (u16). Body: bins u16, scale
+ * f32 (A per code, 0 when empty), offset u16, count u8, codes int8. */
+static int foc_serial_cogging_read(
+    const struct foc_runtime *runtime,
+    const struct foc_protocol_frame *request,
+    struct foc_protocol_frame *response
+)
+{
+    const struct foc_runtime_cogging_table *table = runtime->config.motion.cogging_table;
+    if (table == NULL) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    if (request->length != 2U) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    const uint32_t offset = foc_protocol_read_u16(request->payload);
+    if (offset >= FOC_RUNTIME_COGGING_BINS) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    const uint32_t remaining = FOC_RUNTIME_COGGING_BINS - offset;
+    const uint32_t count = remaining < 64U ? remaining : 64U;
+    uint8_t *body = response->payload;
+    foc_protocol_write_u16(body + 1, (uint16_t)FOC_RUNTIME_COGGING_BINS);
+    foc_protocol_write_u32(body + 3, foc_serial_float_bits(table->scale_a));
+    foc_protocol_write_u16(body + 7, (uint16_t)offset);
+    body[9] = (uint8_t)count;
+    for (uint32_t index = 0U; index < count; ++index) {
+        body[10U + index] = (uint8_t)table->code[offset + index];
+    }
+    response->length = (uint8_t)(10U + count);
+    return FOC_PROTO_OK;
+}
+
 /* SET_ZERO: the present output position becomes zero. DISABLED with INHIBIT confirmed and
  * a fresh sensor, as for a parameter write; PARAM_SAVE stores it. */
 static int foc_serial_set_zero(
@@ -986,7 +1029,8 @@ static int foc_serial_dispatch(
         /* Optional stage mask: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5); empty means both. */
         const unsigned int stages = request->length == 0U ? 3U : request->payload[0];
         /* 1-4 as before; 8 (CAL-7) alone or with the rotor/electrical bits (8-11). */
-        if (request->length > 1U || stages < 1U || (stages > 4U && (stages < 8U || stages > 11U))) {
+        if (request->length > 1U || stages < 1U ||
+            (stages > 4U && (stages < 8U || stages > 11U) && stages != 16U)) {
             return FOC_PROTO_INVALID_ARGUMENT;
         }
         return serial->calibration.start == NULL
@@ -1011,6 +1055,9 @@ static int foc_serial_dispatch(
             serial->dirty = true;
         }
         return result;
+    }
+    if (request->type == FOC_MSG_COGGING_READ) {
+        return foc_serial_cogging_read(runtime, request, response);
     }
     if (request->length != 0U) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -1144,6 +1191,7 @@ void foc_serial_init_with_policy(
         .can = foc_serial_can_defaults(),
         .thermal = foc_serial_thermal_defaults(),
         .temperature = {NAN, NAN},
+        .cogging = foc_serial_cogging_defaults(),
     };
     struct foc_runtime_lifecycle_result lifecycle;
     if (foc_runtime_read_lifecycle_result((struct foc_runtime *)runtime, &lifecycle) ==
@@ -1254,6 +1302,17 @@ bool foc_serial_thermal_settings_valid(const struct foc_serial_thermal_settings 
         foc_serial_range(settings->beta_k, 1000.0f, 10000.0f) &&
         foc_serial_range(settings->r25_ohm, 100.0f, 1.0e6f) &&
         foc_serial_range(settings->pullup_ohm, 100.0f, 1.0e6f) && settings->topology <= 1U;
+}
+
+struct foc_serial_cogging_settings foc_serial_cogging_defaults(void)
+{
+    return (struct foc_serial_cogging_settings){.speed_rad_s = 0.25f, .keep_first_harmonic = 0U};
+}
+
+bool foc_serial_cogging_settings_valid(const struct foc_serial_cogging_settings *settings)
+{
+    return foc_serial_range(settings->speed_rad_s, 0.05f, 2.0f) &&
+        settings->keep_first_harmonic <= 1U;
 }
 
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link)

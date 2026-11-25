@@ -694,6 +694,58 @@ static int test_profile_torque_constant(void)
     return 0;
 }
 
+/* Cogging table: tuning switch, refusal without a table, and the interpolated q current
+ * added to the impedance proposal at the sample's angle modulo one turn. */
+static int test_cogging_table(void)
+{
+    static struct foc_runtime runtime;
+    static struct foc_runtime_cogging_table table = {.scale_a = 0.01f};
+    table.code[81] = 10;
+    table.code[82] = 20;
+    struct foc_runtime_config derived = config;
+    derived.motion.impedance.torque_constant_from_profile = true;
+    derived.motion.cogging_table = &table;
+    derived.motion.cogging_frame_id = 7U;
+    CHECK(foc_runtime_init(&runtime, &pipeline_config, &derived, 0U) == FOC_RUNTIME_OK);
+    struct foc_runtime_tuning tuning;
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(tuning.cogging_enabled == 0U && !runtime.cogging_enabled);
+    tuning.command_timeout_us = FOC_RUNTIME_LEASE_MIN_US;
+    tuning.cogging_enabled = 2U;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_ERR_CONFIG);
+    tuning.cogging_enabled = 1U;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_OK);
+    CHECK(runtime.cogging_enabled);
+    CHECK(foc_runtime_read_tuning(&runtime, &tuning) == FOC_RUNTIME_OK && tuning.cogging_enabled == 1U);
+    /* An empty table cannot be switched on. */
+    table.scale_a = 0.0f;
+    CHECK(foc_runtime_init(&runtime, &pipeline_config, &derived, 0U) == FOC_RUNTIME_OK);
+    tuning.cogging_enabled = 1U;
+    CHECK(foc_runtime_apply_tuning(&runtime, &tuning) == FOC_RUNTIME_ERR_CONFIG);
+    table.scale_a = 0.01f;
+
+    /* The same proposal with and without compensation differs by the table value. */
+    float q[2];
+    for (unsigned int pass = 0U; pass < 2U; ++pass) {
+        struct foc_runtime_config fixed = config;
+        fixed.motion.cogging_table = &table;
+        fixed.motion.cogging_frame_id = 7U;
+        CHECK(select_impedance(&runtime, &fixed, &pipeline_config) == 0);
+        runtime.cogging_enabled = pass == 1U;
+        const struct foc_runtime_command accepted = command_at(&runtime, 10U, 150U);
+        CHECK(foc_runtime_publish_impedance_command(&runtime, &accepted, 150U) == FOC_RUNTIME_OK);
+        CHECK(arm_start(&runtime, 200U) == 0);
+        CHECK(sense(&runtime, 400U, 0.5f, 0.5f, 7U) == FOC_RUNTIME_OK);
+        CHECK(proposal(&runtime)->target_valid);
+        q[pass] = proposal(&runtime)->target.target_a.q;
+    }
+    const float position = 0.5f * 0.15915494309189535f * 1024.0f;
+    const float blend = position - 81.0f;
+    const float expected = 0.01f * ((1.0f - blend) * 10.0f + blend * 20.0f);
+    CHECK(q[0] == 0.5f && fabsf(q[1] - q[0] - expected) < 1.0e-5f);
+    return 0;
+}
+
 /* Test Entry ------------------------------------------------------------------- */
 
 int main(void)
@@ -702,7 +754,8 @@ int main(void)
         test_stop_preemption(FOC_RUNTIME_HOOK_COMMAND_WRITING) ||
         test_stop_preemption(FOC_RUNTIME_HOOK_SENSOR_WRITING) ||
         test_disabled_set_mode_observes_adc() || test_source_order_across_modes() ||
-        test_damping_capture_and_session() || test_profile_torque_constant();
+        test_damping_capture_and_session() || test_profile_torque_constant() ||
+        test_cogging_table();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

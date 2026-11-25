@@ -27,14 +27,18 @@
 
 /* Private Helpers -------------------------------------------------------------- */
 
+/* Slots 0 and 1 hold the settings records; slot 2 (cogging) is the sector below them. */
 static uint32_t foc_at32_store_address(unsigned int slot, size_t offset)
 {
-    return FOC_AT32_STORE_BASE + (uint32_t)slot * FOC_BOARD_STORE_SLOT_BYTES + (uint32_t)offset;
+    const uint32_t sector = slot == FOC_BOARD_STORE_COGGING_SLOT
+        ? FOC_AT32_STORE_BASE - FOC_BOARD_STORE_SLOT_BYTES
+        : FOC_AT32_STORE_BASE + (uint32_t)slot * FOC_BOARD_STORE_SLOT_BYTES;
+    return sector + (uint32_t)offset;
 }
 
 static bool foc_at32_store_range(unsigned int slot, size_t offset, size_t size)
 {
-    return slot <= 1U && offset <= FOC_BOARD_STORE_SLOT_BYTES &&
+    return slot <= FOC_BOARD_STORE_COGGING_SLOT && offset <= FOC_BOARD_STORE_SLOT_BYTES &&
         size <= FOC_BOARD_STORE_SLOT_BYTES - offset;
 }
 
@@ -52,7 +56,7 @@ foc_at32_store_read(void *context, unsigned int slot, size_t offset, uint8_t *by
 static int foc_at32_store_erase(void *context, unsigned int slot)
 {
     (void)context;
-    if (slot > 1U) {
+    if (slot > FOC_BOARD_STORE_COGGING_SLOT) {
         return -1;
     }
     flash_unlock();

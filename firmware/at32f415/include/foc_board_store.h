@@ -39,11 +39,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct foc_board_cogging;
+
 /* Public Types ---------------------------------------------------------------- */
 
 enum foc_board_store_limits {
     /** Bytes reserved per slot; the device erase unit must fit inside. */
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
+    /** Driver slot of the CAL-8 cogging page (0x0801E800 on Board1), below the records. */
+    FOC_BOARD_STORE_COGGING_SLOT = 2,
+    /** Cogging page: 28-byte header, then one int8 code per bin. */
+    FOC_BOARD_STORE_COGGING_BYTES = 28 + FOC_RUNTIME_COGGING_BINS,
     /** Largest format-9 record: header, CRC and every entry (parameters, identity,
      * calibration); the encoded length may be smaller. */
     FOC_BOARD_STORE_RECORD_BYTES = 20 + 4 + 8 * (FOC_PARAMETER_PERSIST_COUNT + 8 + 1 + 7),
@@ -86,6 +92,8 @@ struct foc_board_settings {
     struct foc_serial_can_settings can;
     /** NTC protection settings (IDs 138–146, 148). */
     struct foc_serial_thermal_settings thermal;
+    /** CAL-8 sweep settings (IDs 150, 151). */
+    struct foc_serial_cogging_settings cogging;
     /** An applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;
@@ -135,6 +143,10 @@ struct foc_board_persistence {
     /** True when boot restore re-initialized the instance with a stored calibration. */
     bool calibration_restored;
     struct foc_calibration_snapshot restored_calibration;
+    /** CAL-8 acquisition whose table boot restore loads and PARAM_SAVE stores; may be NULL. */
+    struct foc_board_cogging *cogging;
+    /** True when boot restore loaded a cogging table. */
+    bool cogging_restored;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -148,6 +160,17 @@ size_t foc_board_store_encode(const struct foc_board_store_identity *identity,
                               const struct foc_board_settings *settings,
                               uint32_t sequence,
                               uint8_t record[FOC_BOARD_STORE_RECORD_BYTES]);
+
+/** Store a cogging table (or erase the page for an empty one) for this identity. */
+int foc_board_store_cogging_save(const struct foc_board_store_driver *driver,
+                                 const struct foc_board_store_identity *identity,
+                                 const struct foc_runtime_cogging_table *table);
+
+/** Load the cogging page; OK only for an intact page of the same pole pairs and encoder.
+ * Any other result leaves the table empty. */
+int foc_board_store_cogging_load(const struct foc_board_store_driver *driver,
+                                 const struct foc_board_store_identity *identity,
+                                 struct foc_runtime_cogging_table *table);
 
 /** True when a decoded record carried foc_parameter_table[index]. */
 bool foc_board_settings_present(const struct foc_board_settings *settings, size_t index);

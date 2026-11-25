@@ -38,6 +38,7 @@
 #include "foc_board.h"
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
+#include "foc_board_cogging.h"
 #include "foc_board_store.h"
 #include "foc_board_thermal.h"
 #include "foc_board_timing.h"
@@ -121,7 +122,7 @@ struct sil_plant {
 /* Two flash slots of erased 0xFF bytes; optionally mirrored to a file so that
  * restarting the process with the same file behaves as a power cycle. */
 struct sil_flash {
-    uint8_t slots[2][FOC_BOARD_STORE_SLOT_BYTES];
+    uint8_t slots[3][FOC_BOARD_STORE_SLOT_BYTES];
     const char *path;
     uint32_t erases;
     uint32_t programs;
@@ -890,7 +891,7 @@ static void sil_usage(const char *name)
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
         "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n"
         "          [--dead-time-v v] [--can serial] [--thermal ambient_c,rth_k_per_w,tau_s]\n"
-        "          [--ntc-override-us on_us,off_us,celsius]\n",
+        "          [--ntc-override-us on_us,off_us,celsius] [--cogging-nm amp,cycles[,phase]]\n",
         name
     );
 }
@@ -931,7 +932,8 @@ static int
 sil_flash_read(void *context, unsigned int slot, size_t offset, uint8_t *bytes, size_t size)
 {
     const struct sil_flash *flash = context;
-    if (slot > 1U || offset > sizeof flash->slots[0] || size > sizeof flash->slots[0] - offset) {
+    if (slot > FOC_BOARD_STORE_COGGING_SLOT || offset > sizeof flash->slots[0] ||
+        size > sizeof flash->slots[0] - offset) {
         return -1;
     }
     memcpy(bytes, &flash->slots[slot][offset], size);
@@ -941,7 +943,7 @@ sil_flash_read(void *context, unsigned int slot, size_t offset, uint8_t *bytes, 
 static int sil_flash_erase(void *context, unsigned int slot)
 {
     struct sil_flash *flash = context;
-    if (slot > 1U) {
+    if (slot > FOC_BOARD_STORE_COGGING_SLOT) {
         return -1;
     }
     memset(flash->slots[slot], 0xFF, sizeof flash->slots[slot]);
@@ -959,7 +961,7 @@ static int sil_flash_program(
 )
 {
     struct sil_flash *flash = context;
-    if (slot > 1U || offset % FOC_BOARD_STORE_PROGRAM_BYTES != 0U ||
+    if (slot > FOC_BOARD_STORE_COGGING_SLOT || offset % FOC_BOARD_STORE_PROGRAM_BYTES != 0U ||
         size % FOC_BOARD_STORE_PROGRAM_BYTES != 0U || offset > sizeof flash->slots[0] ||
         size > sizeof flash->slots[0] - offset) {
         return -1;
@@ -987,6 +989,9 @@ int main(int argc, char **argv)
     float vbus_v = 12.0f;
     double load_torque_nm = 0.0;
     uint32_t load_on_us = 0U;
+    double cogging_nm = 0.0;
+    unsigned int cogging_cycles = 0U;
+    double cogging_phase = 0.0;
     const char *flash_path = NULL;
     struct foc_virtual_motor_params motor = sil_default_motor();
     device.trace_us = 500U;
@@ -1055,6 +1060,13 @@ int main(int argc, char **argv)
             device.driver_fault_on_us = (uint32_t)strtoul(value, &rest, 0);
             device.driver_fault_off_us =
                 rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, NULL, 0) : UINT32_MAX;
+        } else if (strcmp(option, "--cogging-nm") == 0) {
+            /* Plant cogging torque: amplitude N*m, cycles per turn, phase rad. */
+            char *rest = NULL;
+            cogging_nm = strtod(value, &rest);
+            cogging_cycles =
+                rest != NULL && *rest == ',' ? (unsigned int)strtoul(rest + 1, &rest, 0) : 0U;
+            cogging_phase = rest != NULL && *rest == ',' ? strtod(rest + 1, NULL) : 0.0;
         } else if (strcmp(option, "--thermal") == 0) {
             /* NTC plant: ambient in degC, winding thermal resistance in K/W, time constant s. */
             char *rest = NULL;
@@ -1113,7 +1125,9 @@ int main(int argc, char **argv)
     const struct foc_virtual_motor_state initial = {0};
     plant->load_torque_nm = load_torque_nm;
     plant->load_on_us = load_on_us;
-    if (foc_virtual_motor_init(&plant->motor, &motor, &initial) != 0 || !isfinite(load_torque_nm)) {
+    if (foc_virtual_motor_init(&plant->motor, &motor, &initial) != 0 || !isfinite(load_torque_nm) ||
+        foc_virtual_motor_set_cogging(&plant->motor, cogging_nm, cogging_cycles, cogging_phase) !=
+            0) {
         fprintf(stderr, "FALCONF0C_META {\"kind\":\"error\",\"reason\":\"plant parameters\"}\n");
         return 2;
     }
@@ -1160,6 +1174,7 @@ int main(int argc, char **argv)
         sil_phase_voltage_read,
         &device
     );
+    foc_board_calibration_attach_cogging(&device.calibration, &foc_board_cogging_state);
     const struct foc_serial_calibration calibration =
         foc_board_calibration_serial(&device.calibration);
     foc_serial_attach_calibration(&device.serial, &calibration);
@@ -1173,6 +1188,7 @@ int main(int argc, char **argv)
         .erase = sil_flash_erase,
         .program = sil_flash_program,
     };
+    device.persistence.cogging = &foc_board_cogging_state;
     foc_board_persistence_restore(
         &device.persistence,
         &device.boot,

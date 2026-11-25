@@ -715,6 +715,8 @@ static int test_thermal_poll(void)
     const uint32_t both =
         FOC_SAFE_FAULT_OVER_TEMPERATURE_FET | FOC_SAFE_FAULT_OVER_TEMPERATURE_MOTOR;
     CHECK(foc_board_init(&runtime, &output, 0U) == FOC_RUNTIME_OK);
+    /* Board1 boots with the I2t time constant set; it acts once a rated current is set. */
+    CHECK(runtime.config.profile.thermal_tau_s == 30.0f && !(runtime.i2t.rate_per_us > 0.0f));
     foc_serial_init(&serial, &runtime);
     foc_board_thermal_init(&thermal, fake_ntc, ratios);
 

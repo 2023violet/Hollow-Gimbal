@@ -117,7 +117,12 @@
 #define CAL_COAST_MAX_SAMPLES       400U
 #define CAL_COAST_MIN_EMF_V         0.3f
 #define CAL_COAST_MIN_READING_V     0.03f
-#define CAL_COAST_MAX_RESIDUAL      0.1
+/* CAL-8: total sweep travel in rotor rad (lead, forward turn, turn-around, backward turn)
+ * and the slack added to its nominal time before TIMEOUT. */
+#define CAL_COGGING_TRAVEL_RAD \
+    (3.0f * FOC_BOARD_COGGING_LEAD_RAD + 2.0f * (CAL_TWO_PI + FOC_BOARD_COGGING_MARGIN_RAD))
+#define CAL_COGGING_SLACK_US   5000000U
+#define CAL_COAST_MAX_RESIDUAL 0.1
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -146,8 +151,13 @@ cal_fail(struct foc_board_calibration *cal, enum foc_board_cal_failure failure, 
     atomic_store(&cal->record_active, 0U);
     if ((cal->state >= FOC_BOARD_CAL_DRIVE_MODE && cal->state <= FOC_BOARD_CAL_SWEEP) ||
         (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
-        cal->state == FOC_BOARD_CAL_INERTIA) {
+        cal->state == FOC_BOARD_CAL_INERTIA ||
+        (cal->state >= FOC_BOARD_CAL_COGGING_ARM && cal->state <= FOC_BOARD_CAL_COGGING)) {
         foc_runtime_revoke_command(cal->runtime);
+    }
+    if (cal->state >= FOC_BOARD_CAL_COGGING_MODE && cal->state <= FOC_BOARD_CAL_COGGING &&
+        cal->cogging != NULL) {
+        cal->cogging->status = FOC_BOARD_COGGING_FAILED;
     }
     if (cal->failing) {
         /* Failed while returning the mode: stop here and keep the first reason. */
@@ -1488,6 +1498,176 @@ static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
 
 /* Public Functions ------------------------------------------------------------- */
 
+/* CAL-8 hold or sweep reference: a POSITION command on the shared publication sequence. */
+static void cal_cogging_command(struct foc_board_calibration *cal, float reference, uint32_t now_us)
+{
+    const struct foc_runtime_command command = {
+        .mode = FOC_RUNTIME_MODE_POSITION,
+        .seq = ++cal->serial->publication_seq,
+        .produced_us = now_us,
+        .target.motion_ref = reference,
+    };
+    (void)foc_runtime_publish_motion_command(cal->runtime, &command, now_us);
+}
+
+/* CAL-8 start: compensation off for the acquisition (a tuning request), then POSITION. */
+static int cal_cogging_start(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (cal->cogging == NULL) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    if (foc_board_calibration_gate(cal) != FOC_PROTO_OK || !cal->runtime->config.motion.enabled) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    if (cal->tuning.cogging_enabled != 0U) {
+        cal->tuning.cogging_enabled = 0U;
+        if (foc_runtime_publish_tuning(
+                cal->runtime,
+                &cal->tuning,
+                ++cal->serial->tuning_sequence
+            ) != FOC_RUNTIME_OK) {
+            return FOC_PROTO_BUSY;
+        }
+    }
+    cal->failure = FOC_BOARD_CAL_FAILURE_NONE;
+    cal->failed_state = FOC_BOARD_CAL_IDLE;
+    cal->admission_failure = FOC_CALIBRATION_ADMISSION_NONE;
+    cal->lifecycle_sequence = 0U;
+    cal->last_us = now_us;
+    cal->stages = FOC_BOARD_CAL_STAGE_COGGING;
+    cal->committed = 0U;
+    cal->mode_claimed = false;
+    cal->failing = false;
+    cal->cogging->status = FOC_BOARD_COGGING_FAILED;
+    cal_enter(cal, FOC_BOARD_CAL_COGGING_MODE, now_us);
+    return FOC_PROTO_ACCEPTED;
+}
+
+/* CAL-8 after the drive stopped: fit, then switch compensation on for a new table. */
+static void cal_cogging_finish(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    struct foc_board_cogging *cogging = cal->cogging;
+    const enum foc_board_cogging_status status = foc_board_cogging_finish(
+        cogging,
+        cal->serial->cogging.keep_first_harmonic != 0U,
+        cal->runtime->config.motion.iq_limit_a
+    );
+    if (status == FOC_BOARD_COGGING_VALID) {
+        struct foc_runtime_tuning tuning;
+        if (foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+            return;
+        }
+        tuning.cogging_enabled = 1U;
+        if (foc_runtime_publish_tuning(cal->runtime, &tuning, ++cal->serial->tuning_sequence) !=
+            FOC_RUNTIME_OK) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TUNE, now_us);
+            return;
+        }
+        cal->committed = FOC_BOARD_CAL_STAGE_COGGING;
+        cal->serial->dirty = true;
+    } else if (status != FOC_BOARD_COGGING_NEGLIGIBLE) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_COGGING, now_us);
+        return;
+    }
+    cal->lifecycle_sequence = 0U;
+    cal_enter(cal, FOC_BOARD_CAL_RESTORE, now_us);
+}
+
+/* CAL-8 states: POSITION, ARM and START at the hold position, the sweep, the stop. */
+static void cal_cogging(
+    struct foc_board_calibration *cal,
+    const struct foc_runtime_snapshot *view,
+    uint32_t now_us
+)
+{
+    struct foc_runtime_tuning_result tuning;
+    switch (cal->state) {
+    case FOC_BOARD_CAL_COGGING_MODE:
+        if (foc_runtime_read_tuning_result(cal->runtime, &tuning) != FOC_RUNTIME_OK ||
+            tuning.result == FOC_RUNTIME_REQUEST_PENDING) {
+            break; /* compensation is still being switched off */
+        }
+        cal->cogging_origin_rad = view->mechanical_rad;
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_SET_MODE,
+            FOC_RUNTIME_MODE_POSITION,
+            FOC_BOARD_CAL_COGGING_ARM,
+            now_us
+        );
+        if (cal->state == FOC_BOARD_CAL_COGGING_ARM) {
+            cal->mode_claimed = true;
+        }
+        break;
+    case FOC_BOARD_CAL_COGGING_ARM:
+        cal_cogging_command(cal, cal->cogging_origin_rad, now_us);
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_ARM,
+            FOC_RUNTIME_MODE_POSITION,
+            FOC_BOARD_CAL_COGGING_START,
+            now_us
+        );
+        break;
+    case FOC_BOARD_CAL_COGGING_START:
+        cal_cogging_command(cal, cal->cogging_origin_rad, now_us);
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_START,
+            FOC_RUNTIME_MODE_POSITION,
+            FOC_BOARD_CAL_COGGING,
+            now_us
+        );
+        if (cal->state == FOC_BOARD_CAL_COGGING) {
+            foc_board_cogging_begin(
+                cal->cogging,
+                cal->cogging_origin_rad,
+                cal->serial->cogging.speed_rad_s
+            );
+            cal->cogging->status = FOC_BOARD_COGGING_FAILED;
+            cal->cogging_start_us = now_us;
+        }
+        break;
+    case FOC_BOARD_CAL_COGGING: {
+        float reference;
+        const uint32_t elapsed_us = now_us - cal->cogging_start_us;
+        const int direction = foc_board_cogging_step(cal->cogging, elapsed_us, &reference);
+        if (view->sensor_valid && view->current_valid) {
+            foc_board_cogging_sample(
+                cal->cogging,
+                direction,
+                view->sensor_us,
+                view->mechanical_rad,
+                view->target_iq_a
+            );
+        }
+        if (cal->cogging->phase == FOC_BOARD_COGGING_END) {
+            foc_runtime_revoke_command(cal->runtime);
+            cal_enter(cal, FOC_BOARD_CAL_COGGING_STOP, now_us);
+        } else if (
+            elapsed_us >
+            (uint32_t)(CAL_COGGING_TRAVEL_RAD / cal->serial->cogging.speed_rad_s * 1.0e6f) +
+                CAL_COGGING_SLACK_US
+        ) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+        } else {
+            cal_cogging_command(cal, reference, now_us);
+        }
+        break;
+    }
+    case FOC_BOARD_CAL_COGGING_STOP:
+        if (cal_quiet(view)) {
+            cal_cogging_finish(cal, now_us);
+        } else if (now_us - cal->state_us > CAL_STOP_TIMEOUT_US) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 void foc_board_calibration_bind(
     struct foc_board_calibration *calibration,
     struct foc_runtime *runtime,
@@ -1532,6 +1712,25 @@ int foc_board_calibration_start(
     unsigned int stages
 )
 {
+    if (stages == FOC_BOARD_CAL_STAGE_COGGING) {
+        if (cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
+            cal->output->backend == NULL) {
+            return FOC_PROTO_OUTPUT_LOCKED;
+        }
+        if (foc_board_calibration_busy(cal)) {
+            return FOC_PROTO_BUSY;
+        }
+        struct foc_runtime_snapshot quiet;
+        struct foc_runtime_tuning_result pending;
+        if (foc_runtime_read_snapshot(cal->runtime, &quiet) != FOC_RUNTIME_OK ||
+            !cal_quiet(&quiet) || fabsf(quiet.mechanical_rad_s) > CAL_STILL_RAD_S ||
+            foc_runtime_read_tuning_result(cal->runtime, &pending) != FOC_RUNTIME_OK ||
+            pending.result == FOC_RUNTIME_REQUEST_PENDING ||
+            foc_runtime_read_tuning(cal->runtime, &cal->tuning) != FOC_RUNTIME_OK) {
+            return FOC_PROTO_BAD_STATE;
+        }
+        return cal_cogging_start(cal, now_us);
+    }
     const bool zero_only = stages == FOC_BOARD_CAL_STAGE_ZERO;
     const unsigned int drive_stages = stages & ~(unsigned int)FOC_BOARD_CAL_STAGE_MECHANICAL;
     const bool mechanical = (stages & FOC_BOARD_CAL_STAGE_MECHANICAL) != 0U;
@@ -1651,6 +1850,16 @@ void foc_board_calibration_adopt(
     }
 }
 
+void foc_board_calibration_attach_cogging(
+    struct foc_board_calibration *calibration,
+    struct foc_board_cogging *cogging
+)
+{
+    if (calibration != NULL) {
+        calibration->cogging = cogging;
+    }
+}
+
 void foc_board_calibration_attach_phase_voltage(
     struct foc_board_calibration *calibration,
     foc_board_phase_voltage_read read,
@@ -1758,6 +1967,12 @@ int foc_board_calibration_reset(struct foc_board_calibration *cal, uint32_t now_
     cal->serial->output_zero_rad = 0.0f;
     cal->serial->can = foc_serial_can_defaults();
     cal->serial->thermal = foc_serial_thermal_defaults();
+    cal->serial->cogging = foc_serial_cogging_defaults();
+    if (cal->cogging != NULL) {
+        /* The boot tuning switched compensation off before the table is cleared. */
+        foc_board_cogging_init(cal->cogging);
+        cal->cogging->dirty = true;
+    }
     cal->snapshot = boot != NULL ? *boot : (struct foc_calibration_snapshot){0};
     cal->active_source = boot != NULL ? FOC_BOARD_CAL_SOURCE_SUPPLY : FOC_BOARD_CAL_SOURCE_BOOT;
     cal->align_voltage_v = 0.0f;
@@ -1805,7 +2020,7 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     }
     const bool driving = (cal->state >= FOC_BOARD_CAL_ALIGN && cal->state <= FOC_BOARD_CAL_SWEEP) ||
         (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
-        cal->state == FOC_BOARD_CAL_INERTIA;
+        cal->state == FOC_BOARD_CAL_INERTIA || cal->state == FOC_BOARD_CAL_COGGING;
     if (driving && view.state != FOC_SAFE_STATE_RUNNING) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_DRIVE, now_us);
         return;
@@ -1974,6 +2189,13 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     case FOC_BOARD_CAL_COAST:
         cal_coast(cal, &view, now_us);
         break;
+    case FOC_BOARD_CAL_COGGING_MODE:
+    case FOC_BOARD_CAL_COGGING_ARM:
+    case FOC_BOARD_CAL_COGGING_START:
+    case FOC_BOARD_CAL_COGGING:
+    case FOC_BOARD_CAL_COGGING_STOP:
+        cal_cogging(cal, &view, now_us);
+        break;
     case FOC_BOARD_CAL_RESTORE:
         if (cal->failing && !cal_quiet(&view)) {
             if (now_us - cal->state_us > CAL_FAIL_QUIET_US) {
@@ -2047,15 +2269,19 @@ static bool cal_serial_read(const void *context, struct foc_serial_calibration_v
         .kp_q_v_per_a = cal->pi.kp_q_v_per_a,
         .ki_v_per_a_s = cal->pi.ki_v_per_a_s,
         .committed_stages = cal->committed,
-        .result_bits = (uint8_t)((cal->offset_result.usable ? FOC_BOARD_CAL_RESULT_ROTOR : 0U) |
-                                 (cal->rl_model.rs_ohm > 0.0f ? FOC_BOARD_CAL_RESULT_RL : 0U) |
-                                 (cal->flux_result.state == FOC_CALIBRATION_STATE_VALID
-                                      ? FOC_BOARD_CAL_RESULT_FLUX
-                                      : 0U) |
-                                 ((cal->committed & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U
-                                      ? FOC_BOARD_CAL_RESULT_PI
-                                      : 0U) |
-                                 (cal->mech_result.usable ? FOC_BOARD_CAL_RESULT_INERTIA : 0U)),
+        .result_bits =
+            (uint8_t)((cal->offset_result.usable ? FOC_BOARD_CAL_RESULT_ROTOR : 0U) |
+                      (cal->rl_model.rs_ohm > 0.0f ? FOC_BOARD_CAL_RESULT_RL : 0U) |
+                      (cal->flux_result.state == FOC_CALIBRATION_STATE_VALID
+                           ? FOC_BOARD_CAL_RESULT_FLUX
+                           : 0U) |
+                      ((cal->committed & FOC_BOARD_CAL_STAGE_ELECTRICAL) != 0U
+                           ? FOC_BOARD_CAL_RESULT_PI
+                           : 0U) |
+                      (cal->mech_result.usable ? FOC_BOARD_CAL_RESULT_INERTIA : 0U) |
+                      (cal->cogging != NULL && cal->cogging->status == FOC_BOARD_COGGING_VALID
+                           ? FOC_BOARD_CAL_RESULT_COGGING
+                           : 0U)),
         .active_source = cal->active_source,
         .ring_high_water = cal->ring_high_water,
         .active_pole_pairs = (uint16_t)cal->runtime->config.motion.rotor.pole_pairs,
@@ -2114,6 +2340,11 @@ static bool cal_serial_commission(const void *context, struct foc_serial_commiss
         .coast_flux_wb = cal->coast_flux_wb,
         .coast_angle_error_rad = cal->coast_angle_error_rad,
         .driven_flux_wb = cal->driven_flux_wb,
+        .cogging_status = cal->cogging != NULL ? (uint8_t)cal->cogging->status : 0U,
+        .cogging_peak_a = cal->cogging != NULL ? cal->cogging->peak_a : 0.0f,
+        .cogging_rms_a = cal->cogging != NULL ? cal->cogging->rms_a : 0.0f,
+        .cogging_friction_a = cal->cogging != NULL ? cal->cogging->friction_a : 0.0f,
+        .cogging_consistency = cal->cogging != NULL ? cal->cogging->consistency : 0.0f,
     };
     return true;
 }

@@ -50,6 +50,7 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_CALIBRATE_ABORT:
     case FOC_MSG_COMMUTATION_WRITE:
     case FOC_MSG_SET_ZERO:
+    case FOC_MSG_COGGING_READ:
         return true;
     default:
         return false;

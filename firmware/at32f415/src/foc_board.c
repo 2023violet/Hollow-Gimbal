@@ -12,6 +12,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#include "foc_board_cogging.h"
 #include "foc_board_thermal.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
@@ -153,6 +154,9 @@ static const struct foc_runtime_config runtime_config = {
                     .max_damping_nm_s_per_rad = 50.0f,
                     .max_feedforward_nm = 100.0f,
                 },
+            /* CAL-8 cogging table (tuning ID 149 switches it), in the encoder frame. */
+            .cogging_table = &foc_board_cogging_state.table,
+            .cogging_frame_id = FOC_BOARD_MECHANICAL_FRAME,
         },
     /*
      * Motor protection (contract section 12.4). 3.0 A lies between the 2.5 A control
@@ -180,6 +184,8 @@ static const struct foc_runtime_config runtime_config = {
         /* Outer gains follow an identified inertia at 10 Hz (contract section 18). */
         .velocity_bandwidth_hz = 10.0f,
         .inertia_travel_rad = 3.1415927f,
+        /* I2t on by default (contract section 27); it acts once ID 96 sets a rated current. */
+        .thermal_tau_s = 30.0f,
     },
 };
 

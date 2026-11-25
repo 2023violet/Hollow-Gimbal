@@ -141,6 +141,13 @@ struct foc_serial_commission_view {
     float driven_flux_wb;
     /** CAL-3 inverter dead-time voltage of the latest run (ID 95), zero if not identified. */
     float dead_time_v;
+    /** CAL-8 result (IDs 152-156): status, peak and RMS of the table, friction current and
+     * the forward/backward consistency. */
+    uint8_t cogging_status;
+    float cogging_peak_a;
+    float cogging_rms_a;
+    float cogging_friction_a;
+    float cogging_consistency;
 };
 
 struct foc_serial_calibration {
@@ -214,6 +221,14 @@ struct foc_serial_thermal_settings {
     float r25_ohm;
     float pullup_ohm;
     uint32_t topology;
+};
+
+/** CAL-8 sweep settings (IDs 150, 151); defaults from foc_serial_cogging_defaults(). */
+struct foc_serial_cogging_settings {
+    /** Rotor sweep speed in rad/s, 0.05..2. */
+    float speed_rad_s;
+    /** 1 keeps the once-per-turn component in the table, 0 removes it. */
+    uint32_t keep_first_harmonic;
 };
 
 /** Latest filtered temperatures in °C, NaN without a reading (IDs 119, 147). */
@@ -324,6 +339,8 @@ struct foc_serial {
     struct foc_serial_thermal_settings thermal;
     /** Written by foc_board_thermal_poll(); NaN until then. */
     struct foc_serial_temperatures temperature;
+    /** CAL-8 sweep settings. */
+    struct foc_serial_cogging_settings cogging;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -375,6 +392,12 @@ struct foc_serial_thermal_settings foc_serial_thermal_defaults(void);
 
 /** True within the PARAM_WRITE ranges with each channel's derate_c below its limit_c. */
 bool foc_serial_thermal_settings_valid(const struct foc_serial_thermal_settings *settings);
+
+/** Default CAL-8 settings: 0.25 rad/s, once-per-turn component removed. */
+struct foc_serial_cogging_settings foc_serial_cogging_defaults(void);
+
+/** True within the PARAM_WRITE ranges of IDs 150 and 151. */
+bool foc_serial_cogging_settings_valid(const struct foc_serial_cogging_settings *settings);
 
 /** Attach the CAN link status before receiving bytes. */
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link);

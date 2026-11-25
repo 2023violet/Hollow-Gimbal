@@ -45,10 +45,10 @@ A clock-tree change must update both together.
 
 ## Flash budget
 
-The program must stay below the settings slots at `0x0801F000` (124 KB usable;
-`store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
-the persistent-settings image 101,972 B; after THERMAL-01 they are 102,976 B and
-107,048 B. AT32F415 has no FPU, so every libm call
+The program must stay below the cogging page at `0x0801E800` (122 KB usable; the settings
+slots follow at `0x0801F000`; `store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
+the persistent-settings image 101,972 B; after THERMAL-01 102,976 B and 107,048 B; after
+COG-01 they are 106,976 B and 111,968 B. AT32F415 has no FPU, so every libm call
 is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
@@ -419,6 +419,17 @@ refresh: a model or bandwidth write re-derives the current PI with
 tightens the limits, and CAL-3/4/5 write the identified model through the same
 path. Every profile, bandwidth and protection parameter is a saved TLV entry
 of the settings record.
+
+### Cogging compensation (CAL-8)
+
+`foc_board_cogging` holds the table every Board1 Runtime configuration points at
+(`motion.cogging_table`, frame `FOC_BOARD_MECHANICAL_FRAME`) and the CAL-8 sweep, bins and
+fit; the calibration manager runs it for stage mask 16 (states 18–22) in POSITION mode.
+The bins (5 KB) are only used during a run; the table is 1 KB. Runtime H1 adds the table
+current when tuning `cogging_enabled` (ID 149) is 1. The page below the settings slots
+(driver slot 2, 0x0801E800) stores it with the image built with persistence, so the
+program limit is 0x0801E800 (122 KB). `sil-demo --sil-scenario cogging` runs it against a
+plant cogging torque (`--cogging-nm amp,cycles[,phase]`); contract 28.
 
 ### Inertia identification (CAL-7)
 

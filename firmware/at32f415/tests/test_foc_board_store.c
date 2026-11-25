@@ -16,6 +16,7 @@
 
 #include "foc_board.h"
 #include "foc_board_boot.h"
+#include "foc_board_cogging.h"
 #include "foc_board_store.h"
 #include "foc_parameter_table.h"
 
@@ -35,7 +36,8 @@
 /* Private Helpers: fake NOR device ---------------------------------------------- */
 
 struct fake_flash {
-    uint8_t slots[2][FOC_BOARD_STORE_SLOT_BYTES];
+    /* Two record slots and the cogging page (slot 2). */
+    uint8_t slots[3][FOC_BOARD_STORE_SLOT_BYTES];
     /* Fail the Nth program call (1-based) by stopping before it: a power loss. */
     unsigned int cut_program;
     unsigned int programs;
@@ -46,7 +48,7 @@ struct fake_flash {
 static int fake_read(void *context, unsigned int slot, size_t offset, uint8_t *bytes, size_t size)
 {
     struct fake_flash *flash = context;
-    if (flash->fail_read || slot > 1U || offset + size > FOC_BOARD_STORE_SLOT_BYTES) {
+    if (flash->fail_read || slot > 2U || offset + size > FOC_BOARD_STORE_SLOT_BYTES) {
         return -1;
     }
     memcpy(bytes, &flash->slots[slot][offset], size);
@@ -120,6 +122,7 @@ static struct foc_board_settings settings_with_kp(float kp)
         .remote_position_cap_rad = 100.0f,
         .can = foc_serial_can_defaults(),
         .thermal = foc_serial_thermal_defaults(),
+        .cogging = foc_serial_cogging_defaults(),
     };
 }
 
@@ -286,6 +289,9 @@ struct restore_fixture {
     struct fake_flash flash;
 };
 
+/* Cogging acquisition a restore attaches, or NULL. */
+static struct foc_board_cogging *restore_cogging;
+
 static int restore_boot(struct restore_fixture *fixture, bool keep_flash)
 {
     struct fake_flash saved = fixture->flash;
@@ -304,6 +310,7 @@ static int restore_boot(struct restore_fixture *fixture, bool keep_flash)
     );
     foc_serial_init(&fixture->serial, &fixture->runtime);
     fixture->persistence.driver = driver_for(&fixture->flash);
+    fixture->persistence.cogging = restore_cogging;
     if (keep_flash) {
         fixture->flash = saved;
     }
@@ -730,11 +737,82 @@ static int test_restore_calibration(void)
 
 /* Test Entry ------------------------------------------------------------------- */
 
+/* CAL-8 cogging page: round trip, identity and CRC refusals, empty page, and a restore
+ * that keeps compensation off without a table. */
+static int test_cogging_page(void)
+{
+    static struct fake_flash flash;
+    static struct foc_runtime_cogging_table table;
+    static struct foc_runtime_cogging_table loaded;
+    memset(flash.slots, 0xFF, sizeof flash.slots);
+    const struct foc_board_store_driver driver = driver_for(&flash);
+    const struct foc_board_store_identity identity =
+        {1U, 7U, 65536U, -1, 0.5f, {2048.0f, 2048.0f, 2048.0f}};
+    table.scale_a = 0.01f;
+    for (unsigned int bin = 0U; bin < FOC_RUNTIME_COGGING_BINS; ++bin) {
+        table.code[bin] = (int8_t)((int)(bin % 200U) - 100);
+    }
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_EMPTY);
+    CHECK(foc_board_store_cogging_save(&driver, &identity, &table) == FOC_BOARD_STORE_OK);
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_OK);
+    CHECK(loaded.scale_a == 0.01f && memcmp(loaded.code, table.code, sizeof table.code) == 0);
+    /* The ADC offsets and electrical offset do not matter; pole pairs and encoder do. */
+    struct foc_board_store_identity other = identity;
+    other.electrical_offset_rad = 2.0f;
+    other.phase_offset_count[0] = 2100.0f;
+    CHECK(foc_board_store_cogging_load(&driver, &other, &loaded) == FOC_BOARD_STORE_OK);
+    other.pole_pairs = 11U;
+    CHECK(foc_board_store_cogging_load(&driver, &other, &loaded) == FOC_BOARD_STORE_ERR_RECORD);
+    CHECK(loaded.scale_a == 0.0f && loaded.code[1] == 0);
+    other = identity;
+    other.runtime_encoder_direction = 1;
+    CHECK(foc_board_store_cogging_load(&driver, &other, &loaded) == FOC_BOARD_STORE_ERR_RECORD);
+    flash.slots[FOC_BOARD_STORE_COGGING_SLOT][28 + 5] ^= 0x01U;
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_RECORD);
+    flash.fail_read = true;
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_IO);
+    flash.fail_read = false;
+    /* An empty table erases the page. */
+    loaded.scale_a = 0.0f;
+    CHECK(foc_board_store_cogging_save(&driver, &identity, &loaded) == FOC_BOARD_STORE_OK);
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_EMPTY);
+
+    /* Restore: a record asking for compensation without a stored table loads with it off. */
+    static struct restore_fixture fixture;
+    restore_cogging = &foc_board_cogging_state;
+    foc_board_cogging_init(&foc_board_cogging_state);
+    CHECK(restore_boot(&fixture, false) == 0);
+    struct foc_board_store_identity boot_identity;
+    CHECK(foc_board_store_identity_from_boot(&fixture.boot, &boot_identity));
+    struct foc_board_settings in = settings_with_kp(2.2f);
+    in.tuning.command_timeout_us = 30000U;
+    in.tuning.cogging_enabled = 1U;
+    CHECK(write_record(&fixture.flash, &boot_identity, &in) == 0);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(
+        fixture.persistence.state == FOC_BOARD_STORE_LOADED && !fixture.persistence.cogging_restored
+    );
+    CHECK(!fixture.runtime.cogging_enabled);
+    /* With the page the table and the switch both come back. */
+    /* driver_for() erases the flash: keep the record and add the page. */
+    const struct foc_board_store_driver page =
+        {&fixture.flash, fake_read, fake_erase, fake_program};
+    CHECK(foc_board_store_cogging_save(&page, &boot_identity, &table) == FOC_BOARD_STORE_OK);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.cogging_restored);
+    CHECK(fixture.persistence.state == FOC_BOARD_STORE_LOADED);
+    CHECK(fixture.runtime.cogging_enabled && foc_board_cogging_state.table.scale_a == 0.01f);
+    CHECK(!foc_board_cogging_state.dirty);
+    restore_cogging = NULL;
+    foc_board_cogging_init(&foc_board_cogging_state);
+    return 0;
+}
+
 int main(void)
 {
     return test_codec() || test_slots() || test_sequence_wrap() || test_restore() ||
         test_calibration_record() || test_profile_record() || test_tlv_rules() ||
-        test_restore_calibration();
+        test_restore_calibration() || test_cogging_page();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

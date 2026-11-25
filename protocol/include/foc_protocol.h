@@ -79,6 +79,8 @@ enum foc_protocol_message {
     FOC_MSG_COMMUTATION_WRITE = 0x53,
     /** Make the present output position the mechanical zero (PARAM 124, appended). */
     FOC_MSG_SET_ZERO = 0x54,
+    /** Read 64 codes of the cogging table from an offset (appended). */
+    FOC_MSG_COGGING_READ = 0x55,
 };
 
 /** First response payload byte. MORE is local to the stream parser. */

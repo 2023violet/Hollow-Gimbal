@@ -12,6 +12,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_board.h"
+#include "foc_board_cogging.h"
 #include "foc_parameter_table.h"
 #include "foc_serial.h"
 
@@ -382,6 +383,31 @@ static int test_parameters(void)
     request.sequence++;
     request.payload[0] = 255;
     CHECK(transact(&test, request, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+    /* COGGING_READ: 64 codes per chunk, 24 in the last; an empty table reads scale 0. */
+    {
+        foc_board_cogging_state.table.code[1000] = -7;
+        struct foc_protocol_frame read = request;
+        read.type = FOC_MSG_COGGING_READ;
+        read.length = 2;
+        read.sequence = ++request.sequence;
+        foc_protocol_write_u16(read.payload, 0U);
+        CHECK(transact(&test, read, &response, FOC_PROTO_OK) == 0);
+        CHECK(response.length == 74U && foc_protocol_read_u16(response.payload + 1) == 1024U);
+        CHECK(foc_protocol_read_u32(response.payload + 3) == 0U && response.payload[9] == 64U);
+        read.sequence = ++request.sequence;
+        foc_protocol_write_u16(read.payload, 1000U);
+        CHECK(transact(&test, read, &response, FOC_PROTO_OK) == 0);
+        CHECK(response.length == 34U && response.payload[9] == 24U);
+        CHECK(foc_protocol_read_u16(response.payload + 7) == 1000U);
+        CHECK((int8_t)response.payload[10] == -7);
+        read.sequence = ++request.sequence;
+        foc_protocol_write_u16(read.payload, 1024U);
+        CHECK(transact(&test, read, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+        read.sequence = ++request.sequence;
+        read.length = 1;
+        CHECK(transact(&test, read, &response, FOC_PROTO_INVALID_ARGUMENT) == 0);
+        foc_board_cogging_state.table.code[1000] = 0;
+    }
     /* NTC thresholds: a channel's derating must start below its limit. */
     request.sequence++;
     request.payload[0] = FOC_PARAM_MOTOR_DERATE_TEMP;

@@ -37,6 +37,7 @@
 #include "foc_calibration.h"
 #include "foc_flux_id.h"
 #include "foc_mechanical_id.h"
+#include "foc_board_cogging.h"
 #include "foc_motor_id.h"
 #include "foc_serial.h"
 
@@ -68,6 +69,13 @@ enum foc_board_cal_state {
     FOC_BOARD_CAL_INERTIA = 16,
     /** Bridge off after the electrical stages: flux and angle error from the coasting EMF. */
     FOC_BOARD_CAL_COAST = 17,
+    /** CAL-8 cogging (appended): POSITION mode, ARM and START at a hold command, the slow
+     * sweep, then the fit once the drive is stopped. */
+    FOC_BOARD_CAL_COGGING_MODE = 18,
+    FOC_BOARD_CAL_COGGING_ARM = 19,
+    FOC_BOARD_CAL_COGGING_START = 20,
+    FOC_BOARD_CAL_COGGING = 21,
+    FOC_BOARD_CAL_COGGING_STOP = 22,
 };
 
 /** One coast sample: encoder position and its time, phase-voltage time and pair voltage. */
@@ -114,6 +122,9 @@ enum foc_board_cal_stages {
     /** CAL-7 inertia and damping; combines with ROTOR and ELECTRICAL. Without
      * ELECTRICAL it needs Rs and flux in the profile. The shaft turns within ID 109. */
     FOC_BOARD_CAL_STAGE_MECHANICAL = 8,
+    /** CAL-8 cogging table, alone. Needs a valid group, this boot's ADC zero and working
+     * position control; the rotor turns about 2.3 turns forward and back (IDs 150, 151). */
+    FOC_BOARD_CAL_STAGE_COGGING = 16,
 };
 
 /** CALIBRATE_READ byte 73: where the active rotor calibration came from. */
@@ -141,6 +152,8 @@ enum foc_board_cal_result_bits {
     FOC_BOARD_CAL_RESULT_FLUX = 4,
     FOC_BOARD_CAL_RESULT_PI = 8,
     FOC_BOARD_CAL_RESULT_INERTIA = 16,
+    /** CAL-8 fitted a table (ID 152 VALID). */
+    FOC_BOARD_CAL_RESULT_COGGING = 32,
 };
 
 /** Wire values of CALIBRATE_READ byte 2. */
@@ -180,6 +193,8 @@ enum foc_board_cal_failure {
     FOC_BOARD_CAL_FAILURE_CAPTURE = 16,
     /** CAL-7 inertia/damping fit failed; see admission_failure (appended). */
     FOC_BOARD_CAL_FAILURE_INERTIA = 17,
+    /** CAL-8 fit refused; ID 152 says why (appended). */
+    FOC_BOARD_CAL_FAILURE_COGGING = 18,
 };
 
 /** One H0 cycle as seen by the electrical stages (logical slot clock). */
@@ -340,6 +355,11 @@ struct foc_board_calibration {
     bool inertia_probing;
     uint32_t inertia_reversal_us;
     uint32_t inertia_window;
+    /* CAL-8: the acquisition the Runtime's cogging table lives in (NULL: not supported),
+     * the hold position and the sweep start. */
+    struct foc_board_cogging *cogging;
+    float cogging_origin_rad;
+    uint32_t cogging_start_us;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -374,6 +394,10 @@ void foc_board_calibration_attach_phase_voltage(struct foc_board_calibration *ca
 
 void foc_board_calibration_capture_boot(struct foc_board_calibration *calibration,
                                         const struct foc_board_boot *boot);
+
+/** Attach the CAL-8 acquisition whose table the Runtime uses, before producers start. */
+void foc_board_calibration_attach_cogging(struct foc_board_calibration *calibration,
+                                          struct foc_board_cogging *cogging);
 
 /** Write a commutation group (pole pairs 1-64, direction +1/-1, offset in [0, 2π)) with
  * the active ADC zero, by re-initialization. Returns a FOC_PROTO_* result. */

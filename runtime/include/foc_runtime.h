@@ -239,6 +239,9 @@ struct foc_runtime_tuning {
     struct foc_runtime_trip_limits trips;
     /** Motor profile; all zero preserves an instance without one. */
     struct foc_runtime_profile profile;
+    /** 1 adds the cogging table's q current in the closed-loop motion and impedance modes,
+     * 0 off. 1 needs a non-empty table (motion cogging_table). Appended field. */
+    uint32_t cogging_enabled;
 };
 
 /** Tuning acceleration/deceleration bounds (IDs 106/107) in rotor rad/s². 0 selects
@@ -397,8 +400,24 @@ struct foc_runtime_impedance_config {
     bool torque_constant_from_profile;
 };
 
+/** Bins of the cogging table over one mechanical turn; bin k sits at k * 2π / BINS of the
+ * motor-shaft angle modulo one turn (the absolute encoder frame). */
+#define FOC_RUNTIME_COGGING_BINS 1024U
+
+/**
+ * q-current feedforward that cancels the position-dependent torque (cogging) of one turn,
+ * in amperes, linearly interpolated between bins. The caller owns the storage and writes it
+ * only while compensation is off (tuning cogging_enabled 0) or the drive is not RUNNING.
+ */
+struct foc_runtime_cogging_table {
+    /** Amperes per code; 0 marks an empty table. */
+    float scale_a;
+    int8_t code[FOC_RUNTIME_COGGING_BINS];
+};
+
 #if defined(FOC_RUNTIME_HOST_COGGING)
-/** Number of uniform knots spanning one mechanical turn, with knot zero at mechanical zero. */
+/** Host review record: knots spanning one mechanical turn, knot zero at mechanical zero.
+ * A valid record is resampled into the instance's own foc_runtime_cogging_table at init. */
 enum {
     FOC_RUNTIME_COGGING_POINTS = 32
 };
@@ -467,6 +486,10 @@ struct foc_runtime_motion_config {
     /** Optional Host table. Disabled or invalid tables leave the motion controller unchanged. */
     struct foc_runtime_cogging_config cogging;
 #endif
+    /** Optional cogging feedforward table (caller storage) and the sample frame it belongs
+     * to; tuning cogging_enabled switches it. Appended fields. */
+    const struct foc_runtime_cogging_table *cogging_table;
+    uint32_t cogging_frame_id;
 };
 
 /** Caller-selected schedules and Host injection configuration. */
@@ -841,6 +864,12 @@ struct foc_runtime {
     /** H0-published θ and effective current-vector ceiling in A, as float words. */
     atomic_uint thermal_theta_word;
     atomic_uint thermal_limit_word;
+    /** Applied tuning cogging_enabled; H1 reads it only while RUNNING. */
+    bool cogging_enabled;
+#if defined(FOC_RUNTIME_HOST_COGGING)
+    /** Resampled Host review table, used through config.motion.cogging_table. */
+    struct foc_runtime_cogging_table host_cogging_table;
+#endif
 };
 
 /* Public Functions ------------------------------------------------------------- */

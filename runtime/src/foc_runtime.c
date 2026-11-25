@@ -1271,33 +1271,82 @@ static bool foc_runtime_cogging_valid(const struct foc_runtime_motion_config *mo
     return true;
 }
 
+/* Resample a valid Host review record into the instance's own q-current table. */
+static void foc_runtime_host_cogging(struct foc_runtime *runtime)
+{
+    struct foc_runtime_motion_config *motion = &runtime->config.motion;
+    const struct foc_runtime_cogging_config *config = &motion->cogging;
+    float iq[FOC_RUNTIME_COGGING_BINS];
+    float peak = 0.0f;
+    for (unsigned int bin = 0U; bin < FOC_RUNTIME_COGGING_BINS; ++bin) {
+        const float knot =
+            (float)bin * ((float)FOC_RUNTIME_COGGING_POINTS / (float)FOC_RUNTIME_COGGING_BINS);
+        const unsigned int index = (unsigned int)knot;
+        const unsigned int next = (index + 1U) % FOC_RUNTIME_COGGING_POINTS;
+        const float blend = knot - (float)index;
+        iq[bin] =
+            ((1.0f - blend) * config->lut.torque_nm[index] + blend * config->lut.torque_nm[next]) /
+            config->torque_constant_nm_per_a;
+        peak = fmaxf(peak, fabsf(iq[bin]));
+    }
+    struct foc_runtime_cogging_table *table = &runtime->host_cogging_table;
+    table->scale_a = peak > 0.0f ? peak / 127.0f : 0.0f;
+    for (unsigned int bin = 0U; bin < FOC_RUNTIME_COGGING_BINS; ++bin) {
+        table->code[bin] =
+            table->scale_a > 0.0f ? (int8_t)lrintf(iq[bin] / table->scale_a) : (int8_t)0;
+    }
+    motion->cogging_table = table;
+    motion->cogging_frame_id = config->mechanical_frame_id;
+    runtime->cogging_enabled = table->scale_a > 0.0f;
+}
+#endif
+
+static bool foc_runtime_cogging_ready(const struct foc_runtime *runtime)
+{
+    const struct foc_runtime_cogging_table *table = runtime->config.motion.cogging_table;
+    return runtime->config.motion.enabled && table != NULL && isfinite(table->scale_a) &&
+        table->scale_a > 0.0f;
+}
+
+/* H1: the cogging table's q current at the sample's angle modulo one turn, 0 when off. */
+static float
+foc_runtime_cogging_iq(const struct foc_runtime *runtime, const struct foc_runtime_sensor *sample)
+{
+    const struct foc_runtime_motion_config *motion = &runtime->config.motion;
+    const struct foc_runtime_cogging_table *table = motion->cogging_table;
+    /* Continuous Float32 position loses phase resolution over long travel. */
+    if (!runtime->cogging_enabled || table == NULL ||
+        sample->mechanical_frame_id != motion->cogging_frame_id ||
+        !isfinite(sample->mechanical_rad) || fabsf(sample->mechanical_rad) > 4096.0f) {
+        return 0.0f;
+    }
+    const float turns = sample->mechanical_rad * 0.15915494309189535f;
+    float fraction = turns - (float)(int32_t)turns;
+    if (fraction < 0.0f) {
+        fraction += 1.0f;
+    }
+    const float position = fraction * (float)FOC_RUNTIME_COGGING_BINS;
+    const unsigned int index = (unsigned int)position % FOC_RUNTIME_COGGING_BINS;
+    const unsigned int next = (index + 1U) % FOC_RUNTIME_COGGING_BINS;
+    const float blend = position - (float)(unsigned int)position;
+    return table->scale_a *
+        ((1.0f - blend) * (float)table->code[index] + blend * (float)table->code[next]);
+}
+
+/* Add the cogging feedforward to an outer-loop q current within the live limits. */
 static float foc_runtime_add_cogging(
-    const struct foc_runtime_motion_config *motion,
+    struct foc_runtime *runtime,
     const struct foc_runtime_sensor *sample,
     const struct foc_runtime_command *command,
     float iq
 )
 {
-    const struct foc_runtime_cogging_config *config = &motion->cogging;
-    /* Continuous Float32 position loses phase resolution over long travel. */
-    if (!config->enabled || sample->mechanical_frame_id != config->mechanical_frame_id ||
-        !isfinite(sample->mechanical_rad) || fabsf(sample->mechanical_rad) > 4096.0f) {
+    const struct foc_runtime_motion_config *motion = &runtime->config.motion;
+    float correction = foc_runtime_cogging_iq(runtime, sample);
+    if (correction == 0.0f) {
         return iq;
     }
-    const float two_pi = 6.28318530717958647692f;
-    float phase = fmodf(sample->mechanical_rad, two_pi);
-    if (phase < 0.0f) {
-        phase += two_pi;
-    }
-    const float knot = phase * ((float)FOC_RUNTIME_COGGING_POINTS / two_pi);
-    const unsigned int lower = (unsigned int)knot;
-    const unsigned int index = lower % FOC_RUNTIME_COGGING_POINTS;
-    const unsigned int next = (index + 1U) % FOC_RUNTIME_COGGING_POINTS;
-    const float blend = knot - (float)lower;
-    const float torque =
-        (1.0f - blend) * config->lut.torque_nm[index] + blend * config->lut.torque_nm[next];
-    float correction = torque / config->torque_constant_nm_per_a;
-    float cap = motion->iq_limit_a;
+    float cap = foc_runtime_thermal_iq(runtime, motion->iq_limit_a);
     if (command->mode == FOC_RUNTIME_MODE_IMPEDANCE) {
         const struct foc_runtime_impedance_config *policy = &motion->impedance;
         const float commanded = command->target.impedance.torque_feedforward_nm;
@@ -1309,7 +1358,6 @@ static float foc_runtime_add_cogging(
     }
     return fmaxf(-cap, fminf(cap, iq + correction));
 }
-#endif
 
 static void foc_runtime_prepare_outer(
     struct foc_runtime *runtime,
@@ -1493,9 +1541,8 @@ static void foc_runtime_prepare_outer(
             iq = 0.0f;
         }
     }
-#if defined(FOC_RUNTIME_HOST_COGGING)
     if (running) {
-        const float compensated = foc_runtime_add_cogging(policy, &candidate->sample, command, iq);
+        const float compensated = foc_runtime_add_cogging(runtime, &candidate->sample, command, iq);
         if (protection && compensated != iq) {
             /* A feedforward proposal must preserve the base command's admission. */
             struct foc_motion_limits_request trial = candidate->motion_request;
@@ -1512,7 +1559,6 @@ static void foc_runtime_prepare_outer(
             iq = compensated;
         }
     }
-#endif
     candidate->target =
         (struct foc_pipeline_command){{0.0f, iq}, command->seq, command->produced_us};
     candidate->target_valid = true;
@@ -1684,6 +1730,10 @@ static int foc_runtime_tuning_check(
         tuning->command_timeout_us < runtime->pipeline.safety.config.sample_timeout_us) {
         return FOC_RUNTIME_ERR_CONFIG;
     }
+    if (tuning->cogging_enabled > 1U ||
+        (tuning->cogging_enabled != 0U && !foc_runtime_cogging_ready(runtime))) {
+        return FOC_RUNTIME_ERR_CONFIG;
+    }
     if (!(tuning->dead_time_v >= 0.0f && tuning->dead_time_v <= FOC_RUNTIME_DEAD_TIME_MAX_V) ||
         (tuning->dead_time_v > 0.0f &&
          !(runtime->pipeline.current.config.dead_time_knee_a > 0.0f))) {
@@ -1744,6 +1794,7 @@ static void foc_runtime_tuning_commit(
     runtime->config.profile = tuning->profile;
     foc_runtime_impedance_refresh(&runtime->config);
     foc_runtime_i2t_configure(runtime);
+    runtime->cogging_enabled = tuning->cogging_enabled != 0U;
     if (runtime->config.motion.enabled) {
         runtime->outer_velocity = *velocity;
         runtime->config.motion.velocity = velocity->config;
@@ -1858,6 +1909,7 @@ int foc_runtime_read_tuning(const struct foc_runtime *runtime, struct foc_runtim
         .command_timeout_us = runtime->pipeline.safety.config.command_timeout_us,
         .trips = runtime->config.trips,
         .profile = runtime->config.profile,
+        .cogging_enabled = runtime->cogging_enabled ? 1U : 0U,
     };
     return FOC_RUNTIME_OK;
 }
@@ -2029,6 +2081,9 @@ int foc_runtime_init(
     };
 #if defined(FOC_RUNTIME_HOST_COGGING)
     runtime->config.motion.cogging.enabled = foc_runtime_cogging_valid(&config->motion);
+    if (runtime->config.motion.cogging.enabled) {
+        foc_runtime_host_cogging(runtime);
+    }
 #endif
     foc_runtime_impedance_refresh(&runtime->config);
     foc_runtime_i2t_configure(runtime);

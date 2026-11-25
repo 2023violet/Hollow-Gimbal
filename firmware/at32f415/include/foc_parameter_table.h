@@ -136,6 +136,14 @@ enum foc_parameter_id {
     FOC_PARAM_NTC_PULLUP = 146,
     FOC_PARAM_MOTOR_TEMPERATURE = 147,
     FOC_PARAM_NTC_TOPOLOGY = 148,
+    FOC_PARAM_COGGING_ENABLE = 149,
+    FOC_PARAM_COGGING_SPEED = 150,
+    FOC_PARAM_COGGING_KEEP_FIRST = 151,
+    FOC_PARAM_COGGING_STATUS = 152,
+    FOC_PARAM_COGGING_PEAK = 153,
+    FOC_PARAM_COGGING_RMS = 154,
+    FOC_PARAM_COGGING_FRICTION = 155,
+    FOC_PARAM_COGGING_CONSISTENCY = 156,
 };
 
 /** Wire type codes. */
@@ -241,8 +249,8 @@ struct foc_parameter_entry {
 
 /* Public Macros ---------------------------------------------------------------- */
 
-#define FOC_PARAMETER_COUNT         100U
-#define FOC_PARAMETER_PERSIST_COUNT 61U
+#define FOC_PARAMETER_COUNT         108U
+#define FOC_PARAMETER_PERSIST_COUNT 64U
 #define FOC_PARAM_NO_PERSIST        0xFFFFU
 
 /* Public Functions ------------------------------------------------------------ */

@@ -385,3 +385,10 @@ talks MIT to `--node` with replies on `--master-id` (`mit-cmd` takes `--mit-posi
 119/147 the NTC temperatures. `sil-demo --sil-scenario thermal --sil-lockstep-us 500`
 runs I²t fold-back, NTC derating and an over-temperature latch on the Board1 SIL
 (contract 27).
+
+## Cogging compensation
+
+`request calibrate --cal-stages cogging` (mask 16) runs CAL-8 on the MCU; IDs 152–156 report the
+result and ID 149 switches compensation. `cogging-read` prints the whole table (COGGING_READ
+chunks) as JSON. `sil-demo --sil-scenario cogging --sil-lockstep-us 500` runs it against a
+plant cogging torque on the Board1 SIL (contract 28).

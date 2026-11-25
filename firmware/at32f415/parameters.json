@@ -101,6 +101,14 @@
     {"id": 145, "name": "ntc-r25", "type": "f32", "unit": "ohm", "access": "rw", "group": "serial", "field": "thermal.r25_ohm", "min": 100.0, "max": 1000000.0, "persist": "thermal.r25_ohm", "brief": "NTC resistance at 25 C."},
     {"id": 146, "name": "ntc-pullup", "type": "f32", "unit": "ohm", "access": "rw", "group": "serial", "field": "thermal.pullup_ohm", "min": 100.0, "max": 1000000.0, "persist": "thermal.pullup_ohm", "brief": "Fixed divider resistor of the NTC channels."},
     {"id": 147, "name": "motor-temperature", "type": "f32", "unit": "C", "access": "ro", "group": "serial", "field": "temperature.motor_c", "brief": "Filtered motor NTC temperature; NaN when off or without a reading."},
-    {"id": 148, "name": "ntc-topology", "type": "u32", "unit": "none", "access": "rw", "group": "serial", "field": "thermal.topology", "min": 0, "max": 1, "persist": "thermal.topology", "brief": "NTC divider: 0 NTC to ground with pull-up, 1 NTC to the reference with pull-down."}
+    {"id": 148, "name": "ntc-topology", "type": "u32", "unit": "none", "access": "rw", "group": "serial", "field": "thermal.topology", "min": 0, "max": 1, "persist": "thermal.topology", "brief": "NTC divider: 0 NTC to ground with pull-up, 1 NTC to the reference with pull-down."},
+    {"id": 149, "name": "cogging-enable", "type": "u32", "unit": "none", "access": "tuning", "group": "tuning", "field": "cogging_enabled", "min": 0, "max": 1, "persist": "tuning.cogging_enabled", "brief": "Cogging compensation: 1 adds the CAL-8 table in velocity, position and impedance modes; needs a table."},
+    {"id": 150, "name": "cogging-speed", "type": "f32", "unit": "rad/s", "access": "rw", "group": "serial", "field": "cogging.speed_rad_s", "min": 0.05, "max": 2.0, "persist": "cogging.speed_rad_s", "brief": "CAL-8 sweep speed, rotor-side."},
+    {"id": 151, "name": "cogging-keep-first", "type": "u32", "unit": "none", "access": "rw", "group": "serial", "field": "cogging.keep_first_harmonic", "min": 0, "max": 1, "persist": "cogging.keep_first_harmonic", "brief": "CAL-8: 1 keeps the once-per-turn component (imbalance), 0 removes it."},
+    {"id": 152, "name": "cogging-status", "type": "u32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-8: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range."},
+    {"id": 153, "name": "cogging-peak", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 table peak q current."},
+    {"id": 154, "name": "cogging-rms", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 table RMS q current."},
+    {"id": 155, "name": "cogging-friction", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 Coulomb friction current (half the forward/backward difference)."},
+    {"id": 156, "name": "cogging-consistency", "type": "f32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted."}
   ]
 }

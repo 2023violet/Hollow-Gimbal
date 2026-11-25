@@ -26,7 +26,7 @@ MESSAGES = {
     "clear": 0x21, "fault-snapshot": 0x22, "param-read": 0x30, "param-write": 0x31,
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
     "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
-    "commutation-write": 0x53, "set-zero": 0x54,
+    "commutation-write": 0x53, "set-zero": 0x54, "cogging-read": 0x55,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
@@ -60,14 +60,17 @@ def fault_names(mask):
         bit for bit in range(len(FAULT_BITS), 32) if mask & (1 << bit)]
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
               "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE",
-              "INERTIA", "COAST"]
+              "INERTIA", "COAST", "COGGING_MODE", "COGGING_ARM", "COGGING_START", "COGGING",
+              "COGGING_STOP"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
-                "CAPTURE", "INERTIA"]
+                "CAPTURE", "INERTIA", "COGGING"]
 CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2, "zero": 4, "mechanical": 8,
-              "electrical-mechanical": 10, "all-mechanical": 11}
+              "electrical-mechanical": 10, "all-mechanical": 11, "cogging": 16}
 CAL_SOURCES = ["BOOT", "RUN", "STORAGE", "HOST", "SUPPLY"]
-CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8), ("inertia", 16))
+CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8), ("inertia", 16),
+                   ("cogging", 32))
+COGGING_STATUS = ["NONE", "VALID", "NEGLIGIBLE", "INCONSISTENT", "SAMPLES", "FAILED", "RANGE"]
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
 WIRE_MAX = 116
@@ -362,6 +365,12 @@ def describe(frame):
             snapshot_fault_names=fault_names(faults), snapshot_h0_us=struct.unpack_from("<I", body, 7)[0],
             **dict(zip(("speed_rad_s", "speed_ref_rad_s", "measured_id_a", "measured_iq_a",
                         "iq_ref_a", "phase_peak_a", "vbus_v"), struct.unpack_from("<7f", body, 11)))))
+    elif frame.type == 0x55 and body[0] == 0:
+        if len(body) < 10 or len(body) != 10 + body[9]:
+            raise ValueError("BAD_RESPONSE")
+        bins, scale, offset = struct.unpack_from("<HfH", body, 1)
+        result.update(bins=bins, scale_a=scale, offset=offset,
+                      codes=list(struct.unpack_from(f"<{body[9]}b", body, 10)))
     elif frame.type == 0x54 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -907,7 +916,8 @@ SIL_STATE_DISABLED, SIL_STATE_ARMED, SIL_STATE_RUNNING, SIL_STATE_FAULT = 1, 2, 
 SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persist", "calibrate",
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
-                 "dead-time", "dead-time-comp", "can", "can-multi", "mit", "thermal")
+                 "dead-time", "dead-time-comp", "can", "can-multi", "mit", "thermal",
+                 "cogging")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1248,7 +1258,7 @@ def run_sil_persist(simulator, base_arguments, flash_path, json_path=None):
 
     # Damage both slots: the device must refuse them and keep the boot configuration.
     image = bytearray(flash_path.read_bytes())
-    slot_bytes = len(image) // 2
+    slot_bytes = 2048  # SIL flash file: record slots 0 and 1, then the cogging page
     for slot in (0, 1):
         image[slot * slot_bytes + 60] ^= 0x01
     flash_path.write_bytes(bytes(image))
@@ -1309,6 +1319,29 @@ def _calibrate_wait(session, stop_at=None, limit=120000):
         if view["calibration_state"] in ("DONE", "FAILED"):
             return view, seen
     return view, seen
+
+
+def cogging_table(client):
+    """Read the whole CAL-8 table (COGGING_READ chunks): bins, A per code, codes and the
+    q current per bin in A."""
+    codes, bins, scale = [], None, 0.0
+    while bins is None or len(codes) < bins:
+        frame = describe(client.call("cogging-read", struct.pack("<H", len(codes))))
+        if frame.get("result") != "OK":
+            raise ValueError(f"COGGING_READ {frame.get('result')}")
+        bins, scale = frame["bins"], frame["scale_a"]
+        codes += frame["codes"]
+    current = [scale * code for code in codes]
+    peak = max((abs(value) for value in current), default=0.0)
+    return {"bins": bins, "scale_a": scale, "peak_a": peak, "codes": codes, "iq_a": current}
+
+
+def _harmonic(values, order):
+    """Amplitude of one harmonic of a periodic table."""
+    count = len(values)
+    a = sum(v * math.cos(2.0 * math.pi * order * k / count) for k, v in enumerate(values))
+    b = sum(v * math.sin(2.0 * math.pi * order * k / count) for k, v in enumerate(values))
+    return 2.0 * math.hypot(a, b) / count
 
 
 def _wait_still(session, limit=20000):
@@ -1895,9 +1928,19 @@ def run_sil_profile(simulator, base_arguments, flash_path, json_path=None):
     checks["speed_limit_above_max_refused"] = (
         session.tune("velocity-limit", 10.0) == "INVALID_ARGUMENT")
 
-    # 4. The rated current sets the sustained-current protection.
+    # 4. The rated current sets the sustained-current protection. With the default I2t
+    # (thermal-tau 30 s) the rated current is a thermal budget, not a timed trip
+    # (contract section 27); with I2t off it drives the timed rule.
     assert session.tune("rated-current", 0.5) == "APPLIED"
     assert session.tune("trip-sustained-ms", 100) == "APPLIED"
+    steps, samples = session.run("current", 0.6, 600000)
+    status = session.status()
+    metrics["rated_current_with_i2t"] = status["fault_names"]
+    checks["i2t_replaces_timed_sustained_trip"] = (status["state"] == SIL_STATE_RUNNING
+                                                   and status["faults"] == 0)
+    session.stop()
+    _wait_still(session)
+    assert session.tune("thermal-tau", 0.0) == "APPLIED"
     steps, samples = session.run("current", 0.6, 600000)
     status = session.status()
     metrics["rated_current_trip"] = status["fault_names"]
@@ -2369,14 +2412,16 @@ def run_sil_thermal(simulator, base_arguments, json_path=None):
 
     # 1-2. Defaults, then the I2t fold-back and its decay.
     transport, session = boot([])
-    names = ("fet-temperature", "motor-temperature", "i2t-load", "thermal-current-limit")
+    names = ("fet-temperature", "motor-temperature", "i2t-load", "thermal-current-limit",
+             "thermal-tau")
     defaults = {name: session.read(name) for name in names}
     metrics["defaults"] = {name: finite(value) for name, value in defaults.items()}
     checks["defaults_without_sensor"] = (defaults["fet-temperature"] != defaults["fet-temperature"]
                                          and defaults["motor-temperature"]
                                          != defaults["motor-temperature"]
                                          and defaults["i2t-load"] == 0.0
-                                         and abs(defaults["thermal-current-limit"] - 2.5) < 1e-6)
+                                         and abs(defaults["thermal-current-limit"] - 2.5) < 1e-6
+                                         and defaults["thermal-tau"] == 30.0)
     tuned = [session.tune("rated-current", 0.5), session.tune("thermal-tau", 2.0)]
     steps, samples = drive(session, 1.0, 3000000, ("i2t-load", "thermal-current-limit"))
     read = [sample for sample in samples if "i2t-load" in sample]
@@ -2454,6 +2499,124 @@ def run_sil_thermal(simulator, base_arguments, json_path=None):
 
     passed = all(checks.values())
     summary = {"kind": "summary", "demo": "board1-sil-thermal", "scenario": "thermal",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
+def run_sil_cogging(simulator, base_arguments, flash_path, json_path=None):
+    """CAL-8 cogging compensation (parameter contract section 28) on a plant with a 24-cycle
+    cogging torque of 0.008 N*m (0.076 A at Kt 0.105): compensation cannot be switched on
+    without a table; the MCU sweeps the rotor forward and back in POSITION mode and fits the
+    table; the 24th harmonic carries it; the velocity ripple at 0.5 rad/s drops; the table
+    and the switch survive a power cycle. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    kt = 1.5 * 7 * 0.01
+    cogging_nm, cycles = 0.008, 24
+
+    def boot(fresh):
+        arguments = list(base_arguments) + ["--cogging-nm", f"{cogging_nm},{cycles},0.3",
+                                            "--flash", str(flash_path)]
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        if fresh:
+            session.tune("command-lease-us", 50000)
+            assert commission(client) == "APPLIED"
+        return transport, session
+
+    def ripple(session, seconds):
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, samples = session.run("velocity", 0.5, int(seconds * 1e6))
+        session.stop()
+        _wait_still(session)
+        tail = [s for s in samples if s["elapsed_us"] >= 1000000]
+        speeds = [s["velocity_rad_s"] for s in tail]
+        mean = sum(speeds) / len(speeds) if speeds else 0.0
+        rms = math.sqrt(sum((v - mean) ** 2 for v in speeds) / len(speeds)) if speeds else None
+        # Speed ripple at the cogging order, against the rotor angle: noise and other
+        # orders average out (constant speed samples the angle evenly).
+        a = sum((s["velocity_rad_s"] - mean) * math.cos(cycles * s["position_rad"]) for s in tail)
+        b = sum((s["velocity_rad_s"] - mean) * math.sin(cycles * s["position_rad"]) for s in tail)
+        order = 2.0 * math.hypot(a, b) / len(tail) if tail else None
+        return {"steps": steps, "mean_rad_s": mean, "ripple_rms_rad_s": rms,
+                "cogging_order_rad_s": order, "faults": sorted({s["faults"] for s in samples})}
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. Baseline and the refusal without a table.
+    transport, session = boot(True)
+    gains = [session.tune("velocity-kp", 1.5), session.tune("velocity-ki", 30.0),
+             session.tune("position-kp", 8.0)]
+    speed = describe(session.client.call(
+        "param-write", parameter_write(PARAMETERS["cogging-speed"], "f32", 0.5)))["result"]
+    refused = session.tune("cogging-enable", 1)
+    before = ripple(session, 3.0)
+    metrics["setup"] = {"gains": gains, "speed": speed, "enable_without_table": refused}
+    metrics["before"] = before
+    checks["enable_refused_without_table"] = refused != "APPLIED" and session.read("cogging-enable") == 0
+
+    # 2. CAL-8.
+    _wait_still(session)
+    started = session.call("calibrate", bytes([16]))["result"]
+    view = None
+    for _ in range(400000):
+        view = session.call("calibrate-read", quiet=True)
+        if view["calibration_state"] in ("DONE", "FAILED"):
+            break
+    result = {name: session.read(name) for name in (
+        "cogging-status", "cogging-peak", "cogging-rms", "cogging-friction",
+        "cogging-consistency", "cogging-enable")}
+    table = cogging_table(session.client)
+    h = _harmonic(table["iq_a"], cycles)
+    rms = math.sqrt(sum(v * v for v in table["iq_a"]) / len(table["iq_a"]))
+    residual = math.sqrt(max(rms * rms - h * h / 2.0, 0.0))
+    metrics["calibration"] = {"started": started, "state": view["calibration_state"],
+                              "failure": view["calibration_failure"],
+                              "results": view.get("results_present"), **result,
+                              "status_name": COGGING_STATUS[result["cogging-status"]],
+                              "table_peak_a": table["peak_a"], "harmonic_a": h,
+                              "expected_a": cogging_nm / kt, "residual_rms_a": residual}
+    checks["calibration_done"] = (started == "ACCEPTED" and view["calibration_state"] == "DONE"
+                                  and result["cogging-status"] == 1 and result["cogging-enable"] == 1
+                                  and "cogging" in (view.get("results_present") or []))
+    checks["table_matches_plant"] = (abs(h / (cogging_nm / kt) - 1.0) < 0.15
+                                     and residual < 0.25 * h
+                                     and result["cogging-consistency"] > 0.9
+                                     and abs(table["peak_a"] - result["cogging-peak"]) < 0.002)
+    checks["friction_reported"] = abs(result["cogging-friction"] - 0.006 * 0.5 / kt) < 0.01
+
+    # 3. Compensation on: the ripple drops.
+    after = ripple(session, 3.0)
+    metrics["after"] = after
+    checks["ripple_reduced"] = (before["cogging_order_rad_s"] is not None
+                                and after["cogging_order_rad_s"] is not None
+                                and after["cogging_order_rad_s"] < 0.3 * before["cogging_order_rad_s"]
+                                and after["faults"] == [0])
+    saved = session.call("save")["result"]
+    transport.__exit__()
+
+    # 4. Power cycle: the table and the switch come back.
+    transport, session = boot(False)
+    restored = {"cogging-enable": session.read("cogging-enable"),
+                "scale_a": cogging_table(session.client)["scale_a"]}
+    metrics["power_cycle"] = {"save": saved, **restored}
+    checks["survives_power_cycle"] = (saved == "APPLIED" and restored["cogging-enable"] == 1
+                                      and abs(restored["scale_a"] - table["scale_a"]) < 1e-9)
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-cogging", "scenario": "cogging",
                "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
                "physical_applied": False, "checks": checks,
                "failed_checks": sorted(name for name, value in checks.items() if not value),
@@ -3716,6 +3879,7 @@ def main():
     parser.add_argument(
         "action",
         choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "sil-demo",
+                 "cogging-read",
                  "calibrate", "motor-setup", "can"],
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
@@ -3966,6 +4130,12 @@ def main():
                 summary = run_sil_coast(os.path.abspath(args.simulator), simulator_arguments,
                                         args.json)
                 return 0 if summary["status"] == "SIL_PASS" else 3
+            if args.action == "sil-demo" and args.sil_scenario == "cogging":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-cogging-flash.bin"))
+                summary = run_sil_cogging(os.path.abspath(args.simulator), simulator_arguments,
+                                          flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "thermal":
                 summary = run_sil_thermal(os.path.abspath(args.simulator), simulator_arguments,
                                           args.json)
@@ -4041,6 +4211,9 @@ def main():
             with transport:
                 client = Client(transport)
                 hello = client.hello()
+                if args.action == "cogging-read":
+                    print(json.dumps(cogging_table(client), allow_nan=False))
+                    return 0
                 if args.action == "motor-setup":
                     summary = motor_setup(client, args.rated_current, args.peak_current,
                                           args.max_speed, args.bandwidth, not args.no_save,

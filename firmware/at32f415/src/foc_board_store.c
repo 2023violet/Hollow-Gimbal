@@ -27,6 +27,8 @@
 
 #include "foc_board_store.h"
 
+#include "foc_board_cogging.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -67,6 +69,18 @@ static uint32_t store_crc32(const uint8_t *bytes, size_t size)
         }
     }
     return crc ^ UINT32_MAX;
+}
+
+/* Continue a CRC-32 over more bytes; start with UINT32_MAX and finish with ~. */
+static uint32_t store_crc32_update(uint32_t crc, const uint8_t *bytes, size_t size)
+{
+    for (size_t index = 0U; index < size; ++index) {
+        crc ^= bytes[index];
+        for (unsigned int bit = 0U; bit < 8U; ++bit) {
+            crc = (crc >> 1) ^ (UINT32_C(0xEDB88320) & (0U - (crc & 1U)));
+        }
+    }
+    return crc;
 }
 
 static void put_u32(uint8_t *p, uint32_t value)
@@ -270,6 +284,7 @@ static bool settings_from_live(
     settings->output_zero_rad = serial->output_zero_rad;
     settings->can = serial->can;
     settings->thermal = serial->thermal;
+    settings->cogging = serial->cogging;
     return true;
 }
 
@@ -283,7 +298,8 @@ static bool serial_caps_valid(const struct foc_board_settings *settings)
         settings->remote_position_cap_rad <= 1000.0f && isfinite(settings->output_zero_rad) &&
         fabsf(settings->output_zero_rad) <= 1000.0f &&
         foc_serial_can_settings_valid(&settings->can) &&
-        foc_serial_thermal_settings_valid(&settings->thermal);
+        foc_serial_thermal_settings_valid(&settings->thermal) &&
+        foc_serial_cogging_settings_valid(&settings->cogging);
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -565,6 +581,110 @@ int foc_board_store_save(
     return FOC_BOARD_STORE_OK;
 }
 
+#define STORE_COGGING_MAGIC UINT32_C(0x31434246) /* "FBC1" */
+
+static void cogging_header(
+    const struct foc_board_store_identity *identity,
+    const struct foc_runtime_cogging_table *table,
+    uint8_t header[28]
+)
+{
+    put_u32(header, STORE_COGGING_MAGIC);
+    put_u32(header + 4, 1U | ((uint32_t)FOC_RUNTIME_COGGING_BINS << 16));
+    put_u32(header + 8, identity->pole_pairs);
+    put_u32(header + 12, identity->encoder_counts_per_revolution);
+    put_u32(header + 16, (uint32_t)identity->runtime_encoder_direction);
+    put_f32(header + 20, table->scale_a);
+    const uint32_t crc = store_crc32_update(UINT32_MAX, header, 24U);
+    put_u32(
+        header + 24,
+        ~store_crc32_update(crc, (const uint8_t *)table->code, FOC_RUNTIME_COGGING_BINS)
+    );
+}
+
+int foc_board_store_cogging_save(
+    const struct foc_board_store_driver *driver,
+    const struct foc_board_store_identity *identity,
+    const struct foc_runtime_cogging_table *table
+)
+{
+    if (driver == NULL || identity == NULL || table == NULL) {
+        return FOC_BOARD_STORE_ERR_INPUT;
+    }
+    if (driver->erase(driver->context, FOC_BOARD_STORE_COGGING_SLOT) != 0 ||
+        !slot_matches(
+            driver,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            0U,
+            NULL,
+            FOC_BOARD_STORE_COGGING_BYTES
+        )) {
+        return FOC_BOARD_STORE_ERR_IO;
+    }
+    if (!(table->scale_a > 0.0f)) {
+        return FOC_BOARD_STORE_OK; /* an empty table is an erased page */
+    }
+    uint8_t header[28];
+    cogging_header(identity, table, header);
+    const uint8_t *codes = (const uint8_t *)table->code;
+    if (driver->program(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            28U,
+            codes,
+            FOC_RUNTIME_COGGING_BINS
+        ) != 0 ||
+        driver->program(driver->context, FOC_BOARD_STORE_COGGING_SLOT, 0U, header, sizeof header) !=
+            0 ||
+        !slot_matches(driver, FOC_BOARD_STORE_COGGING_SLOT, 0U, header, sizeof header) ||
+        !slot_matches(driver, FOC_BOARD_STORE_COGGING_SLOT, 28U, codes, FOC_RUNTIME_COGGING_BINS)) {
+        return FOC_BOARD_STORE_ERR_VERIFY;
+    }
+    return FOC_BOARD_STORE_OK;
+}
+
+int foc_board_store_cogging_load(
+    const struct foc_board_store_driver *driver,
+    const struct foc_board_store_identity *identity,
+    struct foc_runtime_cogging_table *table
+)
+{
+    if (driver == NULL || identity == NULL || table == NULL) {
+        return FOC_BOARD_STORE_ERR_INPUT;
+    }
+    uint8_t header[28];
+    int status = FOC_BOARD_STORE_OK;
+    if (driver->read(driver->context, FOC_BOARD_STORE_COGGING_SLOT, 0U, header, sizeof header) !=
+            0 ||
+        driver->read(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            28U,
+            (uint8_t *)table->code,
+            FOC_RUNTIME_COGGING_BINS
+        ) != 0) {
+        status = FOC_BOARD_STORE_ERR_IO;
+    } else if (erased(header, sizeof header)) {
+        status = FOC_BOARD_STORE_ERR_EMPTY;
+    } else {
+        struct foc_runtime_cogging_table check = {.scale_a = bits_f32(get_u32(header + 20))};
+        uint8_t expected[28];
+        memcpy(check.code, table->code, sizeof check.code);
+        cogging_header(identity, &check, expected);
+        if (memcmp(header, expected, sizeof header) != 0 || !isfinite(check.scale_a) ||
+            !(check.scale_a > 0.0f)) {
+            status = FOC_BOARD_STORE_ERR_RECORD;
+        } else {
+            table->scale_a = check.scale_a;
+        }
+    }
+    if (status != FOC_BOARD_STORE_OK) {
+        table->scale_a = 0.0f;
+        memset(table->code, 0, sizeof table->code);
+    }
+    return status;
+}
+
 int foc_board_store_erase(const struct foc_board_store_driver *driver)
 {
     if (driver == NULL) {
@@ -577,6 +697,20 @@ int foc_board_store_erase(const struct foc_board_store_driver *driver)
         }
     }
     return FOC_BOARD_STORE_OK;
+}
+
+/* Apply a restored tuning; cogging compensation the instance cannot take (no table, or no
+ * motion before the stored calibration is applied) falls back to off instead of refusing
+ * the whole record. */
+static int restore_tuning(struct foc_runtime *runtime, const struct foc_runtime_tuning *tuning)
+{
+    const int status = foc_runtime_apply_tuning(runtime, tuning);
+    if (status == FOC_RUNTIME_OK || tuning->cogging_enabled == 0U) {
+        return status;
+    }
+    struct foc_runtime_tuning without = *tuning;
+    without.cogging_enabled = 0U;
+    return foc_runtime_apply_tuning(runtime, &without);
 }
 
 void foc_board_persistence_restore(
@@ -595,9 +729,19 @@ void foc_board_persistence_restore(
     persistence->stored_sequence = 0U;
     persistence->stored = false;
     persistence->calibration_restored = false;
+    persistence->cogging_restored = false;
     if (!foc_board_store_identity_from_boot(boot, &persistence->identity)) {
         persistence->state = FOC_BOARD_STORE_UNAVAILABLE;
         return;
+    }
+    /* The cogging page stands apart from the settings record: load it first. */
+    if (persistence->cogging != NULL) {
+        persistence->cogging_restored = foc_board_store_cogging_load(
+                                            &persistence->driver,
+                                            &persistence->identity,
+                                            &persistence->cogging->table
+                                        ) == FOC_BOARD_STORE_OK;
+        persistence->cogging->dirty = false;
     }
     struct foc_board_store_identity identity;
     struct foc_board_settings settings;
@@ -637,6 +781,7 @@ void foc_board_persistence_restore(
         .output_zero_rad = serial->output_zero_rad,
         .can = serial->can,
         .thermal = serial->thermal,
+        .cogging = serial->cogging,
         .calibration_present = settings.calibration_present,
         .calibration = settings.calibration,
     };
@@ -647,6 +792,10 @@ void foc_board_persistence_restore(
         }
     }
     settings = merged;
+    /* Compensation needs the table; without a restored one it stays off. */
+    if (persistence->cogging == NULL || !(persistence->cogging->table.scale_a > 0.0f)) {
+        settings.tuning.cogging_enabled = 0U;
+    }
     /* The boot current limit stays the ceiling, as for a UART write (ID 68). Tuning is
      * checked on the boot instance first, so a refused value changes nothing. */
     if (!serial_caps_valid(&settings) ||
@@ -654,7 +803,7 @@ void foc_board_persistence_restore(
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
     }
-    if (foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
+    if (restore_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
     }
@@ -674,7 +823,7 @@ void foc_board_persistence_restore(
             return;
         }
         /* Re-initialization starts from defaults: the already checked tuning again. */
-        (void)foc_runtime_apply_tuning(runtime, &settings.tuning);
+        (void)restore_tuning(runtime, &settings.tuning);
         persistence->restored_calibration = settings.calibration;
         persistence->calibration_restored = true;
     }
@@ -684,6 +833,7 @@ void foc_board_persistence_restore(
     serial->output_zero_rad = settings.output_zero_rad;
     serial->can = settings.can;
     serial->thermal = settings.thermal;
+    serial->cogging = settings.cogging;
     persistence->loaded_sequence = sequence;
     persistence->state = FOC_BOARD_STORE_LOADED;
 }
@@ -717,6 +867,16 @@ static int persistence_save(
         FOC_BOARD_STORE_OK) {
         return FOC_PROTO_INTERNAL_ERROR;
     }
+    if (persistence->cogging != NULL && persistence->cogging->dirty) {
+        if (foc_board_store_cogging_save(
+                &persistence->driver,
+                &persistence->identity,
+                &persistence->cogging->table
+            ) != FOC_BOARD_STORE_OK) {
+            return FOC_PROTO_INTERNAL_ERROR;
+        }
+        persistence->cogging->dirty = false;
+    }
     persistence->stored_sequence = *sequence;
     persistence->stored = true;
     return FOC_PROTO_APPLIED;
@@ -729,6 +889,18 @@ static int persistence_erase(void *context)
         return FOC_PROTO_NOT_SUPPORTED;
     }
     if (foc_board_store_erase(&persistence->driver) != FOC_BOARD_STORE_OK) {
+        return FOC_PROTO_INTERNAL_ERROR;
+    }
+    if (persistence->cogging != NULL &&
+        (persistence->driver.erase(persistence->driver.context, FOC_BOARD_STORE_COGGING_SLOT) !=
+             0 ||
+         !slot_matches(
+             &persistence->driver,
+             FOC_BOARD_STORE_COGGING_SLOT,
+             0U,
+             NULL,
+             FOC_BOARD_STORE_COGGING_BYTES
+         ))) {
         return FOC_PROTO_INTERNAL_ERROR;
     }
     persistence->stored = false;

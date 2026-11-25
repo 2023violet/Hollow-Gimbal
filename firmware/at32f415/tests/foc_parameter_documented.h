@@ -141,6 +141,14 @@ static const struct foc_parameter_documented foc_parameter_documented[] = {
     {146U, 0x42C80000U, true, 0x49742400U, true},
     {147U, 0U, false, 0U, false},
     {148U, 0U, true, 1U, true},
+    {149U, 0U, true, 1U, true},
+    {150U, 0x3D4CCCCDU, true, 0x40000000U, true},
+    {151U, 0U, true, 1U, true},
+    {152U, 0U, false, 0U, false},
+    {153U, 0U, false, 0U, false},
+    {154U, 0U, false, 0U, false},
+    {155U, 0U, false, 0U, false},
+    {156U, 0U, false, 0U, false},
 };
 
 /* ---------------------------------------- end of file ----------------------------------------- */

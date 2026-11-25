@@ -3260,3 +3260,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - Board1：`foc_board_thermal` 前台 10 ms 轮询（读取端口；ARM 镜像无 NTC 通道，不传读取函数）；参数 119、135–148 进 `parameters.json`（单位 °C 24、s 25、K 26，生成器允许串口组只读字段），TLV 保存，写入与恢复校验"降额起点 < 上限"，CONFIG_ERASE 恢复默认。CAN：Get_Temperature 回温度，达妙温度字节与错误 B/C，CANSimple 0x4000/0x2000。
 - SIL `--thermal`、`--ntc-override-us`，场景 `thermal` 与 SIL 测试 `test_thermal_protection`：I²t 折返 0.500 A、停机 2 s θ = 0.368；NTC 降额平衡 0.881 A / 52.95 °C 与理论一致；80 °C 注入锁存并在回落后清除。UART 录制：新 ID 外仅 ID 60/62 各 +3（ID 135 的 3 次写入）。
 - fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 131 项；SDK 技术门禁 PASS。默认镜像 +3,076 B（102,976 B），带参数存储镜像 +2,988 B（107,048 B），RAM +160 B。证据：[THERMAL-01](../evidence/2026-11-25-thermal-01.md)。protocol README 新增 "Thermal protection"，契约第 27 节，firmware/CLI README 更新。
+
+## 2026-11-25 · COG-01 齿槽补偿（CAL-8）
+
+- Runtime：主机专用的 32 点齿槽实现改为产品机制——`foc_runtime_cogging_table`（每圈 1024 个 int8 + 每码安培数，调用方持有）、`motion.cogging_table/cogging_frame_id` 与调参 `cogging_enabled`（均为末尾字段，表为空时拒绝开启）；H1 在速度、位置、阻抗模式按角度取模一圈插值叠加 q 电流；主机审查记录初始化时重采样进实例自己的表，simulation/control_plane 代码不变、测试全过。
+- Board1：`foc_board_cogging`（扫转参考按速度 × 时间计算，就近分桶的正反向滑动平均，正反平均抵消摩擦，默认去 1 次谐波，一致性/样本/范围判据）；校准管理器 CAL-8（掩码 16，状态 18–22，失败码 18，结果位 32）；存储 slot 2 齿槽页（0x0801E800，"FBC1"，极对数与编码器身份，CRC32），PARAM_SAVE 写页、CONFIG_ERASE 擦页，恢复时无表则只把补偿关掉；`store-reserve.ld` 上限改为 0x0801E800（122 KB）。
+- 协议 COGGING_READ 0x55；参数 149–156 进 `parameters.json`；CLI `request calibrate --cal-stages cogging`、`cogging-read`；SIL `--cogging-nm`、场景 `cogging` 与 SIL 测试 `test_cogging_compensation`（齿槽阶次速度波动 −92%，断电重启后表与开关恢复）；SIL flash 文件多一页，persist 场景的损坏偏移改为按 2048 B 槽计算。
+- 修正 THERMAL-01 遗漏：Board1 默认配置没有写 I²t 时间常数（实际默认关闭），现为 30 s；板级测试与 SIL thermal 场景加了检查。
+- 默认镜像 +4,000 B（106,976 B），带参数存储镜像 +4,920 B（111,968 B），RAM +6,248 B（分桶 5 KB 只在标定时用，方案估计偏低）。SIL 套件首轮 persist（两槽偏移）与 profile（τ 默认开启后 I²t 接管定时跳闸）两项失败，已修正场景；fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 132 项全过；SDK 技术门禁 PASS。证据：[COG-01](../evidence/2026-11-25-cog-01.md)。protocol README 新增 "Cogging compensation (CAL-8)"，契约第 28 节，firmware/CLI README 更新。

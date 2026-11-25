@@ -1,0 +1,76 @@
+{
+  "kind": "summary",
+  "demo": "board1-sil-cogging",
+  "scenario": "cogging",
+  "status": "SIL_PASS",
+  "simulated": true,
+  "physical_applied": false,
+  "checks": {
+    "enable_refused_without_table": true,
+    "calibration_done": true,
+    "table_matches_plant": true,
+    "friction_reported": true,
+    "ripple_reduced": true,
+    "survives_power_cycle": true
+  },
+  "failed_checks": [],
+  "metrics": {
+    "setup": {
+      "gains": [
+        "APPLIED",
+        "APPLIED",
+        "APPLIED"
+      ],
+      "speed": "APPLIED",
+      "enable_without_table": "INVALID_ARGUMENT"
+    },
+    "before": {
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "mean_rad_s": 0.4993414063116481,
+      "ripple_rms_rad_s": 0.023210115123151416,
+      "cogging_order_rad_s": 0.028250201173110646,
+      "faults": [
+        0
+      ]
+    },
+    "calibration": {
+      "started": "ACCEPTED",
+      "state": "DONE",
+      "failure": "NONE",
+      "results": [
+        "cogging"
+      ],
+      "cogging-status": 1,
+      "cogging-peak": 0.08259999752044678,
+      "cogging-rms": 0.057713039219379425,
+      "cogging-friction": 0.028516307473182678,
+      "cogging-consistency": 0.9988275766372681,
+      "cogging-enable": 1,
+      "status_name": "VALID",
+      "table_peak_a": 0.08259999484289438,
+      "harmonic_a": 0.08159501042607366,
+      "expected_a": 0.0761904761904762,
+      "residual_rms_a": 0.0014506175155172389
+    },
+    "after": {
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "mean_rad_s": 0.5000436754002683,
+      "ripple_rms_rad_s": 0.012310044758012801,
+      "cogging_order_rad_s": 0.002295936828193423,
+      "faults": [
+        0
+      ]
+    },
+    "power_cycle": {
+      "save": "APPLIED",
+      "cogging-enable": 1,
+      "scale_a": 0.0006503936601802707
+    }
+  }
+}

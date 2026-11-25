@@ -104,6 +104,14 @@ PARAMETER_INFO = {
     'ntc-pullup': {'id': 146, 'type': 'f32', 'unit': 'ohm', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 11, 'calibration': False, 'min': 100.0, 'max': 1000000.0, 'brief': 'Fixed divider resistor of the NTC channels.'},
     'motor-temperature': {'id': 147, 'type': 'f32', 'unit': 'C', 'access': 'ro', 'group': 'serial', 'persist': False, 'unit_code': 24, 'calibration': False, 'min': None, 'max': None, 'brief': 'Filtered motor NTC temperature; NaN when off or without a reading.'},
     'ntc-topology': {'id': 148, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'NTC divider: 0 NTC to ground with pull-up, 1 NTC to the reference with pull-down.'},
+    'cogging-enable': {'id': 149, 'type': 'u32', 'unit': 'none', 'access': 'tuning', 'group': 'tuning', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'Cogging compensation: 1 adds the CAL-8 table in velocity, position and impedance modes; needs a table.'},
+    'cogging-speed': {'id': 150, 'type': 'f32', 'unit': 'rad/s', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 3, 'calibration': False, 'min': 0.05, 'max': 2.0, 'brief': 'CAL-8 sweep speed, rotor-side.'},
+    'cogging-keep-first': {'id': 151, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'CAL-8: 1 keeps the once-per-turn component (imbalance), 0 removes it.'},
+    'cogging-status': {'id': 152, 'type': 'u32', 'unit': 'none', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range.'},
+    'cogging-peak': {'id': 153, 'type': 'f32', 'unit': 'A', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 1, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 table peak q current.'},
+    'cogging-rms': {'id': 154, 'type': 'f32', 'unit': 'A', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 1, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 table RMS q current.'},
+    'cogging-friction': {'id': 155, 'type': 'f32', 'unit': 'A', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 1, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 Coulomb friction current (half the forward/backward difference).'},
+    'cogging-consistency': {'id': 156, 'type': 'f32', 'unit': 'none', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted.'},
 }
 
 # Name -> wire ID.

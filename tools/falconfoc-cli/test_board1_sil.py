@@ -279,6 +279,14 @@ class Board1SilTest(unittest.TestCase):
         self.assertLess(abs(metrics["position"]["final_rad"] - 0.5), 0.02)
         self.assertLess(abs(metrics["torque"]["mean_reply_nm"] - 0.004), 0.0015)
 
+    def test_cogging_compensation(self):
+        """CAL-8 on a plant with cogging: refused without a table, the MCU fits the table,
+        the ripple drops, and the table survives a power cycle."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_cogging(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_thermal_protection(self):
         """I2t fold-back to the rated current and its decay; NTC derating against the plant's
         heating; an over-temperature latch released only once the reading cools."""

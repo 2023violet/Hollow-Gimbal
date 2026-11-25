@@ -110,3 +110,11 @@ settings record. Semantics, derivations and calibration stages are in the
 | 146 | `ntc-pullup` | f32 | ohm | RW | 100 … 1e+06 | yes | Fixed divider resistor of the NTC channels. |
 | 147 | `motor-temperature` | f32 | C | RO |  |  | Filtered motor NTC temperature; NaN when off or without a reading. |
 | 148 | `ntc-topology` | u32 |  | RW | 0 … 1 | yes | NTC divider: 0 NTC to ground with pull-up, 1 NTC to the reference with pull-down. |
+| 149 | `cogging-enable` | u32 |  | RW (DISABLED, H0) | 0 … 1 | yes | Cogging compensation: 1 adds the CAL-8 table in velocity, position and impedance modes; needs a table. |
+| 150 | `cogging-speed` | f32 | rad/s | RW | 0.05 … 2 | yes | CAL-8 sweep speed, rotor-side. |
+| 151 | `cogging-keep-first` | u32 |  | RW | 0 … 1 | yes | CAL-8: 1 keeps the once-per-turn component (imbalance), 0 removes it. |
+| 152 | `cogging-status` | u32 |  | RO |  |  | CAL-8: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range. |
+| 153 | `cogging-peak` | f32 | A | RO |  |  | CAL-8 table peak q current. |
+| 154 | `cogging-rms` | f32 | A | RO |  |  | CAL-8 table RMS q current. |
+| 155 | `cogging-friction` | f32 | A | RO |  |  | CAL-8 Coulomb friction current (half the forward/backward difference). |
+| 156 | `cogging-consistency` | f32 |  | RO |  |  | CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted. |

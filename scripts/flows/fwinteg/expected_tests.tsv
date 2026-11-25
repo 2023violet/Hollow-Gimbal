@@ -5,7 +5,8 @@
 # production Board1 path against a virtual motor over UART) and test-foc-board-store (M2
 # persistent settings record, torn saves, boot restore) and test-foc-can (CANSimple) and
 # test-foc-trig (ROM-01 foc_sincosf accuracy) and test-foc-parameter-table (PARAM-01) and
-# test-foc-thermal and test-foc-runtime-thermal (THERMAL-01 NTC, derating, I2t); test-legacy-sincos-baseline left with the
+# test-foc-thermal and test-foc-runtime-thermal (THERMAL-01 NTC, derating, I2t) and
+# test-foc-board-cogging (COG-01 CAL-8 sweep and fit); test-legacy-sincos-baseline left with the
 # Legacy removal. Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
@@ -56,6 +57,7 @@ firmware-at32f415	test-foc-adc-candidate
 firmware-at32f415	test-foc-board-boot
 firmware-at32f415	test-foc-board-boot-default
 firmware-at32f415	test-foc-board-capture
+firmware-at32f415	test-foc-board-cogging
 firmware-at32f415	test-foc-board-config
 firmware-at32f415	test-foc-board-store
 firmware-at32f415	test-foc-board1

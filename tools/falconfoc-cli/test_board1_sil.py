@@ -8,6 +8,7 @@ physical evidence. FOC_BOARD1_SIL names the falconfoc-board1-sil executable.
 import contextlib
 import io
 import os
+import struct
 import sys
 import time
 import unittest
@@ -46,6 +47,33 @@ class Board1SilTest(unittest.TestCase):
             client = cli.Client(transport, sequence=1)
             client.hello()
             return cli.run_sil_demo(client, transport, *arguments, scenario=name)
+
+    def test_parameter_table_matches_firmware(self):
+        """Every parameters.json entry reads back with its wire type, unit, access, calibration
+        flag and constant bounds; no other ID in 0-200 answers."""
+        def f32(value):
+            return struct.unpack("<f", struct.pack("<f", value))[0]
+
+        known = {info["id"]: (name, info) for name, info in cli.PARAMETER_INFO.items()}
+        with cli.SimulatorTransport(SIL, ["--lockstep-us", "500"] + cli.SIL_CALIBRATE_ARGUMENTS)                 as transport, contextlib.redirect_stdout(io.StringIO()):
+            client = cli.Client(transport, sequence=1)
+            client.hello()
+            for identifier in range(201):
+                reply = cli.describe(client.call("param-read", cli.parameter_read(identifier)))
+                if identifier not in known:
+                    self.assertEqual(reply["result"], "INVALID_ARGUMENT", identifier)
+                    continue
+                name, info = known[identifier]
+                self.assertEqual(reply["result"], "OK", name)
+                self.assertEqual(reply["parameter_type"], info["type"], name)
+                self.assertEqual(reply["unit"], info["unit_code"], name)
+                self.assertEqual(reply["writable"], info["access"] != "ro", name)
+                self.assertEqual(reply["calibration_required"], info["calibration"], name)
+                for bound in ("min", "max"):
+                    if info[bound] is not None:
+                        expected = info[bound] if info["type"] == "u32" else f32(info[bound])
+                        self.assertEqual(reply["minimum" if bound == "min" else "maximum"],
+                                         expected, (name, bound))
 
     def test_current_demo_lockstep(self):
         """UART SETPOINT -> production Board1 path -> virtual motor -> UART readback."""

@@ -4,7 +4,7 @@
 # Capture -> ADC candidate -> isolated Runtime) and test-foc-board1-sil (M0 Board1 SIL:
 # production Board1 path against a virtual motor over UART) and test-foc-board-store (M2
 # persistent settings record, torn saves, boot restore) and test-foc-can (CANSimple) and
-# test-foc-trig (ROM-01 foc_sincosf accuracy); test-legacy-sincos-baseline left with the
+# test-foc-trig (ROM-01 foc_sincosf accuracy) and test-foc-parameter-table (PARAM-01); test-legacy-sincos-baseline left with the
 # Legacy removal. Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
@@ -63,6 +63,7 @@ firmware-at32f415	test-foc-can
 firmware-at32f415	test-foc-capture-boot-import
 firmware-at32f415	test-foc-capture-import
 firmware-at32f415	test-foc-locked-timing-import
+firmware-at32f415	test-foc-parameter-table
 firmware-at32f415	test-foc-pwm-port
 firmware-at32f415	test-foc-python
 firmware-at32f415	test-foc-serial

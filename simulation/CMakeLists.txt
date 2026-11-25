@@ -69,6 +69,7 @@ add_executable(
   falconfoc-virtual-device
   src/falconfoc_virtual_device.c
   "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_serial.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_parameter_table.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_board_profile.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/at32f415/src/foc_uart_buffer.c"
 )

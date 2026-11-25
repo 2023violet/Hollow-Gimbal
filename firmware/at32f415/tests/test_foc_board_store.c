@@ -7,8 +7,9 @@
  * Test role
  * ---------
  * Drive the production store through a fake NOR device with power-loss cuts,
- * stuck cells and damaged slots, and the boot restore through the production
- * boot selection.
+ * stuck cells and damaged slots, the format-9 TLV rules (unknown, missing,
+ * duplicate and mistyped entries, old formats refused) and the boot restore
+ * through the production boot selection.
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -16,8 +17,10 @@
 #include "foc_board.h"
 #include "foc_board_boot.h"
 #include "foc_board_store.h"
+#include "foc_parameter_table.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -115,16 +118,21 @@ static struct foc_board_settings settings_with_kp(float kp)
         .rx_budget = 24U,
         .remote_current_cap_a = 2.5f,
         .remote_position_cap_rad = 100.0f,
+        .can = foc_serial_can_defaults(),
     };
 }
 
 /* Tests ------------------------------------------------------------------------ */
 
+static size_t find_entry(const uint8_t *record, uint16_t id);
+static size_t drop_entry(uint8_t *record, size_t index);
+
 static int test_codec(void)
 {
     uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
     const struct foc_board_settings in = settings_with_kp(2.0f);
-    foc_board_store_encode(&nominal, &in, 7U, record);
+    const size_t length = foc_board_store_encode(&nominal, &in, 7U, record);
+    CHECK(length == FOC_BOARD_STORE_RECORD_BYTES - 8U * 8U); /* no calibration entries */
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
@@ -138,8 +146,15 @@ static int test_codec(void)
     CHECK(sequence == 7U && out.tuning.current_kp_v_per_a.q == 2.0f && out.rx_budget == 24U);
     CHECK(identity.pole_pairs == 7U && identity.runtime_encoder_direction == -1);
     CHECK(out.tuning.command_timeout_us == 2500U && out.remote_position_cap_rad == 100.0f);
+    /* Every parameter of the table was carried. */
+    for (size_t index = 0U; index < FOC_PARAMETER_COUNT; ++index) {
+        CHECK(
+            foc_board_settings_present(&out, index) ==
+            ((foc_parameter_table[index].flags & FOC_PARAM_FLAG_PERSIST) != 0U)
+        );
+    }
     /* Any flipped byte in the covered range fails the CRC. */
-    for (size_t index = 4U; index < FOC_BOARD_STORE_RECORD_BYTES; ++index) {
+    for (size_t index = 4U; index < length; ++index) {
         record[index] ^= 0x10U;
         CHECK(
             foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD
@@ -380,6 +395,27 @@ static int test_restore(void)
     CHECK(restore_boot(&fixture, true) == 0);
     CHECK(fixture.persistence.state == FOC_BOARD_STORE_VALUE_REJECTED);
 
+    /* A record without a parameter keeps its boot value (dead-time compensation 0, CAN
+     * defaults here) and still applies the rest. */
+    {
+        struct foc_board_settings partial = in;
+        partial.tuning.dead_time_v = 0.05f;
+        partial.can.node_id = 9U;
+        uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
+        foc_board_store_encode(&boot_identity, &partial, 1U, record);
+        (void)drop_entry(record, find_entry(record, FOC_PARAM_DEAD_TIME_COMP));
+        (void)drop_entry(record, find_entry(record, FOC_PARAM_CAN_NODE_ID));
+        memset(fixture.flash.slots, 0xFF, sizeof fixture.flash.slots);
+        memcpy(fixture.flash.slots[0], record, sizeof record);
+        CHECK(restore_boot(&fixture, true) == 0);
+        CHECK(fixture.persistence.state == FOC_BOARD_STORE_LOADED);
+        CHECK(fixture.runtime.pipeline.current.config.kp_v_per_a.q == 2.2f);
+        struct foc_runtime_tuning applied;
+        CHECK(foc_runtime_read_tuning(&fixture.runtime, &applied) == FOC_RUNTIME_OK);
+        CHECK(applied.dead_time_v == 0.0f);
+        CHECK(fixture.serial.can.node_id == 63U && fixture.serial.rx_budget == 16U);
+    }
+
     /* Damaged storage reports INVALID_RECORD and keeps the boot configuration. */
     memset(fixture.flash.slots, 0x00, sizeof fixture.flash.slots);
     CHECK(restore_boot(&fixture, true) == 0);
@@ -390,7 +426,7 @@ static int test_restore(void)
     return 0;
 }
 
-/* M3c: format 2 carries an applied rotor calibration; format 1 still decodes. */
+/* Format 9: TLV entries, an applied rotor calibration, every persistent parameter. */
 static uint32_t test_crc32(const uint8_t *bytes, size_t size)
 {
     uint32_t crc = UINT32_MAX;
@@ -409,6 +445,48 @@ static void put_word(uint8_t *bytes, uint32_t value)
     bytes[1] = (uint8_t)(value >> 8);
     bytes[2] = (uint8_t)(value >> 16);
     bytes[3] = (uint8_t)(value >> 24);
+}
+
+static size_t record_length(const uint8_t *record)
+{
+    return (size_t)record[10] | ((size_t)record[11] << 8);
+}
+
+/* Commit, fix count, length and CRC after editing the entries of a record of `length`. */
+static void reseal(uint8_t *record, size_t length)
+{
+    const size_t count = (length - 24U) / 8U;
+    record[10] = (uint8_t)length;
+    record[11] = (uint8_t)(length >> 8);
+    record[16] = (uint8_t)count;
+    record[17] = (uint8_t)(count >> 8);
+    put_word(record + length - 4U, test_crc32(record + 4, length - 8U));
+    put_word(record, UINT32_C(0xC35A4C7E));
+}
+
+/* Index of the entry carrying `id`, or SIZE_MAX. */
+static size_t find_entry(const uint8_t *record, uint16_t id)
+{
+    const size_t count = (record_length(record) - 24U) / 8U;
+    for (size_t index = 0U; index < count; ++index) {
+        const uint8_t *entry = record + 20U + 8U * index;
+        if ((uint16_t)(entry[0] | (entry[1] << 8)) == id) {
+            return index;
+        }
+    }
+    return SIZE_MAX;
+}
+
+/* Drop one entry; returns the new length. */
+static size_t drop_entry(uint8_t *record, size_t index)
+{
+    const size_t length = record_length(record);
+    uint8_t *entry = record + 20U + 8U * index;
+    memmove(entry, entry + 8U, length - 4U - (size_t)(entry + 8U - record));
+    const size_t shorter = length - 8U;
+    memset(record + shorter, 0xFF, length - shorter);
+    reseal(record, shorter);
+    return shorter;
 }
 
 /* Board1-consistent calibration: raw source -1, fitted -1, Runtime +1. */
@@ -434,7 +512,7 @@ static int test_calibration_record(void)
     struct foc_board_settings in = settings_with_kp(2.0f);
     in.calibration_present = true;
     in.calibration = calibrated();
-    foc_board_store_encode(&nominal, &in, 3U, record);
+    CHECK(foc_board_store_encode(&nominal, &in, 3U, record) == FOC_BOARD_STORE_RECORD_BYTES);
     put_word(record, UINT32_C(0xC35A4C7E));
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
@@ -449,38 +527,21 @@ static int test_calibration_record(void)
     );
     CHECK(out.calibration.source_identity.pole_pairs == 11U);
     CHECK(out.tuning.current_kp_v_per_a.q == 2.0f);
-
-    /* A format-1 record (108 bytes, CRC at 104) decodes as tuning without calibration. */
-    uint8_t v1[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v1, 0xFF, sizeof v1);
-    memcpy(v1, record, 104U);
-    v1[8] = 1U;
-    v1[9] = 0U;
-    v1[10] = 108U;
-    v1[11] = 0U;
-    put_word(v1 + 104, test_crc32(v1 + 4, 100U));
-    CHECK(foc_board_store_decode(v1, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(!out.calibration_present && out.tuning.current_kp_v_per_a.q == 2.0f && sequence == 3U);
-    CHECK(!out.extended);
-    /* A format-2 record (140 bytes, CRC at 136) keeps its calibration, no profile. */
-    uint8_t v2[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v2, 0xFF, sizeof v2);
-    memcpy(v2, record, 136U);
-    v2[8] = 2U;
-    v2[10] = 140U;
-    put_word(v2 + 136, test_crc32(v2 + 4, 132U));
-    CHECK(foc_board_store_decode(v2, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.calibration_present && out.calibration.pole_pairs == 11U && !out.extended);
-    CHECK(out.tuning.profile.rs_ohm == 0.0f && out.tuning.trips.overcurrent_a == 0.0f);
-    /* Unknown flag bits are refused. */
-    record[104] = 3U;
-    put_word(record + 228, test_crc32(record + 4, 224U));
-    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    /* A calibration flag other than 0/1 is refused. */
+    uint8_t bad[FOC_BOARD_STORE_RECORD_BYTES];
+    memcpy(bad, record, sizeof bad);
+    put_word(bad + 20U + 8U * find_entry(bad, 0xF100U) + 4U, 3U);
+    reseal(bad, record_length(bad));
+    CHECK(foc_board_store_decode(bad, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    /* A calibration missing one of its fields is refused. */
+    memcpy(bad, record, sizeof bad);
+    (void)drop_entry(bad, find_entry(bad, 0xF104U));
+    CHECK(foc_board_store_decode(bad, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     return 0;
 }
 
-/* Format 5 carries the motor profile, the protection thresholds, the output zero and
- * the acceleration limits; formats 4 and 3 still decode. */
+/* Every persistent parameter round-trips: profile, protection, output zero, ramps,
+ * dead-time compensation and CAN. */
 static int test_profile_record(void)
 {
     uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
@@ -497,6 +558,8 @@ static int test_profile_record(void)
         .max_speed_rad_s = 80.0f,
         .gear_ratio = 9.0f,
         .current_bandwidth_hz = 120.0f,
+        .velocity_bandwidth_hz = 12.0f,
+        .inertia_travel_rad = 1.5f,
     };
     in.tuning.trips = (struct foc_runtime_trip_limits){
         .overcurrent_a = 3.1f,
@@ -510,8 +573,6 @@ static int test_profile_record(void)
     in.output_zero_rad = -2.5f;
     in.tuning.accel_rad_s2 = 40.0f;
     in.tuning.decel_rad_s2 = 120.0f;
-    in.tuning.profile.velocity_bandwidth_hz = 12.0f;
-    in.tuning.profile.inertia_travel_rad = 1.5f;
     in.tuning.dead_time_v = 0.08f;
     in.can = (struct foc_serial_can_settings){
         .node_id = 5U,
@@ -521,83 +582,92 @@ static int test_profile_record(void)
     };
     foc_board_store_encode(&nominal, &in, 7U, record);
     put_word(record, UINT32_C(0xC35A4C7E));
-    CHECK(record[8] == 8U && record[10] == 244U);
+    CHECK(record[8] == 9U);
     struct foc_board_store_identity identity;
     struct foc_board_settings out;
     uint32_t sequence = 0U;
     CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.extended && sequence == 7U);
+    CHECK(sequence == 7U);
     CHECK(memcmp(&out.tuning.profile, &in.tuning.profile, sizeof in.tuning.profile) == 0);
-    CHECK(out.tuning.trips.overcurrent_a == 3.1f && out.tuning.trips.undervoltage_v == 6.0f);
-    CHECK(out.tuning.trips.sustained_ms == 1500U && out.tuning.trips.divergence_ms == 400U);
+    CHECK(memcmp(&out.tuning.trips, &in.tuning.trips, sizeof in.tuning.trips) == 0);
     CHECK(out.output_zero_rad == -2.5f);
     CHECK(out.tuning.accel_rad_s2 == 40.0f && out.tuning.decel_rad_s2 == 120.0f);
-    CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
     CHECK(out.tuning.dead_time_v == 0.08f);
     CHECK(out.can.node_id == 5U && out.can.bitrate == 500000U);
     CHECK(out.can.heartbeat_ms == 250U && out.can.estimates_ms == 20U);
-    /* Format 7 (236 bytes, CRC at 232) keeps the dead-time compensation, CAN defaults. */
-    uint8_t v7[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v7, 0xFF, sizeof v7);
-    memcpy(v7, record, 232U);
-    v7[8] = 7U;
-    v7[10] = 236U;
-    put_word(v7 + 232, test_crc32(v7 + 4, 228U));
-    CHECK(foc_board_store_decode(v7, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.tuning.dead_time_v == 0.08f);
-    CHECK(out.can.node_id == 63U && out.can.bitrate == 1000000U && out.can.heartbeat_ms == 100U);
-    /* A format-8 bit-rate code above 3 is refused. */
-    uint8_t bad[FOC_BOARD_STORE_RECORD_BYTES];
-    memcpy(bad, record, sizeof bad);
-    bad[233] = 4U;
-    put_word(bad + 240, test_crc32(bad + 4, 236U));
-    CHECK(foc_board_store_decode(bad, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
-    /* Format 6 (232 bytes, CRC at 228) keeps IDs 108/109, no dead-time compensation. */
-    uint8_t v6[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v6, 0xFF, sizeof v6);
-    memcpy(v6, record, 228U);
-    v6[8] = 6U;
-    v6[10] = 232U;
-    put_word(v6 + 228, test_crc32(v6 + 4, 224U));
-    CHECK(foc_board_store_decode(v6, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.mechanical && out.tuning.profile.velocity_bandwidth_hz == 12.0f);
-    CHECK(out.tuning.dead_time_v == 0.0f);
-    /* Format 5 (224 bytes, CRC at 220) keeps the acceleration limits, not IDs 108/109. */
-    uint8_t v5[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v5, 0xFF, sizeof v5);
-    memcpy(v5, record, 220U);
-    v5[8] = 5U;
-    v5[10] = 224U;
-    put_word(v5 + 220, test_crc32(v5 + 4, 216U));
-    CHECK(foc_board_store_decode(v5, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.extended && !out.mechanical && out.tuning.accel_rad_s2 == 40.0f);
-    CHECK(out.tuning.profile.velocity_bandwidth_hz == 0.0f);
-    /* Format 4 (216 bytes, CRC at 212) keeps the output zero, no acceleration limits. */
-    uint8_t v4[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v4, 0xFF, sizeof v4);
-    memcpy(v4, record, 212U);
-    v4[8] = 4U;
-    v4[10] = 216U;
-    put_word(v4 + 212, test_crc32(v4 + 4, 208U));
-    CHECK(foc_board_store_decode(v4, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.extended && out.output_zero_rad == -2.5f);
-    CHECK(out.tuning.accel_rad_s2 == 0.0f && out.tuning.decel_rad_s2 == 0.0f);
-    uint8_t v3[FOC_BOARD_STORE_RECORD_BYTES];
-    memset(v3, 0xFF, sizeof v3);
-    memcpy(v3, record, 208U);
-    v3[8] = 3U;
-    v3[10] = 212U;
-    put_word(v3 + 208, test_crc32(v3 + 4, 204U));
-    CHECK(foc_board_store_decode(v3, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
-    CHECK(out.extended && out.output_zero_rad == 0.0f && !out.mechanical);
-    /* Formats before 6 carry no IDs 108/109; the restore keeps their boot values. */
-    struct foc_runtime_profile expected = in.tuning.profile;
-    expected.velocity_bandwidth_hz = 0.0f;
-    expected.inertia_travel_rad = 0.0f;
-    CHECK(memcmp(&out.tuning.profile, &expected, sizeof expected) == 0);
-    /* A flipped extension byte breaks the CRC. */
-    record[150] ^= 1U;
-    CHECK(foc_board_store_decode(record, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    CHECK(memcmp(&identity, &nominal, sizeof nominal) == 0);
+    return 0;
+}
+
+/* TLV rules: unknown IDs are ignored, missing ones reported, duplicates, mistyped entries,
+ * a missing identity and the old fixed-offset formats are refused. */
+static int test_tlv_rules(void)
+{
+    uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
+    uint8_t edit[FOC_BOARD_STORE_RECORD_BYTES];
+    const struct foc_board_settings in = settings_with_kp(2.0f);
+    const size_t length = foc_board_store_encode(&nominal, &in, 5U, record);
+    put_word(record, UINT32_C(0xC35A4C7E));
+    struct foc_board_store_identity identity;
+    struct foc_board_settings out;
+    uint32_t sequence = 0U;
+
+    /* An entry this firmware does not know (a newer firmware's parameter) is ignored. */
+    memcpy(edit, record, sizeof edit);
+    const uint8_t unknown[8] = {0x21U, 0x03U, 1U, 0U, 0x78U, 0x56U, 0x34U, 0x12U}; /* ID 801 */
+    memcpy(edit + length - 4U, unknown, sizeof unknown);
+    reseal(edit, length + 8U);
+    CHECK(length + 8U <= FOC_BOARD_STORE_RECORD_BYTES);
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    CHECK(out.tuning.current_kp_v_per_a.q == 2.0f);
+
+    /* A missing parameter is reported absent; the others stay present. */
+    memcpy(edit, record, sizeof edit);
+    (void)drop_entry(edit, find_entry(edit, FOC_PARAM_DEAD_TIME_COMP));
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_OK);
+    const size_t dead_time =
+        (size_t)(foc_parameter_find(FOC_PARAM_DEAD_TIME_COMP) - foc_parameter_table);
+    const size_t kp_q = (size_t)(foc_parameter_find(FOC_PARAM_CURRENT_KP_Q) - foc_parameter_table);
+    CHECK(!foc_board_settings_present(&out, dead_time) && foc_board_settings_present(&out, kp_q));
+
+    /* A duplicated parameter is refused. */
+    memcpy(edit, record, sizeof edit);
+    memcpy(edit + length - 4U, record + 20U + 8U * find_entry(record, FOC_PARAM_CURRENT_KP_Q), 8U);
+    reseal(edit, length + 8U);
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+
+    /* A parameter with the wrong wire type is refused. */
+    memcpy(edit, record, sizeof edit);
+    edit[20U + 8U * find_entry(edit, FOC_PARAM_CURRENT_KP_Q) + 2U] = 1U;
+    reseal(edit, length);
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+
+    /* A record without its full identity is refused. */
+    memcpy(edit, record, sizeof edit);
+    (void)drop_entry(edit, find_entry(edit, 0xF002U));
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+
+    /* Non-zero reserved bytes and a count that disagrees with the length are refused. */
+    memcpy(edit, record, sizeof edit);
+    edit[20U + 3U] = 1U;
+    reseal(edit, length);
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+    memcpy(edit, record, sizeof edit);
+    edit[16] ^= 1U;
+    put_word(edit + length - 4U, test_crc32(edit + 4, length - 8U));
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
+
+    /* A committed, CRC-valid format-8 record (fixed 244 bytes) is no longer read. */
+    memset(edit, 0xFF, sizeof edit);
+    put_word(edit, UINT32_C(0xC35A4C7E));
+    put_word(edit + 4, UINT32_C(0x31504246));
+    edit[8] = 8U;
+    edit[9] = 0U;
+    edit[10] = 244U;
+    edit[11] = 0U;
+    memset(edit + 12, 0, 228U);
+    put_word(edit + 240, test_crc32(edit + 4, 236U));
+    CHECK(foc_board_store_decode(edit, &identity, &out, &sequence) == FOC_BOARD_STORE_ERR_RECORD);
     return 0;
 }
 
@@ -646,7 +716,8 @@ static int test_restore_calibration(void)
 int main(void)
 {
     return test_codec() || test_slots() || test_sequence_wrap() || test_restore() ||
-        test_calibration_record() || test_profile_record() || test_restore_calibration();
+        test_calibration_record() || test_profile_record() || test_tlv_rules() ||
+        test_restore_calibration();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

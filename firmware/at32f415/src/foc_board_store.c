@@ -6,39 +6,21 @@
  *
  * Implementation role
  * -------------------
- * Record "FBP1", format 8, 244 bytes, little-endian. Format 7 is bytes 0–231 with its
- * CRC at 232 and no CAN settings (defaults on restore). Format 6 is bytes 0–227 with its
- * CRC at 228 and no dead-time compensation. Format 5 is bytes 0–219 with
- * its CRC at 220 and no velocity bandwidth or inertia travel; format 4 is bytes 0–211
- * with its CRC at 212 and no acceleration limits; format 3 is bytes 0–207 with its CRC at
- * 208 and no output zero; format 2 is bytes 0–135 with its CRC at 136;
- * format 1 is bytes 0–103 with its CRC at 104 and no calibration. Formats 1 and 2
- * still decode, keeping the boot profile and protection thresholds:
+ * Record "FBP1" format 9: a fixed header and 8-byte TLV entries, little-endian.
+ * Formats 1-8 (fixed offsets) are no longer read; such a record reports
+ * INVALID_RECORD and the boot configuration stays in use.
  *
  *   0  commit word 0xC35A4C7E (erased 0xFFFFFFFF), programmed last
- *   4  magic "FBP1"          8  format u16 = 8     10 length u16 = 244
- *   12 sequence u32
- *   16 configuration u32     20 pole pairs u32     24 encoder CPR u32
- *   28 runtime encoder direction i32   32 electrical offset f32
- *   36/40/44 phase A/B/C ADC offset f32
- *   48/52 current Kp d/q     56/60 current Ki d/q  64 current-vector limit
- *   68/72 velocity Kp/Ki     76 position Kp        80 speed reference limit
- *   84 q-current limit (all f32)                   88 command lease u32 µs
- *   92 UART RX budget u32    96 remote current cap f32   100 remote position cap f32
- *   104 flags u32 (bit 0: calibration present)
- *   108/112/116 calibrated phase A/B/C ADC offset f32   120 pole pairs u32
- *   124 electrical offset f32   128 calibration direction i32   132 Runtime direction i32
- *   136/140/144/148 Rs Ω, Ld H, Lq H, flux Wb   152/156 inertia, damping
- *   160/164/168 rated A, peak A, max speed rad/s   172 gear ratio   176 bandwidth Hz
- *   180/184/188/192 trips: over-current A, over/under-voltage V, over-speed rad/s
- *   196/200/204 sustained, stall, divergence windows u32 ms
- *   208 output-position zero offset f32 rad (format 4; 0 from format 3)
- *   212/216 acceleration / deceleration f32 rad/s² (format 5; 0 from format 4)
- *   220/224 velocity bandwidth Hz / inertia travel rad (format 6; boot values before)
- *   228 dead-time compensation f32 V (format 7; 0, off, before)
- *   232 CAN node ID u8   233 CAN bit-rate code u8 (0 125k, 1 250k, 2 500k, 3 1M)
- *   234/236 heartbeat / encoder-estimate periods u16 ms   238 reserved u16 = 0 (format 8)
- *   240 CRC-32 (IEEE, reflected) of bytes 4–239
+ *   4  magic "FBP1"   8 format u16 = 9   10 length u16 (whole record, CRC included)
+ *   12 sequence u32   16 entry count u16  18 reserved u16 = 0
+ *   20 entries: id u16 | type u8 (1 u32, 2 f32) | reserved u8 = 0 | value u32
+ *   length - 4: CRC-32 (IEEE, reflected) of bytes 4 .. length - 5
+ *
+ * Entry IDs are the UART/CAN parameter IDs of every persistent table entry
+ * (foc_parameter_table.h), plus 0xF000-0xF007 for the boot identity and 0xF100
+ * (present flag) with 0xF101-0xF107 for an applied rotor calibration. Decoding
+ * ignores unknown IDs and records which parameters were present; the restore
+ * keeps the boot value of any parameter the record does not carry.
  */
 
 /* Includes --------------------------------------------------------------------- */
@@ -50,28 +32,26 @@
 
 /* Private Macros --------------------------------------------------------------- */
 
-#define STORE_COMMIT    UINT32_C(0xC35A4C7E)
-#define STORE_MAGIC     UINT32_C(0x31504246) /* "FBP1" */
-#define STORE_FORMAT    8U
-#define STORE_CRC_AT    240U
-#define STORE_V7_BYTES  236U
-#define STORE_V7_CRC_AT 232U
-#define STORE_V6_BYTES  232U
-#define STORE_V6_CRC_AT 228U
-#define STORE_V5_BYTES  224U
-#define STORE_V5_CRC_AT 220U
-#define STORE_V4_BYTES  216U
-#define STORE_V4_CRC_AT 212U
-#define STORE_V3_BYTES  212U
-#define STORE_V3_CRC_AT 208U
-#define STORE_V2_BYTES  140U
-#define STORE_V2_CRC_AT 136U
-#define STORE_V1_BYTES  108U
-#define STORE_V1_CRC_AT 104U
-#define STORE_FLAG_CAL  1U
-#define STORE_HALF      UINT32_C(0x80000000)
+#define STORE_COMMIT       UINT32_C(0xC35A4C7E)
+#define STORE_MAGIC        UINT32_C(0x31504246) /* "FBP1" */
+#define STORE_FORMAT       9U
+#define STORE_HEADER       20U
+#define STORE_ENTRY        8U
+#define STORE_HALF         UINT32_C(0x80000000)
+#define STORE_ID_IDENTITY  0xF000U
+#define STORE_IDENTITY_N   8U
+#define STORE_ID_CAL       0xF100U
+#define STORE_CAL_N        7U
+#define STORE_TYPE_U32     1U
+#define STORE_TYPE_F32     2U
+#define STORE_VERIFY_CHUNK 64U
 
-_Static_assert(FOC_BOARD_STORE_RECORD_BYTES == STORE_CRC_AT + 4U, "record layout");
+_Static_assert(
+    FOC_BOARD_STORE_RECORD_BYTES ==
+        STORE_HEADER + 4U +
+            STORE_ENTRY * (FOC_PARAMETER_PERSIST_COUNT + STORE_IDENTITY_N + 1U + STORE_CAL_N),
+    "record size"
+);
 _Static_assert(FOC_BOARD_STORE_RECORD_BYTES % FOC_BOARD_STORE_PROGRAM_BYTES == 0, "program unit");
 _Static_assert(FOC_BOARD_STORE_RECORD_BYTES <= FOC_BOARD_STORE_SLOT_BYTES, "slot size");
 
@@ -109,20 +89,78 @@ static void put_f32(uint8_t *p, float value)
     put_u32(p, bits);
 }
 
-static float get_f32(const uint8_t *p)
-{
-    const uint32_t bits = get_u32(p);
-    float value;
-    memcpy(&value, &bits, sizeof value);
-    return value;
-}
-
 static bool erased(const uint8_t *bytes, size_t size)
 {
     for (size_t index = 0U; index < size; ++index) {
         if (bytes[index] != 0xFFU) {
             return false;
         }
+    }
+    return true;
+}
+
+static uint32_t get_u16(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8);
+}
+
+static uint32_t f32_bits(float value)
+{
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof bits);
+    return bits;
+}
+
+static float bits_f32(uint32_t bits)
+{
+    float value;
+    memcpy(&value, &bits, sizeof value);
+    return value;
+}
+
+/* A persistent 4-byte field of struct foc_board_settings, by the table's offset. */
+static uint32_t settings_get(const struct foc_board_settings *settings, uint16_t offset)
+{
+    uint32_t value;
+    memcpy(&value, (const uint8_t *)settings + offset, sizeof value);
+    return value;
+}
+
+static void settings_set(struct foc_board_settings *settings, uint16_t offset, uint32_t value)
+{
+    memcpy((uint8_t *)settings + offset, &value, sizeof value);
+}
+
+static size_t put_entry(uint8_t *record, size_t at, uint32_t id, uint32_t type, uint32_t value)
+{
+    record[at] = (uint8_t)id;
+    record[at + 1U] = (uint8_t)(id >> 8);
+    record[at + 2U] = (uint8_t)type;
+    record[at + 3U] = 0U;
+    put_u32(record + at + 4U, value);
+    return at + STORE_ENTRY;
+}
+
+/* Read back [offset, offset + size) in chunks and compare with bytes, or with erased
+ * 0xFF when bytes is NULL. */
+static bool slot_matches(
+    const struct foc_board_store_driver *driver,
+    unsigned int slot,
+    size_t offset,
+    const uint8_t *bytes,
+    size_t size
+)
+{
+    uint8_t chunk[STORE_VERIFY_CHUNK];
+    for (size_t done = 0U; done < size;) {
+        const size_t step = size - done < sizeof chunk ? size - done : sizeof chunk;
+        if (driver->read(driver->context, slot, offset + done, chunk, step) != 0) {
+            return false;
+        }
+        if (bytes == NULL ? !erased(chunk, step) : memcmp(chunk, bytes + done, step) != 0) {
+            return false;
+        }
+        done += step;
     }
     return true;
 }
@@ -269,91 +307,98 @@ bool foc_board_store_identity_from_boot(
     return true;
 }
 
-void foc_board_store_encode(
+size_t foc_board_store_encode(
     const struct foc_board_store_identity *identity,
     const struct foc_board_settings *settings,
     uint32_t sequence,
     uint8_t record[FOC_BOARD_STORE_RECORD_BYTES]
 )
 {
-    const struct foc_runtime_tuning *t = &settings->tuning;
-    memset(record, 0, FOC_BOARD_STORE_RECORD_BYTES);
+    memset(record, 0xFF, FOC_BOARD_STORE_RECORD_BYTES);
+    size_t at = STORE_HEADER;
+    const uint32_t identity_values[STORE_IDENTITY_N] = {
+        identity->configuration,
+        identity->pole_pairs,
+        identity->encoder_counts_per_revolution,
+        (uint32_t)identity->runtime_encoder_direction,
+        f32_bits(identity->electrical_offset_rad),
+        f32_bits(identity->phase_offset_count[0]),
+        f32_bits(identity->phase_offset_count[1]),
+        f32_bits(identity->phase_offset_count[2]),
+    };
+    for (uint32_t index = 0U; index < STORE_IDENTITY_N; ++index) {
+        at = put_entry(
+            record,
+            at,
+            STORE_ID_IDENTITY + index,
+            index < 4U ? STORE_TYPE_U32 : STORE_TYPE_F32,
+            identity_values[index]
+        );
+    }
+    if (settings->calibration_present) {
+        const struct foc_calibration_snapshot *cal = &settings->calibration;
+        const uint32_t cal_values[STORE_CAL_N] = {
+            f32_bits(cal->phase_a_offset_count),
+            f32_bits(cal->phase_b_offset_count),
+            f32_bits(cal->phase_c_offset_count),
+            cal->pole_pairs,
+            f32_bits(cal->electrical_offset_rad),
+            (uint32_t)cal->calibration_direction,
+            (uint32_t)cal->runtime_encoder_direction,
+        };
+        static const uint8_t cal_types[STORE_CAL_N] = {
+            STORE_TYPE_F32,
+            STORE_TYPE_F32,
+            STORE_TYPE_F32,
+            STORE_TYPE_U32,
+            STORE_TYPE_F32,
+            STORE_TYPE_U32,
+            STORE_TYPE_U32,
+        };
+        at = put_entry(record, at, STORE_ID_CAL, STORE_TYPE_U32, 1U);
+        for (uint32_t index = 0U; index < STORE_CAL_N; ++index) {
+            at = put_entry(
+                record,
+                at,
+                STORE_ID_CAL + 1U + index,
+                cal_types[index],
+                cal_values[index]
+            );
+        }
+    }
+    for (size_t index = 0U; index < FOC_PARAMETER_COUNT; ++index) {
+        const struct foc_parameter_entry *entry = &foc_parameter_table[index];
+        if ((entry->flags & FOC_PARAM_FLAG_PERSIST) != 0U) {
+            at = put_entry(
+                record,
+                at,
+                entry->id,
+                entry->type,
+                settings_get(settings, entry->persist_offset)
+            );
+        }
+    }
+    const size_t length = at + 4U;
     put_u32(record, UINT32_MAX);
     put_u32(record + 4, STORE_MAGIC);
     record[8] = (uint8_t)STORE_FORMAT;
-    record[10] = (uint8_t)FOC_BOARD_STORE_RECORD_BYTES;
+    record[9] = 0U;
+    record[10] = (uint8_t)length;
+    record[11] = (uint8_t)(length >> 8);
     put_u32(record + 12, sequence);
-    put_u32(record + 16, identity->configuration);
-    put_u32(record + 20, identity->pole_pairs);
-    put_u32(record + 24, identity->encoder_counts_per_revolution);
-    put_u32(record + 28, (uint32_t)identity->runtime_encoder_direction);
-    put_f32(record + 32, identity->electrical_offset_rad);
-    put_f32(record + 36, identity->phase_offset_count[0]);
-    put_f32(record + 40, identity->phase_offset_count[1]);
-    put_f32(record + 44, identity->phase_offset_count[2]);
-    put_f32(record + 48, t->current_kp_v_per_a.d);
-    put_f32(record + 52, t->current_kp_v_per_a.q);
-    put_f32(record + 56, t->current_ki_v_per_a_s.d);
-    put_f32(record + 60, t->current_ki_v_per_a_s.q);
-    put_f32(record + 64, t->current_limit_a);
-    put_f32(record + 68, t->velocity_kp_a_per_rad_s);
-    put_f32(record + 72, t->velocity_ki_a_per_rad);
-    put_f32(record + 76, t->position_kp_per_s);
-    put_f32(record + 80, t->velocity_limit_rad_s);
-    put_f32(record + 84, t->iq_limit_a);
-    put_u32(record + 88, t->command_timeout_us);
-    put_u32(record + 92, settings->rx_budget);
-    put_f32(record + 96, settings->remote_current_cap_a);
-    put_f32(record + 100, settings->remote_position_cap_rad);
-    const struct foc_calibration_snapshot *cal = &settings->calibration;
-    if (settings->calibration_present) {
-        put_u32(record + 104, STORE_FLAG_CAL);
-        put_f32(record + 108, cal->phase_a_offset_count);
-        put_f32(record + 112, cal->phase_b_offset_count);
-        put_f32(record + 116, cal->phase_c_offset_count);
-        put_u32(record + 120, cal->pole_pairs);
-        put_f32(record + 124, cal->electrical_offset_rad);
-        put_u32(record + 128, (uint32_t)cal->calibration_direction);
-        put_u32(record + 132, (uint32_t)cal->runtime_encoder_direction);
-    }
-    const struct foc_runtime_profile *profile = &t->profile;
-    const float profile_values[] = {
-        profile->rs_ohm,
-        profile->ld_h,
-        profile->lq_h,
-        profile->flux_wb,
-        profile->inertia_kg_m2,
-        profile->damping_nm_s_per_rad,
-        profile->rated_current_a,
-        profile->peak_current_a,
-        profile->max_speed_rad_s,
-        profile->gear_ratio,
-        profile->current_bandwidth_hz,
-    };
-    for (size_t index = 0U; index < sizeof profile_values / sizeof profile_values[0]; ++index) {
-        put_f32(record + 136 + 4U * index, profile_values[index]);
-    }
-    put_f32(record + 180, t->trips.overcurrent_a);
-    put_f32(record + 184, t->trips.overvoltage_v);
-    put_f32(record + 188, t->trips.undervoltage_v);
-    put_f32(record + 192, t->trips.overspeed_rad_s);
-    put_u32(record + 196, t->trips.sustained_ms);
-    put_u32(record + 200, t->trips.stall_ms);
-    put_u32(record + 204, t->trips.divergence_ms);
-    put_f32(record + 208, settings->output_zero_rad);
-    put_f32(record + 212, t->accel_rad_s2);
-    put_f32(record + 216, t->decel_rad_s2);
-    put_f32(record + 220, t->profile.velocity_bandwidth_hz);
-    put_f32(record + 224, t->profile.inertia_travel_rad);
-    put_f32(record + 228, t->dead_time_v);
-    const uint32_t rate = settings->can.bitrate;
-    record[232] = (uint8_t)settings->can.node_id;
-    record[233] = rate == 125000U ? 0U : rate == 250000U ? 1U : rate == 500000U ? 2U : 3U;
-    record[234] = (uint8_t)settings->can.heartbeat_ms;
-    record[235] = (uint8_t)(settings->can.heartbeat_ms >> 8);
-    record[236] = (uint8_t)settings->can.estimates_ms;
-    record[237] = (uint8_t)(settings->can.estimates_ms >> 8);
-    put_u32(record + STORE_CRC_AT, store_crc32(record + 4, STORE_CRC_AT - 4U));
+    const size_t count = (at - STORE_HEADER) / STORE_ENTRY;
+    record[16] = (uint8_t)count;
+    record[17] = (uint8_t)(count >> 8);
+    record[18] = 0U;
+    record[19] = 0U;
+    put_u32(record + at, store_crc32(record + 4, at - 4U));
+    return length;
+}
+
+bool foc_board_settings_present(const struct foc_board_settings *settings, size_t index)
+{
+    return index < FOC_PARAMETER_COUNT &&
+        (settings->present[index / 8U] & (1U << (index % 8U))) != 0U;
 }
 
 int foc_board_store_decode(
@@ -363,113 +408,93 @@ int foc_board_store_decode(
     uint32_t *sequence
 )
 {
-    const unsigned int format = record[8] | (record[9] << 8);
-    const unsigned int length = record[10] | (record[11] << 8);
-    const bool v1 = format == 1U && length == STORE_V1_BYTES;
-    const bool v2 = format == 2U && length == STORE_V2_BYTES;
-    const bool v3 = format == 3U && length == STORE_V3_BYTES;
-    const bool v4 = format == 4U && length == STORE_V4_BYTES;
-    const bool v5 = format == 5U && length == STORE_V5_BYTES;
-    const bool v6 = format == 6U && length == STORE_V6_BYTES;
-    const bool v7 = format == 7U && length == STORE_V7_BYTES;
-    const bool v8 = format == STORE_FORMAT && length == FOC_BOARD_STORE_RECORD_BYTES;
-    const size_t crc_at = v1 ? STORE_V1_CRC_AT
-        : v2                 ? STORE_V2_CRC_AT
-        : v3                 ? STORE_V3_CRC_AT
-        : v4                 ? STORE_V4_CRC_AT
-        : v5                 ? STORE_V5_CRC_AT
-        : v6                 ? STORE_V6_CRC_AT
-        : v7                 ? STORE_V7_CRC_AT
-                             : STORE_CRC_AT;
+    const size_t length = get_u16(record + 10);
+    const size_t count = get_u16(record + 16);
     if (get_u32(record) != STORE_COMMIT || get_u32(record + 4) != STORE_MAGIC ||
-        !(v1 || v2 || v3 || v4 || v5 || v6 || v7 || v8) ||
-        (v8 && (record[233] > 3U || record[238] != 0U || record[239] != 0U)) ||
-        get_u32(record + crc_at) != store_crc32(record + 4, crc_at - 4U) ||
-        (!v1 && (get_u32(record + 104) & ~STORE_FLAG_CAL) != 0U)) {
+        get_u16(record + 8) != STORE_FORMAT || length < STORE_HEADER + 4U ||
+        length > FOC_BOARD_STORE_RECORD_BYTES ||
+        count * STORE_ENTRY + STORE_HEADER + 4U != length || get_u16(record + 18) != 0U ||
+        get_u32(record + length - 4U) != store_crc32(record + 4, length - 8U)) {
+        return FOC_BOARD_STORE_ERR_RECORD;
+    }
+    uint32_t identity_values[STORE_IDENTITY_N] = {0};
+    uint32_t cal_values[STORE_CAL_N] = {0};
+    uint32_t identity_seen = 0U;
+    uint32_t cal_seen = 0U;
+    uint32_t cal_flag = 0U;
+    bool cal_flag_seen = false;
+    *settings = (struct foc_board_settings){0};
+    for (size_t index = 0U; index < count; ++index) {
+        const uint8_t *entry_bytes = record + STORE_HEADER + index * STORE_ENTRY;
+        const uint32_t id = get_u16(entry_bytes);
+        const uint32_t type = entry_bytes[2];
+        const uint32_t value = get_u32(entry_bytes + 4);
+        if (entry_bytes[3] != 0U || (type != STORE_TYPE_U32 && type != STORE_TYPE_F32)) {
+            return FOC_BOARD_STORE_ERR_RECORD;
+        }
+        if (id >= STORE_ID_IDENTITY && id < STORE_ID_IDENTITY + STORE_IDENTITY_N) {
+            const uint32_t slot = id - STORE_ID_IDENTITY;
+            if ((identity_seen & (1U << slot)) != 0U ||
+                type != (slot < 4U ? STORE_TYPE_U32 : STORE_TYPE_F32)) {
+                return FOC_BOARD_STORE_ERR_RECORD;
+            }
+            identity_seen |= 1U << slot;
+            identity_values[slot] = value;
+        } else if (id == STORE_ID_CAL) {
+            if (cal_flag_seen || type != STORE_TYPE_U32 || value > 1U) {
+                return FOC_BOARD_STORE_ERR_RECORD;
+            }
+            cal_flag_seen = true;
+            cal_flag = value;
+        } else if (id > STORE_ID_CAL && id <= STORE_ID_CAL + STORE_CAL_N) {
+            const uint32_t slot = id - STORE_ID_CAL - 1U;
+            if ((cal_seen & (1U << slot)) != 0U) {
+                return FOC_BOARD_STORE_ERR_RECORD;
+            }
+            cal_seen |= 1U << slot;
+            cal_values[slot] = value;
+        } else {
+            const struct foc_parameter_entry *entry = foc_parameter_find((uint16_t)id);
+            if (entry == NULL || (entry->flags & FOC_PARAM_FLAG_PERSIST) == 0U) {
+                continue; /* written by another firmware: ignored */
+            }
+            const size_t table_index = (size_t)(entry - foc_parameter_table);
+            if (type != entry->type || foc_board_settings_present(settings, table_index)) {
+                return FOC_BOARD_STORE_ERR_RECORD;
+            }
+            settings_set(settings, entry->persist_offset, value);
+            settings->present[table_index / 8U] |= (uint8_t)(1U << (table_index % 8U));
+        }
+    }
+    if (identity_seen != (1U << STORE_IDENTITY_N) - 1U ||
+        (cal_flag == 1U && cal_seen != (1U << STORE_CAL_N) - 1U)) {
         return FOC_BOARD_STORE_ERR_RECORD;
     }
     *sequence = get_u32(record + 12);
     *identity = (struct foc_board_store_identity){
-        .configuration = get_u32(record + 16),
-        .pole_pairs = get_u32(record + 20),
-        .encoder_counts_per_revolution = get_u32(record + 24),
-        .runtime_encoder_direction = (int32_t)get_u32(record + 28),
-        .electrical_offset_rad = get_f32(record + 32),
-        .phase_offset_count = {get_f32(record + 36), get_f32(record + 40), get_f32(record + 44)},
+        .configuration = identity_values[0],
+        .pole_pairs = identity_values[1],
+        .encoder_counts_per_revolution = identity_values[2],
+        .runtime_encoder_direction = (int32_t)identity_values[3],
+        .electrical_offset_rad = bits_f32(identity_values[4]),
+        .phase_offset_count = {
+            bits_f32(identity_values[5]),
+            bits_f32(identity_values[6]),
+            bits_f32(identity_values[7])
+        },
     };
-    *settings = (struct foc_board_settings){
-        .tuning =
-            {
-                .current_kp_v_per_a = {get_f32(record + 48), get_f32(record + 52)},
-                .current_ki_v_per_a_s = {get_f32(record + 56), get_f32(record + 60)},
-                .current_limit_a = get_f32(record + 64),
-                .velocity_kp_a_per_rad_s = get_f32(record + 68),
-                .velocity_ki_a_per_rad = get_f32(record + 72),
-                .position_kp_per_s = get_f32(record + 76),
-                .velocity_limit_rad_s = get_f32(record + 80),
-                .iq_limit_a = get_f32(record + 84),
-                .command_timeout_us = get_u32(record + 88),
-            },
-        .rx_budget = get_u32(record + 92),
-        .remote_current_cap_a = get_f32(record + 96),
-        .remote_position_cap_rad = get_f32(record + 100),
-        .calibration_present = !v1 && (get_u32(record + 104) & STORE_FLAG_CAL) != 0U,
-        .output_zero_rad = v4 || v5 || v6 || v7 || v8 ? get_f32(record + 208) : 0.0f,
-        .extended = v3 || v4 || v5 || v6 || v7 || v8,
-        .mechanical = v6 || v7 || v8,
-        .can = foc_serial_can_defaults(),
-    };
-    settings->tuning.dead_time_v = v7 || v8 ? get_f32(record + 228) : 0.0f;
-    if (v8) {
-        static const uint32_t rates[] = {125000U, 250000U, 500000U, 1000000U};
-        settings->can = (struct foc_serial_can_settings){
-            .node_id = record[232],
-            .bitrate = rates[record[233]],
-            .heartbeat_ms = (uint32_t)record[234] | (uint32_t)record[235] << 8,
-            .estimates_ms = (uint32_t)record[236] | (uint32_t)record[237] << 8,
-        };
-    }
-    if (v5 || v6 || v7 || v8) {
-        settings->tuning.accel_rad_s2 = get_f32(record + 212);
-        settings->tuning.decel_rad_s2 = get_f32(record + 216);
-    }
-    if (v3 || v4 || v5 || v6 || v7 || v8) {
-        settings->tuning.profile = (struct foc_runtime_profile){
-            .rs_ohm = get_f32(record + 136),
-            .ld_h = get_f32(record + 140),
-            .lq_h = get_f32(record + 144),
-            .flux_wb = get_f32(record + 148),
-            .inertia_kg_m2 = get_f32(record + 152),
-            .damping_nm_s_per_rad = get_f32(record + 156),
-            .rated_current_a = get_f32(record + 160),
-            .peak_current_a = get_f32(record + 164),
-            .max_speed_rad_s = get_f32(record + 168),
-            .gear_ratio = get_f32(record + 172),
-            .current_bandwidth_hz = get_f32(record + 176),
-            .velocity_bandwidth_hz = v6 || v7 || v8 ? get_f32(record + 220) : 0.0f,
-            .inertia_travel_rad = v6 || v7 || v8 ? get_f32(record + 224) : 0.0f,
-        };
-        settings->tuning.trips = (struct foc_runtime_trip_limits){
-            .overcurrent_a = get_f32(record + 180),
-            .overvoltage_v = get_f32(record + 184),
-            .undervoltage_v = get_f32(record + 188),
-            .overspeed_rad_s = get_f32(record + 192),
-            .sustained_ms = get_u32(record + 196),
-            .stall_ms = get_u32(record + 200),
-            .divergence_ms = get_u32(record + 204),
-        };
-    }
+    settings->calibration_present = cal_flag == 1U;
     if (settings->calibration_present) {
-        const uint16_t pole_pairs = (uint16_t)get_u32(record + 120);
+        const uint16_t pole_pairs = (uint16_t)cal_values[3];
         settings->calibration = (struct foc_calibration_snapshot){
-            .phase_a_offset_count = get_f32(record + 108),
-            .phase_b_offset_count = get_f32(record + 112),
-            .phase_c_offset_count = get_f32(record + 116),
-            .calibration_direction = (int32_t)get_u32(record + 128),
-            .runtime_encoder_direction = (int32_t)get_u32(record + 132),
+            .phase_a_offset_count = bits_f32(cal_values[0]),
+            .phase_b_offset_count = bits_f32(cal_values[1]),
+            .phase_c_offset_count = bits_f32(cal_values[2]),
+            .calibration_direction = (int32_t)cal_values[5],
+            .runtime_encoder_direction = (int32_t)cal_values[6],
             .pole_pairs = pole_pairs,
-            .electrical_offset_rad = get_f32(record + 124),
-            .accepted = get_u32(record + 120) <= UINT16_MAX,
+            .electrical_offset_rad = bits_f32(cal_values[4]),
+            .accepted = cal_values[3] <= UINT16_MAX,
         };
         /* The source identity is Board1's own fact set at the stored pole pairs. */
         foc_board_calibration_identity(pole_pairs, &settings->calibration.source_identity);
@@ -518,24 +543,20 @@ int foc_board_store_save(
     const unsigned int target = active == 0U ? 1U : 0U;
     const uint32_t next = status == FOC_BOARD_STORE_OK ? old_sequence + 1U : 1U;
     uint8_t record[FOC_BOARD_STORE_RECORD_BYTES];
-    uint8_t check[FOC_BOARD_STORE_RECORD_BYTES];
-    foc_board_store_encode(identity, settings, next, record);
+    const size_t length = foc_board_store_encode(identity, settings, next, record);
     if (driver->erase(driver->context, target) != 0 ||
-        driver->read(driver->context, target, 0U, check, sizeof check) != 0 ||
-        !erased(check, sizeof check)) {
+        !slot_matches(driver, target, 0U, NULL, FOC_BOARD_STORE_RECORD_BYTES)) {
         return FOC_BOARD_STORE_ERR_IO;
     }
-    if (driver->program(driver->context, target, 4U, record + 4, sizeof record - 4U) != 0 ||
-        driver->read(driver->context, target, 0U, check, sizeof check) != 0 ||
-        memcmp(check + 4, record + 4, sizeof record - 4U) != 0) {
+    if (driver->program(driver->context, target, 4U, record + 4, length - 4U) != 0 ||
+        !slot_matches(driver, target, 4U, record + 4, length - 4U)) {
         return FOC_BOARD_STORE_ERR_VERIFY;
     }
     uint8_t commit[4];
     put_u32(commit, STORE_COMMIT);
-    put_u32(record, STORE_COMMIT);
     if (driver->program(driver->context, target, 0U, commit, sizeof commit) != 0 ||
-        driver->read(driver->context, target, 0U, check, sizeof check) != 0 ||
-        memcmp(check, record, sizeof record) != 0) {
+        !slot_matches(driver, target, 0U, commit, sizeof commit) ||
+        !slot_matches(driver, target, 4U, record + 4, length - 4U)) {
         return FOC_BOARD_STORE_ERR_VERIFY;
     }
     *sequence = next;
@@ -547,11 +568,9 @@ int foc_board_store_erase(const struct foc_board_store_driver *driver)
     if (driver == NULL) {
         return FOC_BOARD_STORE_ERR_INPUT;
     }
-    uint8_t check[FOC_BOARD_STORE_RECORD_BYTES];
     for (unsigned int slot = 0U; slot < 2U; ++slot) {
         if (driver->erase(driver->context, slot) != 0 ||
-            driver->read(driver->context, slot, 0U, check, sizeof check) != 0 ||
-            !erased(check, sizeof check)) {
+            !slot_matches(driver, slot, 0U, NULL, FOC_BOARD_STORE_RECORD_BYTES)) {
             return FOC_BOARD_STORE_ERR_IO;
         }
     }
@@ -601,23 +620,36 @@ void foc_board_persistence_restore(
         persistence->state = FOC_BOARD_STORE_IDENTITY_MISMATCH;
         return;
     }
-    /* The boot current limit stays the ceiling, as for a UART write (ID 68). Tuning is
-     * checked on the boot instance first, so a refused value changes nothing. */
+    /* Start from the boot values and overlay every parameter the record carries; one it
+     * does not carry (a newer firmware's addition) keeps its boot value. */
     struct foc_runtime_tuning boot_tuning;
-    if (!serial_caps_valid(&settings) ||
-        !(settings.tuning.current_limit_a <= serial->current_limit_ceiling_a) ||
-        foc_runtime_read_tuning(runtime, &boot_tuning) != FOC_RUNTIME_OK) {
+    if (foc_runtime_read_tuning(runtime, &boot_tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
         return;
     }
-    /* Formats 1 and 2 carry no profile or protection thresholds: keep the boot values. */
-    if (!settings.extended) {
-        settings.tuning.trips = boot_tuning.trips;
-        settings.tuning.profile = boot_tuning.profile;
-    } else if (!settings.mechanical) {
-        /* Formats 3-5 predate IDs 108/109: keep their boot values. */
-        settings.tuning.profile.velocity_bandwidth_hz = boot_tuning.profile.velocity_bandwidth_hz;
-        settings.tuning.profile.inertia_travel_rad = boot_tuning.profile.inertia_travel_rad;
+    struct foc_board_settings merged = {
+        .tuning = boot_tuning,
+        .rx_budget = serial->rx_budget,
+        .remote_current_cap_a = serial->current_limit_a,
+        .remote_position_cap_rad = serial->position_limit_rad,
+        .output_zero_rad = serial->output_zero_rad,
+        .can = serial->can,
+        .calibration_present = settings.calibration_present,
+        .calibration = settings.calibration,
+    };
+    for (size_t index = 0U; index < FOC_PARAMETER_COUNT; ++index) {
+        if (foc_board_settings_present(&settings, index)) {
+            const uint16_t offset = foc_parameter_table[index].persist_offset;
+            settings_set(&merged, offset, settings_get(&settings, offset));
+        }
+    }
+    settings = merged;
+    /* The boot current limit stays the ceiling, as for a UART write (ID 68). Tuning is
+     * checked on the boot instance first, so a refused value changes nothing. */
+    if (!serial_caps_valid(&settings) ||
+        !(settings.tuning.current_limit_a <= serial->current_limit_ceiling_a)) {
+        persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;
+        return;
     }
     if (foc_runtime_apply_tuning(runtime, &settings.tuning) != FOC_RUNTIME_OK) {
         persistence->state = FOC_BOARD_STORE_VALUE_REJECTED;

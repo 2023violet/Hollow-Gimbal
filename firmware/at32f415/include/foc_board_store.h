@@ -6,8 +6,9 @@
  *
  * Design overview
  * ---------------
- * One fixed "FBP1" record holds the M1 controller tuning and the UART RAM
- * caps, bound to the motor configuration it was saved under. Two slots use
+ * One "FBP1" TLV record (format 9) holds every persistent parameter of the
+ * table (foc_parameter_table.h) and an applied rotor calibration, bound to the
+ * motor configuration it was saved under. Two slots use
  * the configuration store transaction: erase the inactive slot, program and
  * verify the body, then program and verify a separate commit word. Load picks
  * the newer committed, CRC-valid record by modulo sequence.
@@ -32,6 +33,7 @@
 #pragma once
 
 #include "foc_board_boot.h"
+#include "foc_parameter_table.h"
 #include "foc_serial.h"
 
 #include <stddef.h>
@@ -42,9 +44,10 @@
 enum foc_board_store_limits {
     /** Bytes reserved per slot; the device erase unit must fit inside. */
     FOC_BOARD_STORE_SLOT_BYTES = 2048,
-    /** Encoded record size and programming unit. */
-    /** Format 3 record; formats 1 (108 bytes) and 2 (140 bytes) still decode. */
-    FOC_BOARD_STORE_RECORD_BYTES = 244,
+    /** Largest format-9 record: header, CRC and every entry (parameters, identity,
+     * calibration); the encoded length may be smaller. */
+    FOC_BOARD_STORE_RECORD_BYTES = 20 + 4 + 8 * (FOC_PARAMETER_PERSIST_COUNT + 8 + 1 + 7),
+    /** Programming unit. */
     FOC_BOARD_STORE_PROGRAM_BYTES = 4,
 };
 
@@ -77,19 +80,15 @@ struct foc_board_settings {
     uint32_t rx_budget;
     float remote_current_cap_a;
     float remote_position_cap_rad;
-    /** Format 4: output-position zero offset in output rad (PARAM 124); 0 before. */
+    /** Output-position zero offset in output rad (PARAM 124). */
     float output_zero_rad;
-    /** Format 8: CAN settings (IDs 120, 122, 123, 125); defaults before. */
+    /** CAN settings (IDs 120, 122, 123, 125). */
     struct foc_serial_can_settings can;
-    /** Format 2: an applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
+    /** An applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;
-    /** Format 3 or 4: tuning.profile and tuning.trips came from the record. Otherwise the
-     * restore keeps their boot values. */
-    bool extended;
-    /** Format 6: velocity bandwidth (ID 108) and inertia travel (ID 109) came from the
-     * record; otherwise the restore keeps their boot values. */
-    bool mechanical;
+    /** Decode: bit i set when the record carried foc_parameter_table[i]. */
+    uint8_t present[(FOC_PARAMETER_COUNT + 7U) / 8U];
 };
 
 /** Wire values of UART PARAM_READ ID 48. */
@@ -142,13 +141,16 @@ struct foc_board_persistence {
 bool foc_board_store_identity_from_boot(const struct foc_board_boot *boot,
                                         struct foc_board_store_identity *identity);
 
-/** Encode a record with an erased commit word. */
-void foc_board_store_encode(const struct foc_board_store_identity *identity,
-                            const struct foc_board_settings *settings,
-                            uint32_t sequence,
-                            uint8_t record[FOC_BOARD_STORE_RECORD_BYTES]);
+/** Encode a record with an erased commit word; returns its length in bytes. */
+size_t foc_board_store_encode(const struct foc_board_store_identity *identity,
+                              const struct foc_board_settings *settings,
+                              uint32_t sequence,
+                              uint8_t record[FOC_BOARD_STORE_RECORD_BYTES]);
 
-/** Decode a committed, CRC-valid record. */
+/** True when a decoded record carried foc_parameter_table[index]. */
+bool foc_board_settings_present(const struct foc_board_settings *settings, size_t index);
+
+/** Decode a committed, CRC-valid format-9 record. Unknown IDs are ignored. */
 int foc_board_store_decode(const uint8_t record[FOC_BOARD_STORE_RECORD_BYTES],
                            struct foc_board_store_identity *identity,
                            struct foc_board_settings *settings,

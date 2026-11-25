@@ -27,6 +27,16 @@
 #include "foc_protocol.h"
 #include "foc_runtime.h"
 
+/* Public Macros ---------------------------------------------------------------- */
+
+/* Parameter bounds (parameters.json). Board1 facts bounding the protection thresholds: the ±3.3 A current-sense span,
+ * the 24 V DRV8311 VM absolute maximum and its 3 V recommended minimum. */
+#define FOC_SERIAL_TRIP_CURRENT_MAX_A 3.2f
+#define FOC_SERIAL_TRIP_VBUS_MAX_V    24.0f
+#define FOC_SERIAL_TRIP_VBUS_MIN_V    3.0f
+#define FOC_SERIAL_TRIP_SPEED_MAX     1000.0f
+#define FOC_SERIAL_OUTPUT_ZERO_MAX    1000.0f
+
 /* Public Types ---------------------------------------------------------------- */
 
 /** Startup readback exposed through read-only PARAM_READ IDs 32–45. */

@@ -37,38 +37,13 @@ RESULTS = [
 MODES = {"current": 0, "velocity": 1, "position": 2}
 LIFECYCLE_RESULTS = ["NONE", "PENDING", "APPLIED", "REJECTED", "CANCELLED"]
 LIFECYCLE_ACTIONS = ["NONE", "ARM", "START", "CLEAR_FAULT", "SET_MODE"]
-# UART V1 parameter IDs by name (protocol/README.md).
-PARAMETERS = {
-    "rx-budget": 1, "remote-current-cap": 2, "remote-position-cap": 3,
-    "pole-pairs": 16, "electrical-offset": 17, "velocity-limit-ro": 18,
-    "boot-configuration": 32, "calibration-input": 33, "phase-a-offset": 38,
-    "phase-b-offset": 39, "phase-c-offset": 40, "measurement-qualified": 45,
-    "store-state": 48, "store-loaded-sequence": 49, "store-stored-sequence": 50,
-    "store-calibration": 51,
-    "runtime-direction": 42, "commutation-valid": 88, "commutation-source": 89, "adc-zero-state": 90,
-    "tuning-revision": 60, "tuning-result": 61, "tuning-sequence": 62,
-    "current-kp-d": 64, "current-kp-q": 65, "current-ki-d": 66, "current-ki-q": 67,
-    "current-limit": 68, "velocity-kp": 69, "velocity-ki": 70, "position-kp": 71,
-    "velocity-limit": 72, "iq-limit": 73, "command-lease-us": 74,
-    "trip-overcurrent": 112, "trip-overvoltage": 113, "trip-undervoltage": 114,
-    "trip-overspeed": 115, "trip-sustained-ms": 116, "trip-stall-ms": 117,
-    "trip-divergence-ms": 118,
-    "model-rs": 80, "model-ld": 81, "model-lq": 82, "model-flux": 83, "model-kt": 84,
-    "model-inertia": 85, "model-damping": 86, "rated-current": 96, "peak-current": 97,
-    "max-speed": 98, "gear-ratio": 99, "current-bandwidth": 104, "output-zero": 124,
-    "accel": 106, "decel": 107, "velocity-bandwidth": 108, "inertia-travel": 109,
-    "coast-status": 91, "coast-flux": 92, "coast-angle-error": 93, "driven-flux": 94,
-    "dead-time-v": 95, "dead-time-comp": 87,
-    "can-node-id": 120, "can-bitrate": 122, "can-heartbeat-ms": 123, "can-estimates-ms": 125,
-    "can-status": 126, "raw-faults": 127,
-}
+# Parameter IDs and wire types come from the generated table (firmware/at32f415/parameters.json).
+from falconfoc_params import PARAMETER_INFO, PARAMETER_TYPES, PARAMETERS  # noqa: E402,F401
 # Persisted by store format 3 (motor profile, derived PI, limits, protection windows).
 PROFILE_PARAMETERS = ("model-rs", "model-ld", "model-lq", "model-flux", "model-inertia",
                       "model-damping", "rated-current", "peak-current", "max-speed",
                       "gear-ratio", "current-bandwidth", "current-kp-q", "current-ki-q",
                       "current-limit", "velocity-limit", "trip-sustained-ms")
-PARAMETER_TYPES = {74: "u32", 1: "u32", 116: "u32", 117: "u32", 118: "u32", 91: "u32",
-                   120: "u32", 122: "u32", 123: "u32", 125: "u32", 126: "u32", 127: "u32"}
 # Coast check outcome (ID 91).
 COAST_STATUS = ["NOT_RUN", "USED", "TOO_FEW", "INCONSISTENT"]
 # Safety fault bits (g3/safe/include/foc_safe.h); bits 9-15 are motor protection, 16 the

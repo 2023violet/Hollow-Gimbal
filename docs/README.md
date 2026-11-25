@@ -10,6 +10,7 @@ firmware and its docs were removed on 2026-11-24 and remain only at the Git tag
 2. [Bare-metal execution ADR](./architecture/FalconFOC_BareMetal_Execution_ADR.md) — H0/H1/Foreground, timing targets, change gate
 3. [Parameter contract](./superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md) — UART/CAN parameters, MCU calibration stages, persistence formats
 4. [Board1 firmware](../firmware/at32f415/README.md) — pins, build, SIL, locked output
+   - [Parameter table](./parameters.md) — every UART/CAN parameter, generated from `firmware/at32f415/parameters.json`
 5. [Wire protocols](../protocol/README.md) — UART V1 and CANSimple
 6. [Python CLI](../tools/falconfoc-cli/README.md) — commands and SIL scenarios
 7. [Servo quickstart](./servo/quickstart.md) and [Host Virtual quickstart](./code-wiki/FalconFOC_VM_virtual_quickstart.md)

@@ -3,8 +3,9 @@ param(
     [switch]$RequireCMakeFormatter
 )
 
-# FalconFOC V2 quality gate: whitespace diff check, C/H/CMake/README source contract and
-# CMake header/format rules. Host tests, SIL and ARM images run in their own lanes (fwinteg).
+# FalconFOC V2 quality gate: whitespace diff check, generated parameter files current,
+# C/H/CMake/README source contract and CMake header/format rules. Host tests, SIL and ARM
+# images run in their own lanes (fwinteg).
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
@@ -59,6 +60,12 @@ try {
     & git -C $root diff --check -- . ":(exclude)build/**" ":(exclude)tmp/**"
     if ($LASTEXITCODE -ne 0) {
         throw "git diff --check failed."
+    }
+
+    Write-Host "[quality_gate] run: gen_parameters.py --check"
+    & python -B (Join-Path $root "scripts\gen\gen_parameters.py") --check
+    if ($LASTEXITCODE -ne 0) {
+        throw "Generated parameter files are stale: run python -B scripts/gen/gen_parameters.py."
     }
 
     Invoke-ChildScript -ScriptPath (Join-Path $root "scripts\gates\check_falconfoc_source_contract.ps1") `

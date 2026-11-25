@@ -14,6 +14,7 @@
 #include "foc_serial.h"
 
 #include "foc_board_profile.h"
+#include "foc_parameter_table.h"
 
 #include <float.h>
 #include <math.h>
@@ -21,105 +22,7 @@
 
 /* Private Constants ------------------------------------------------------------ */
 
-/* Board1 facts bounding the protection thresholds: the ±3.3 A current-sense span,
- * the 24 V DRV8311 VM absolute maximum and its 3 V recommended minimum. */
-#define FOC_SERIAL_TRIP_CURRENT_MAX_A 3.2f
-#define FOC_SERIAL_TRIP_VBUS_MAX_V    24.0f
-#define FOC_SERIAL_TRIP_VBUS_MIN_V    3.0f
-#define FOC_SERIAL_TRIP_SPEED_MAX     1000.0f
-#define FOC_SERIAL_OUTPUT_ZERO_MAX    1000.0f
-
 enum {
-    PARAM_RX_BUDGET = 1,
-    PARAM_CURRENT_LIMIT = 2,
-    PARAM_POSITION_LIMIT = 3,
-    PARAM_POLE_PAIRS = 16,
-    PARAM_ELECTRICAL_OFFSET = 17,
-    PARAM_VELOCITY_LIMIT = 18,
-    /* Read-only startup readback, valid only with an attached ready report. */
-    PARAM_BOOT_CONFIGURATION = 32,
-    PARAM_CALIBRATION_INPUT = 33,
-    PARAM_CALIBRATION_REJECTION = 34,
-    PARAM_ADMISSION_FAILURE = 35,
-    PARAM_SUPPLY_ID = 36,
-    PARAM_REVIEW_ID = 37,
-    PARAM_PHASE_A_OFFSET = 38,
-    PARAM_PHASE_B_OFFSET = 39,
-    PARAM_PHASE_C_OFFSET = 40,
-    PARAM_ENCODER_CPR = 41,
-    PARAM_RUNTIME_DIRECTION = 42,
-    PARAM_SOURCE_DIRECTION = 43,
-    PARAM_CALIBRATION_DIRECTION = 44,
-    PARAM_MEASUREMENT_QUALIFIED = 45,
-    /* Persistent storage readback (M2). */
-    PARAM_STORE_STATE = 48,
-    PARAM_STORE_LOADED_SEQUENCE = 49,
-    PARAM_STORE_STORED_SEQUENCE = 50,
-    PARAM_STORE_CALIBRATION = 51,
-    /* Commutation readback (step 3). */
-    PARAM_COMMUTATION_VALID = 88,
-    PARAM_COMMUTATION_SOURCE = 89,
-    PARAM_ADC_ZERO_STATE = 90,
-    /* Coast check of the latest calibration run, read only. */
-    PARAM_COAST_STATUS = 91,
-    PARAM_COAST_FLUX = 92,
-    PARAM_COAST_ANGLE_ERROR = 93,
-    PARAM_DRIVEN_FLUX = 94,
-    PARAM_DEAD_TIME = 95,
-    /* Controller tuning receipt, read only. */
-    PARAM_TUNING_REVISION = 60,
-    PARAM_TUNING_RESULT = 61,
-    PARAM_TUNING_SEQUENCE = 62,
-    /* Controller tuning, writable while DISABLED; applied by H0. */
-    PARAM_CURRENT_KP_D = 64,
-    PARAM_CURRENT_KP_Q = 65,
-    PARAM_CURRENT_KI_D = 66,
-    PARAM_CURRENT_KI_Q = 67,
-    PARAM_CURRENT_VECTOR_LIMIT = 68,
-    PARAM_VELOCITY_KP = 69,
-    PARAM_VELOCITY_KI = 70,
-    PARAM_POSITION_KP = 71,
-    PARAM_VELOCITY_REFERENCE_LIMIT = 72,
-    PARAM_IQ_LIMIT = 73,
-    PARAM_COMMAND_LEASE = 74,
-    /* Motor model (contract 3.1); Kt is derived and read only. */
-    PARAM_MODEL_RS = 80,
-    PARAM_MODEL_LD = 81,
-    PARAM_MODEL_LQ = 82,
-    PARAM_MODEL_FLUX = 83,
-    PARAM_MODEL_KT = 84,
-    PARAM_MODEL_INERTIA = 85,
-    PARAM_MODEL_DAMPING = 86,
-    /* User profile (contract 3.3) and the current-loop bandwidth (3.4). */
-    PARAM_PROFILE_RATED_CURRENT = 96,
-    PARAM_PROFILE_PEAK_CURRENT = 97,
-    PARAM_PROFILE_MAX_SPEED = 98,
-    PARAM_PROFILE_GEAR_RATIO = 99,
-    PARAM_CURRENT_BANDWIDTH = 104,
-    /* Trajectory acceleration and deceleration (contract 3.4), rotor-side, 0 unlimited. */
-    PARAM_DEAD_TIME_COMP = 87,
-    PARAM_ACCEL = 106,
-    PARAM_DECEL = 107,
-    /* Velocity bandwidth for the J-derived outer gains and the CAL-7 travel (contract 18). */
-    PARAM_VELOCITY_BANDWIDTH = 108,
-    PARAM_INERTIA_TRAVEL = 109,
-    /* Motor-protection thresholds, writable while DISABLED; applied by H0. */
-    PARAM_TRIP_OVERCURRENT = 112,
-    PARAM_TRIP_OVERVOLTAGE = 113,
-    PARAM_TRIP_UNDERVOLTAGE = 114,
-    PARAM_TRIP_OVERSPEED = 115,
-    PARAM_TRIP_SUSTAINED = 116,
-    PARAM_TRIP_STALL = 117,
-    PARAM_TRIP_DIVERGENCE = 118,
-    /* Output frame (contract 3.7): host positions are output-side and relative to it. */
-    PARAM_OUTPUT_ZERO = 124,
-    /* CAN (contract 25): node ID, bit rate, cyclic periods; link status and raw faults. */
-    PARAM_CAN_NODE_ID = 120,
-    PARAM_CAN_BITRATE = 122,
-    PARAM_CAN_HEARTBEAT = 123,
-    PARAM_CAN_ESTIMATES = 125,
-    PARAM_CAN_STATUS = 126,
-    PARAM_RAW_FAULTS = 127,
     PARAM_U32 = 1,
     PARAM_F32 = 2,
     UNIT_NONE = 0,
@@ -299,372 +202,231 @@ static uint32_t foc_serial_direction_code(int32_t direction)
                           : DIRECTION_NONE;
 }
 
-/* Values come from the bound live Runtime and encoder policy, never a copy. */
-static bool foc_serial_boot_parameter(
-    const struct foc_serial *serial,
-    uint16_t id,
-    struct foc_serial_parameter *parameter
-)
-{
-    struct foc_serial_boot_readback view;
-    if (id < PARAM_BOOT_CONFIGURATION || id > PARAM_MEASUREMENT_QUALIFIED ||
-        serial->boot_reader == NULL || !serial->boot_reader(serial->boot_context, &view)) {
-        return false;
-    }
-    *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
-    switch (id) {
-    case PARAM_BOOT_CONFIGURATION:
-        parameter->value = view.configuration;
-        break;
-    case PARAM_CALIBRATION_INPUT:
-        parameter->value = view.calibration;
-        break;
-    case PARAM_CALIBRATION_REJECTION:
-        parameter->value = view.rejection;
-        break;
-    case PARAM_ADMISSION_FAILURE:
-        parameter->value = view.admission_failure;
-        break;
-    case PARAM_SUPPLY_ID:
-        parameter->value = view.supply_id;
-        break;
-    case PARAM_REVIEW_ID:
-        parameter->value = view.review_id;
-        break;
-    case PARAM_PHASE_A_OFFSET:
-    case PARAM_PHASE_B_OFFSET:
-    case PARAM_PHASE_C_OFFSET:
-        parameter->type = PARAM_F32;
-        parameter->unit = UNIT_COUNT;
-        parameter->value =
-            foc_serial_float_bits(view.phase_offset_count[id - PARAM_PHASE_A_OFFSET]);
-        parameter->calibration_required = true;
-        break;
-    case PARAM_ENCODER_CPR:
-        parameter->value = view.encoder_counts_per_revolution;
-        break;
-    case PARAM_RUNTIME_DIRECTION:
-        parameter->value = foc_serial_direction_code(view.runtime_direction);
-        parameter->calibration_required = true;
-        break;
-    case PARAM_SOURCE_DIRECTION:
-        parameter->value = foc_serial_direction_code(view.source_direction);
-        break;
-    case PARAM_CALIBRATION_DIRECTION:
-        parameter->value = foc_serial_direction_code(view.calibration_direction);
-        parameter->calibration_required = true;
-        break;
-    default:
-        parameter->value = view.current_measurement_qualified ? 1U : 0U;
-        break;
-    }
-    parameter->minimum = parameter->maximum = parameter->value;
-    return true;
-}
-
-static void foc_serial_tuning_float(
-    struct foc_serial_parameter *parameter,
-    float value,
-    float minimum,
-    float maximum,
-    uint8_t unit
-)
-{
-    *parameter = (struct foc_serial_parameter){
-        .value = foc_serial_float_bits(value),
-        .minimum = foc_serial_float_bits(minimum),
-        .maximum = foc_serial_float_bits(maximum),
-        .type = PARAM_F32,
-        .unit = unit,
-        .writable = true,
-        .tuning = true,
-    };
-}
-
 static uint32_t foc_serial_request_code(enum foc_runtime_request_result result)
 {
     return (uint32_t)result; /* NONE 0, PENDING 1, APPLIED 2, REJECTED 3, CANCELLED 4 */
 }
 
-/* Controller tuning and its receipt, from the live Runtime. */
-static bool foc_serial_tuning_parameter(
+/* A 4-byte field of a serial or tuning struct, by the table's byte offset. */
+static uint32_t foc_serial_field_get(const void *base, uint16_t offset)
+{
+    uint32_t value;
+    memcpy(&value, (const uint8_t *)base + offset, sizeof value);
+    return value;
+}
+
+static void foc_serial_field_set(void *base, uint16_t offset, uint32_t value)
+{
+    memcpy((uint8_t *)base + offset, &value, sizeof value);
+}
+
+/* A bound: the table constant or the live value it names. */
+static uint32_t foc_serial_bound(
+    const struct foc_serial *serial,
+    const struct foc_runtime *runtime,
+    const struct foc_runtime_tuning *tuning,
+    uint8_t bound,
+    union foc_parameter_value constant
+)
+{
+    switch (bound) {
+    case FOC_PARAM_BOUND_RUNTIME_IQ_LIMIT:
+        return foc_serial_float_bits(runtime->config.motion.iq_limit_a);
+    case FOC_PARAM_BOUND_CURRENT_CEILING:
+        return foc_serial_float_bits(serial->current_limit_ceiling_a);
+    case FOC_PARAM_BOUND_TUNING_CURRENT_LIMIT:
+        return foc_serial_float_bits(tuning->current_limit_a);
+    default:
+        return constant.u;
+    }
+}
+
+/* Startup readback (IDs 32-45) from the bound live Runtime and encoder policy. */
+static uint32_t foc_serial_boot_value(const struct foc_serial_boot_readback *view, uint16_t id)
+{
+    switch (id) {
+    case FOC_PARAM_BOOT_CONFIGURATION:
+        return view->configuration;
+    case FOC_PARAM_CALIBRATION_INPUT:
+        return view->calibration;
+    case FOC_PARAM_CALIBRATION_REJECTION:
+        return view->rejection;
+    case FOC_PARAM_ADMISSION_FAILURE:
+        return view->admission_failure;
+    case FOC_PARAM_SUPPLY_ID:
+        return view->supply_id;
+    case FOC_PARAM_REVIEW_ID:
+        return view->review_id;
+    case FOC_PARAM_PHASE_A_OFFSET:
+    case FOC_PARAM_PHASE_B_OFFSET:
+    case FOC_PARAM_PHASE_C_OFFSET:
+        return foc_serial_float_bits(view->phase_offset_count[id - FOC_PARAM_PHASE_A_OFFSET]);
+    case FOC_PARAM_ENCODER_CPR:
+        return view->encoder_counts_per_revolution;
+    case FOC_PARAM_RUNTIME_DIRECTION:
+        return foc_serial_direction_code(view->runtime_direction);
+    case FOC_PARAM_SOURCE_DIRECTION:
+        return foc_serial_direction_code(view->source_direction);
+    case FOC_PARAM_CALIBRATION_DIRECTION:
+        return foc_serial_direction_code(view->calibration_direction);
+    default:
+        return view->current_measurement_qualified ? 1U : 0U;
+    }
+}
+
+/* Commissioning readback (IDs 88-95) of the latest on-MCU calibration. */
+static uint32_t
+foc_serial_commission_value(const struct foc_serial_commission_view *view, uint16_t id)
+{
+    switch (id) {
+    case FOC_PARAM_COMMUTATION_VALID:
+        return view->valid;
+    case FOC_PARAM_COMMUTATION_SOURCE:
+        return view->source;
+    case FOC_PARAM_ADC_ZERO_STATE:
+        return view->zero_state;
+    case FOC_PARAM_COAST_STATUS:
+        return view->coast_status;
+    case FOC_PARAM_COAST_FLUX:
+        return foc_serial_float_bits(view->coast_flux_wb);
+    case FOC_PARAM_COAST_ANGLE_ERROR:
+        return foc_serial_float_bits(view->coast_angle_error_rad);
+    case FOC_PARAM_DRIVEN_FLUX:
+        return foc_serial_float_bits(view->driven_flux_wb);
+    default:
+        return foc_serial_float_bits(view->dead_time_v);
+    }
+}
+
+/* Persistent-storage readback (IDs 48-51); zeros without an attached store. */
+static uint32_t foc_serial_store_value(const struct foc_serial *serial, uint16_t id)
+{
+    struct foc_serial_persistence_view view = {0};
+    if (serial->persistence.read != NULL) {
+        (void)serial->persistence.read(serial->persistence.context, &view);
+    }
+    return id == FOC_PARAM_STORE_STATE          ? view.state
+        : id == FOC_PARAM_STORE_LOADED_SEQUENCE ? view.loaded_sequence
+        : id == FOC_PARAM_STORE_STORED_SEQUENCE ? view.stored_sequence
+                                                : view.calibration_restored;
+}
+
+/*
+ * One parameter as the wire reports it, served by the table entry's group. A parameter
+ * whose source is absent (no startup reader, no commissioning, protection disabled or an
+ * unreadable Runtime) does not exist on this image.
+ */
+static bool foc_serial_parameter_read(
     const struct foc_serial *serial,
     const struct foc_runtime *runtime,
     uint16_t id,
     struct foc_serial_parameter *parameter
 )
 {
-    struct foc_runtime_tuning tuning;
-    struct foc_runtime_tuning_result receipt;
-    const bool trip = id >= PARAM_TRIP_OVERCURRENT && id <= PARAM_TRIP_DIVERGENCE;
-    const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
-        (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
-        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH ||
-        id == PARAM_INERTIA_TRAVEL;
-    const bool ramp = id == PARAM_ACCEL || id == PARAM_DECEL || id == PARAM_DEAD_TIME_COMP;
-    if ((trip ? !runtime->config.trip_enabled
-              : !profile && !ramp && (id < PARAM_TUNING_REVISION || id > PARAM_COMMAND_LEASE)) ||
-        foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
-        foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) != FOC_RUNTIME_OK) {
+    const struct foc_parameter_entry *entry = foc_parameter_find(id);
+    struct foc_runtime_tuning tuning = {0};
+    if (entry == NULL) {
         return false;
     }
-    switch (id) {
-    case PARAM_TUNING_REVISION:
-    case PARAM_TUNING_RESULT:
-    case PARAM_TUNING_SEQUENCE:
-        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
-        parameter->value = id == PARAM_TUNING_REVISION ? receipt.revision
-            : id == PARAM_TUNING_RESULT                ? foc_serial_request_code(receipt.result)
-                                                       : receipt.request_sequence;
+    *parameter = (struct foc_serial_parameter){
+        .type = entry->type,
+        .unit = entry->unit,
+        .writable =
+            entry->access == FOC_PARAM_ACCESS_RW || entry->access == FOC_PARAM_ACCESS_TUNING,
+        .calibration_required = (entry->flags & FOC_PARAM_FLAG_CALIBRATION) != 0U,
+        .tuning = entry->access == FOC_PARAM_ACCESS_TUNING,
+    };
+    switch (entry->group) {
+    case FOC_PARAM_GROUP_SERIAL:
+        parameter->value = foc_serial_field_get(serial, entry->offset);
+        break;
+    case FOC_PARAM_GROUP_TUNING:
+    case FOC_PARAM_GROUP_RECEIPT:
+    case FOC_PARAM_GROUP_DERIVED: {
+        struct foc_runtime_tuning_result receipt;
+        if (((entry->flags & FOC_PARAM_FLAG_TRIP) != 0U && !runtime->config.trip_enabled) ||
+            foc_runtime_read_tuning(runtime, &tuning) != FOC_RUNTIME_OK ||
+            foc_runtime_read_tuning_result((struct foc_runtime *)runtime, &receipt) !=
+                FOC_RUNTIME_OK) {
+            return false;
+        }
+        if (entry->group == FOC_PARAM_GROUP_TUNING) {
+            parameter->value = foc_serial_field_get(&tuning, entry->offset);
+        } else if (entry->group == FOC_PARAM_GROUP_RECEIPT) {
+            parameter->value = id == FOC_PARAM_TUNING_REVISION ? receipt.revision
+                : id == FOC_PARAM_TUNING_RESULT ? foc_serial_request_code(receipt.result)
+                                                : receipt.request_sequence;
+        } else {
+            /* Kt = 1.5 x pole pairs x flux linkage, per peak q ampere; 0 without a flux. */
+            parameter->value = foc_serial_float_bits(
+                1.5f * (float)runtime->config.motion.rotor.pole_pairs * tuning.profile.flux_wb
+            );
+        }
+        break;
+    }
+    case FOC_PARAM_GROUP_BOOT: {
+        struct foc_serial_boot_readback view;
+        if (serial->boot_reader == NULL || !serial->boot_reader(serial->boot_context, &view)) {
+            return false;
+        }
+        parameter->value = foc_serial_boot_value(&view, id);
+        break;
+    }
+    case FOC_PARAM_GROUP_STORE:
+        parameter->value = foc_serial_store_value(serial, id);
+        break;
+    case FOC_PARAM_GROUP_COMMISSION: {
+        struct foc_serial_commission_view view = {0};
+        if (serial->calibration.commission == NULL) {
+            return false;
+        }
+        (void)serial->calibration.commission(serial->calibration.context, &view);
+        parameter->value = foc_serial_commission_value(&view, id);
+        break;
+    }
+    case FOC_PARAM_GROUP_ROTOR:
+        if (id == FOC_PARAM_POLE_PAIRS) {
+            parameter->value = runtime->config.motion.rotor.pole_pairs;
+        } else if (id == FOC_PARAM_ELECTRICAL_OFFSET) {
+            parameter->value =
+                foc_serial_float_bits(runtime->config.motion.rotor.electrical_offset_rad);
+            /* A trim of the valid commutation group, [0, 2π). */
+            parameter->writable = serial->calibration.trim != NULL;
+        } else {
+            parameter->value =
+                foc_serial_float_bits(runtime->config.motion.position.velocity_limit_rad_s);
+        }
+        break;
+    default: /* FOC_PARAM_GROUP_STATUS */
+        if (id == FOC_PARAM_CAN_STATUS) {
+            parameter->value = serial->can_link.status != NULL
+                ? serial->can_link.status(serial->can_link.context)
+                : 0U;
+        } else {
+            struct foc_runtime_snapshot view;
+            if (foc_runtime_read_snapshot((struct foc_runtime *)runtime, &view) != FOC_RUNTIME_OK) {
+                return false;
+            }
+            parameter->value = view.faults;
+        }
+        break;
+    }
+    if (parameter->writable) {
+        parameter->minimum =
+            foc_serial_bound(serial, runtime, &tuning, entry->min_bound, entry->minimum);
+        parameter->maximum =
+            foc_serial_bound(serial, runtime, &tuning, entry->max_bound, entry->maximum);
+    } else {
         parameter->minimum = parameter->maximum = parameter->value;
-        return true;
-    case PARAM_CURRENT_KP_D:
-    case PARAM_CURRENT_KP_Q:
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_CURRENT_KP_D ? tuning.current_kp_v_per_a.d : tuning.current_kp_v_per_a.q,
-            0.0f,
-            20.0f,
-            UNIT_V_PER_A
-        );
-        return true;
-    case PARAM_CURRENT_KI_D:
-    case PARAM_CURRENT_KI_Q:
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_CURRENT_KI_D ? tuning.current_ki_v_per_a_s.d
-                                     : tuning.current_ki_v_per_a_s.q,
-            0.0f,
-            20000.0f,
-            UNIT_V_PER_A_S
-        );
-        return true;
-    case PARAM_CURRENT_VECTOR_LIMIT:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.current_limit_a,
-            0.05f,
-            serial->current_limit_ceiling_a,
-            UNIT_AMPERE
-        );
-        return true;
-    case PARAM_VELOCITY_KP:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.velocity_kp_a_per_rad_s,
-            0.0f,
-            1000.0f,
-            UNIT_A_PER_RAD_S
-        );
-        return true;
-    case PARAM_VELOCITY_KI:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.velocity_ki_a_per_rad,
-            0.0f,
-            100000.0f,
-            UNIT_A_PER_RAD
-        );
-        return true;
-    case PARAM_POSITION_KP:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.position_kp_per_s,
-            0.0f,
-            1000.0f,
-            UNIT_PER_SECOND
-        );
-        return true;
-    case PARAM_VELOCITY_REFERENCE_LIMIT:
-        foc_serial_tuning_float(parameter, tuning.velocity_limit_rad_s, 0.1f, 1000.0f, UNIT_RAD_S);
-        return true;
-    case PARAM_DEAD_TIME_COMP:
-        /* Inverter dead-time compensation of the current loop; 0 (default) off. The Host
-         * enables it, typically with the CAL-3 value of ID 95. */
-        foc_serial_tuning_float(
-            parameter,
-            tuning.dead_time_v,
-            0.0f,
-            FOC_RUNTIME_DEAD_TIME_MAX_V,
-            UNIT_VOLT
-        );
-        return true;
-    case PARAM_ACCEL:
-    case PARAM_DECEL:
-        /* 0 is unlimited; H0 refuses values between 0 and FOC_RUNTIME_RAMP_MIN_RAD_S2. */
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_ACCEL ? tuning.accel_rad_s2 : tuning.decel_rad_s2,
-            0.0f,
-            FOC_RUNTIME_RAMP_MAX_RAD_S2,
-            UNIT_RAD_S2
-        );
-        return true;
-    case PARAM_IQ_LIMIT:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.iq_limit_a,
-            0.05f,
-            tuning.current_limit_a,
-            UNIT_AMPERE
-        );
-        return true;
-    case PARAM_COMMAND_LEASE:
-        *parameter = (struct foc_serial_parameter){
-            .value = tuning.command_timeout_us,
-            .minimum = FOC_RUNTIME_LEASE_MIN_US,
-            .maximum = FOC_RUNTIME_LEASE_MAX_US,
-            .type = PARAM_U32,
-            .unit = UNIT_MICROSECOND,
-            .writable = true,
-            .tuning = true,
-        };
-        return true;
-    case PARAM_MODEL_RS:
-        foc_serial_tuning_float(parameter, tuning.profile.rs_ohm, 0.0f, 100.0f, UNIT_OHM);
-        return true;
-    case PARAM_MODEL_LD:
-    case PARAM_MODEL_LQ:
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_MODEL_LD ? tuning.profile.ld_h : tuning.profile.lq_h,
-            0.0f,
-            1.0f,
-            UNIT_HENRY
-        );
-        return true;
-    case PARAM_MODEL_FLUX:
-        foc_serial_tuning_float(parameter, tuning.profile.flux_wb, 0.0f, 1.0f, UNIT_WEBER);
-        return true;
-    case PARAM_MODEL_KT: {
-        /* Kt = 1.5 x pole pairs x flux linkage, per peak q ampere; 0 without a flux. */
-        const float kt =
-            1.5f * (float)runtime->config.motion.rotor.pole_pairs * tuning.profile.flux_wb;
-        foc_serial_tuning_float(parameter, kt, kt, kt, UNIT_NM_PER_A);
-        parameter->writable = false;
-        parameter->tuning = false;
-        return true;
     }
-    case PARAM_MODEL_INERTIA:
-        foc_serial_tuning_float(parameter, tuning.profile.inertia_kg_m2, 0.0f, 1.0f, UNIT_KG_M2);
-        return true;
-    case PARAM_MODEL_DAMPING:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.profile.damping_nm_s_per_rad,
-            0.0f,
-            10.0f,
-            UNIT_NM_S_PER_RAD
-        );
-        return true;
-    case PARAM_PROFILE_RATED_CURRENT:
-    case PARAM_PROFILE_PEAK_CURRENT:
-        /* A motor may be rated above the board: ID 68 keeps the board ceiling. */
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_PROFILE_RATED_CURRENT ? tuning.profile.rated_current_a
-                                              : tuning.profile.peak_current_a,
-            0.0f,
-            1000.0f,
-            UNIT_AMPERE
-        );
-        return true;
-    case PARAM_PROFILE_MAX_SPEED:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.profile.max_speed_rad_s,
-            0.0f,
-            FOC_SERIAL_TRIP_SPEED_MAX,
-            UNIT_RAD_S
-        );
-        return true;
-    case PARAM_PROFILE_GEAR_RATIO:
-        foc_serial_tuning_float(parameter, tuning.profile.gear_ratio, 1.0f, 1000.0f, UNIT_NONE);
-        return true;
-    case PARAM_CURRENT_BANDWIDTH:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.profile.current_bandwidth_hz,
-            (float)FOC_BOARD_PROFILE_BANDWIDTH_MIN_HZ,
-            (float)FOC_BOARD_PROFILE_BANDWIDTH_MAX_HZ,
-            UNIT_HERTZ
-        );
-        return true;
-    case PARAM_VELOCITY_BANDWIDTH:
-        /* 0 keeps manual outer gains; the refresh refuses more than 1/5 of ID 104. */
-        foc_serial_tuning_float(
-            parameter,
-            tuning.profile.velocity_bandwidth_hz,
-            0.0f,
-            (float)FOC_BOARD_PROFILE_VELOCITY_BANDWIDTH_MAX_HZ,
-            UNIT_HERTZ
-        );
-        return true;
-    case PARAM_INERTIA_TRAVEL:
-        foc_serial_tuning_float(
-            parameter,
-            tuning.profile.inertia_travel_rad,
-            0.5f,
-            1000.0f,
-            UNIT_RADIAN
-        );
-        return true;
-    case PARAM_TRIP_OVERCURRENT:
-        /* H0 also requires it strictly above the current-vector limit. */
-        foc_serial_tuning_float(
-            parameter,
-            tuning.trips.overcurrent_a,
-            tuning.current_limit_a,
-            FOC_SERIAL_TRIP_CURRENT_MAX_A,
-            UNIT_AMPERE
-        );
-        return true;
-    case PARAM_TRIP_OVERVOLTAGE:
-    case PARAM_TRIP_UNDERVOLTAGE:
-        /* H0 also requires under-voltage below over-voltage. */
-        foc_serial_tuning_float(
-            parameter,
-            id == PARAM_TRIP_OVERVOLTAGE ? tuning.trips.overvoltage_v : tuning.trips.undervoltage_v,
-            FOC_SERIAL_TRIP_VBUS_MIN_V,
-            FOC_SERIAL_TRIP_VBUS_MAX_V,
-            UNIT_VOLT
-        );
-        return true;
-    case PARAM_TRIP_OVERSPEED:
-        /* 0 follows 1.25 x ID 72; otherwise H0 requires at least ID 72. */
-        foc_serial_tuning_float(
-            parameter,
-            tuning.trips.overspeed_rad_s,
-            0.0f,
-            FOC_SERIAL_TRIP_SPEED_MAX,
-            UNIT_RAD_S
-        );
-        return true;
-    case PARAM_TRIP_SUSTAINED:
-    case PARAM_TRIP_STALL:
-    case PARAM_TRIP_DIVERGENCE:
-        *parameter = (struct foc_serial_parameter){
-            .value = id == PARAM_TRIP_SUSTAINED ? tuning.trips.sustained_ms
-                : id == PARAM_TRIP_STALL        ? tuning.trips.stall_ms
-                                                : tuning.trips.divergence_ms,
-            .minimum = 0U,
-            .maximum = id == PARAM_TRIP_SUSTAINED ? FOC_RUNTIME_TRIP_WINDOW_MAX_MS : 10000U,
-            .type = PARAM_U32,
-            .unit = UNIT_MILLISECOND,
-            .writable = true,
-            .tuning = true,
-        };
-        return true;
-    default:
-        return false;
-    }
+    return true;
 }
 
 /* Replace one field of the live tuning and publish the whole candidate to H0. */
 static int foc_serial_tuning_write(
     struct foc_serial *serial,
     struct foc_runtime *runtime,
-    uint16_t id,
+    const struct foc_parameter_entry *entry,
     uint32_t value
 )
 {
@@ -679,132 +441,19 @@ static int foc_serial_tuning_write(
         after.result == FOC_RUNTIME_REQUEST_PENDING || after.revision != before.revision) {
         return FOC_PROTO_BUSY;
     }
-    const float floating = foc_serial_bits_float(value);
-    switch (id) {
-    case PARAM_CURRENT_KP_D:
-        tuning.current_kp_v_per_a.d = floating;
-        break;
-    case PARAM_CURRENT_KP_Q:
-        tuning.current_kp_v_per_a.q = floating;
-        break;
-    case PARAM_CURRENT_KI_D:
-        tuning.current_ki_v_per_a_s.d = floating;
-        break;
-    case PARAM_CURRENT_KI_Q:
-        tuning.current_ki_v_per_a_s.q = floating;
-        break;
-    case PARAM_CURRENT_VECTOR_LIMIT:
-        tuning.current_limit_a = floating;
-        break;
-    case PARAM_VELOCITY_KP:
-        tuning.velocity_kp_a_per_rad_s = floating;
-        break;
-    case PARAM_VELOCITY_KI:
-        tuning.velocity_ki_a_per_rad = floating;
-        break;
-    case PARAM_POSITION_KP:
-        tuning.position_kp_per_s = floating;
-        break;
-    case PARAM_ACCEL:
-        tuning.accel_rad_s2 = floating;
-        break;
-    case PARAM_DEAD_TIME_COMP:
-        tuning.dead_time_v = floating;
-        break;
-    case PARAM_DECEL:
-        tuning.decel_rad_s2 = floating;
-        break;
-    case PARAM_VELOCITY_REFERENCE_LIMIT:
-        tuning.velocity_limit_rad_s = floating;
-        break;
-    case PARAM_IQ_LIMIT:
-        tuning.iq_limit_a = floating;
-        break;
-    case PARAM_COMMAND_LEASE:
-        tuning.command_timeout_us = value;
-        break;
-    case PARAM_TRIP_OVERCURRENT:
-        tuning.trips.overcurrent_a = floating;
-        break;
-    case PARAM_TRIP_OVERVOLTAGE:
-        tuning.trips.overvoltage_v = floating;
-        break;
-    case PARAM_TRIP_UNDERVOLTAGE:
-        tuning.trips.undervoltage_v = floating;
-        break;
-    case PARAM_TRIP_OVERSPEED:
-        tuning.trips.overspeed_rad_s = floating;
-        break;
-    case PARAM_TRIP_SUSTAINED:
-        tuning.trips.sustained_ms = value;
-        break;
-    case PARAM_TRIP_STALL:
-        tuning.trips.stall_ms = value;
-        break;
-    case PARAM_TRIP_DIVERGENCE:
-        tuning.trips.divergence_ms = value;
-        break;
-    case PARAM_MODEL_RS:
-        tuning.profile.rs_ohm = floating;
-        break;
-    case PARAM_MODEL_LD:
-        tuning.profile.ld_h = floating;
-        break;
-    case PARAM_MODEL_LQ:
-        tuning.profile.lq_h = floating;
-        break;
-    case PARAM_MODEL_FLUX:
-        tuning.profile.flux_wb = floating;
-        break;
-    case PARAM_MODEL_INERTIA:
-        tuning.profile.inertia_kg_m2 = floating;
-        break;
-    case PARAM_MODEL_DAMPING:
-        tuning.profile.damping_nm_s_per_rad = floating;
-        break;
-    case PARAM_PROFILE_RATED_CURRENT:
-        tuning.profile.rated_current_a = floating;
-        break;
-    case PARAM_PROFILE_PEAK_CURRENT:
-        tuning.profile.peak_current_a = floating;
-        break;
-    case PARAM_PROFILE_MAX_SPEED:
-        tuning.profile.max_speed_rad_s = floating;
-        break;
-    case PARAM_PROFILE_GEAR_RATIO:
-        tuning.profile.gear_ratio = floating;
-        break;
-    case PARAM_CURRENT_BANDWIDTH:
-        tuning.profile.current_bandwidth_hz = floating;
-        break;
-    case PARAM_VELOCITY_BANDWIDTH:
-        tuning.profile.velocity_bandwidth_hz = floating;
-        break;
-    case PARAM_INERTIA_TRAVEL:
-        tuning.profile.inertia_travel_rad = floating;
-        break;
-    default:
-        return FOC_PROTO_INTERNAL_ERROR;
-    }
+    foc_serial_field_set(&tuning, entry->offset, value);
     /* Unified refresh (contract 13.3), for profile fields only: a model or bandwidth change
      * re-derives the current PI, a peak current or maximum speed tightens the limits it
-     * bounds. A written limit is never adjusted: H0 refuses one that breaks the ordering. */
-    const bool profile = (id >= PARAM_MODEL_RS && id <= PARAM_MODEL_DAMPING) ||
-        (id >= PARAM_PROFILE_RATED_CURRENT && id <= PARAM_PROFILE_GEAR_RATIO) ||
-        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH;
-    const bool redesign = id == PARAM_MODEL_RS || id == PARAM_MODEL_LD || id == PARAM_MODEL_LQ ||
-        id == PARAM_CURRENT_BANDWIDTH;
-    /* Kt, the inertia, the velocity bandwidth or its 1/5 bound re-derive the outer gains. */
-    const bool redesign_velocity = id == PARAM_MODEL_FLUX || id == PARAM_MODEL_INERTIA ||
-        id == PARAM_CURRENT_BANDWIDTH || id == PARAM_VELOCITY_BANDWIDTH;
-    if (profile &&
+     * bounds; Kt, the inertia, the velocity bandwidth or its 1/5 bound re-derive the outer
+     * gains. A written limit is never adjusted: H0 refuses one that breaks the ordering. */
+    if ((entry->flags & FOC_PARAM_FLAG_REFRESH_PROFILE) != 0U &&
         !foc_board_profile_refresh(
             runtime->config.h0.period_us,
             runtime->pipeline.current.config.pwm.voltage_limit_v,
             runtime->config.motion.rotor.pole_pairs,
             &tuning,
-            redesign,
-            redesign_velocity,
+            (entry->flags & FOC_PARAM_FLAG_REDESIGN_CURRENT) != 0U,
+            (entry->flags & FOC_PARAM_FLAG_REDESIGN_VELOCITY) != 0U,
             NULL
         )) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -825,153 +474,6 @@ static int foc_serial_tuning_write(
     return FOC_PROTO_ACCEPTED;
 }
 
-static bool foc_serial_parameter_read(
-    const struct foc_serial *serial,
-    const struct foc_runtime *runtime,
-    uint16_t id,
-    struct foc_serial_parameter *parameter
-)
-{
-    if (foc_serial_boot_parameter(serial, id, parameter) ||
-        foc_serial_tuning_parameter(serial, runtime, id, parameter)) {
-        return true;
-    }
-    if (id >= PARAM_COMMUTATION_VALID && id <= PARAM_DEAD_TIME &&
-        serial->calibration.commission != NULL) {
-        struct foc_serial_commission_view view = {0};
-        (void)serial->calibration.commission(serial->calibration.context, &view);
-        if (id >= PARAM_COAST_FLUX) {
-            const float value = id == PARAM_COAST_FLUX ? view.coast_flux_wb
-                : id == PARAM_COAST_ANGLE_ERROR        ? view.coast_angle_error_rad
-                : id == PARAM_DRIVEN_FLUX              ? view.driven_flux_wb
-                                                       : view.dead_time_v;
-            *parameter = (struct foc_serial_parameter){
-                .type = PARAM_F32,
-                .unit = id == PARAM_COAST_ANGLE_ERROR ? UNIT_RADIAN
-                    : id == PARAM_DEAD_TIME           ? UNIT_VOLT
-                                                      : UNIT_WEBER,
-                .value = foc_serial_float_bits(value),
-            };
-        } else {
-            *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
-            parameter->value = id == PARAM_COMMUTATION_VALID ? view.valid
-                : id == PARAM_COMMUTATION_SOURCE             ? view.source
-                : id == PARAM_ADC_ZERO_STATE                 ? view.zero_state
-                                                             : view.coast_status;
-        }
-        parameter->minimum = parameter->maximum = parameter->value;
-        return true;
-    }
-    if (id >= PARAM_STORE_STATE && id <= PARAM_STORE_CALIBRATION) {
-        struct foc_serial_persistence_view view = {0};
-        if (serial->persistence.read != NULL) {
-            (void)serial->persistence.read(serial->persistence.context, &view);
-        }
-        *parameter = (struct foc_serial_parameter){.type = PARAM_U32, .unit = UNIT_NONE};
-        parameter->value = id == PARAM_STORE_STATE ? view.state
-            : id == PARAM_STORE_LOADED_SEQUENCE    ? view.loaded_sequence
-            : id == PARAM_STORE_STORED_SEQUENCE    ? view.stored_sequence
-                                                   : view.calibration_restored;
-        parameter->minimum = parameter->maximum = parameter->value;
-        return true;
-    }
-    *parameter = (struct foc_serial_parameter){.type = PARAM_F32};
-    switch (id) {
-    case PARAM_RX_BUDGET:
-        *parameter = (struct foc_serial_parameter){
-            .value = serial->rx_budget,
-            .minimum = 8,
-            .maximum = 32,
-            .type = PARAM_U32,
-            .unit = UNIT_NONE,
-            .writable = true,
-        };
-        break;
-    case PARAM_CURRENT_LIMIT:
-        parameter->value = foc_serial_float_bits(serial->current_limit_a);
-        parameter->minimum = foc_serial_float_bits(0.05f);
-        parameter->maximum = foc_serial_float_bits(runtime->config.motion.iq_limit_a);
-        parameter->unit = UNIT_AMPERE;
-        parameter->writable = true;
-        break;
-    case PARAM_POSITION_LIMIT:
-        parameter->value = foc_serial_float_bits(serial->position_limit_rad);
-        parameter->minimum = foc_serial_float_bits(1.0f);
-        parameter->maximum = foc_serial_float_bits(1000.0f);
-        parameter->unit = UNIT_RADIAN;
-        parameter->writable = true;
-        break;
-    case PARAM_OUTPUT_ZERO:
-        parameter->value = foc_serial_float_bits(serial->output_zero_rad);
-        parameter->minimum = foc_serial_float_bits(-FOC_SERIAL_OUTPUT_ZERO_MAX);
-        parameter->maximum = foc_serial_float_bits(FOC_SERIAL_OUTPUT_ZERO_MAX);
-        parameter->unit = UNIT_RADIAN;
-        parameter->writable = true;
-        break;
-    case PARAM_POLE_PAIRS:
-        parameter->type = PARAM_U32;
-        parameter->value = runtime->config.motion.rotor.pole_pairs;
-        parameter->calibration_required = true;
-        break;
-    case PARAM_ELECTRICAL_OFFSET:
-        parameter->value =
-            foc_serial_float_bits(runtime->config.motion.rotor.electrical_offset_rad);
-        parameter->unit = UNIT_RADIAN;
-        parameter->calibration_required = true;
-        /* A trim of the valid commutation group, [0, 2π). */
-        parameter->writable = serial->calibration.trim != NULL;
-        parameter->minimum = foc_serial_float_bits(0.0f);
-        parameter->maximum = foc_serial_float_bits(6.283185f);
-        break;
-    case PARAM_VELOCITY_LIMIT:
-        parameter->value =
-            foc_serial_float_bits(runtime->config.motion.position.velocity_limit_rad_s);
-        parameter->unit = UNIT_RAD_S;
-        break;
-    case PARAM_CAN_NODE_ID:
-    case PARAM_CAN_BITRATE:
-    case PARAM_CAN_HEARTBEAT:
-    case PARAM_CAN_ESTIMATES:
-        /* RAM settings, saved with PARAM_SAVE; the bit rate applies at the next boot. */
-        *parameter = (struct foc_serial_parameter){
-            .value = id == PARAM_CAN_NODE_ID ? serial->can.node_id
-                : id == PARAM_CAN_BITRATE    ? serial->can.bitrate
-                : id == PARAM_CAN_HEARTBEAT  ? serial->can.heartbeat_ms
-                                             : serial->can.estimates_ms,
-            .minimum = id == PARAM_CAN_BITRATE ? 125000U : 0U,
-            .maximum = id == PARAM_CAN_NODE_ID ? 63U
-                : id == PARAM_CAN_BITRATE      ? 1000000U
-                                               : 10000U,
-            .type = PARAM_U32,
-            .unit =
-                id == PARAM_CAN_NODE_ID || id == PARAM_CAN_BITRATE ? UNIT_NONE : UNIT_MILLISECOND,
-            .writable = true,
-        };
-        break;
-    case PARAM_CAN_STATUS:
-        parameter->type = PARAM_U32;
-        parameter->value = serial->can_link.status != NULL
-            ? serial->can_link.status(serial->can_link.context)
-            : 0U;
-        break;
-    case PARAM_RAW_FAULTS: {
-        struct foc_runtime_snapshot view;
-        if (foc_runtime_read_snapshot((struct foc_runtime *)runtime, &view) != FOC_RUNTIME_OK) {
-            return false;
-        }
-        parameter->type = PARAM_U32;
-        parameter->value = view.faults;
-        break;
-    }
-    default:
-        return false;
-    }
-    if (!parameter->writable) {
-        parameter->minimum = parameter->maximum = parameter->value;
-    }
-    return true;
-}
-
 static int foc_serial_parameter(
     struct foc_serial *serial,
     struct foc_runtime *runtime,
@@ -990,6 +492,7 @@ static int foc_serial_parameter(
         return FOC_PROTO_INVALID_ARGUMENT;
     }
     if (writing) {
+        const struct foc_parameter_entry *entry = foc_parameter_find(id);
         struct foc_runtime_snapshot view;
         if (!parameter.writable) {
             return FOC_PROTO_NOT_SUPPORTED;
@@ -1016,8 +519,11 @@ static int foc_serial_parameter(
                 return FOC_PROTO_INVALID_ARGUMENT;
             }
         }
+        if (!foc_parameter_allowed(entry, value)) {
+            return FOC_PROTO_INVALID_ARGUMENT;
+        }
         if (parameter.tuning) {
-            const int published = foc_serial_tuning_write(serial, runtime, id, value);
+            const int published = foc_serial_tuning_write(serial, runtime, entry, value);
             if (published != FOC_PROTO_ACCEPTED) {
                 return published;
             }
@@ -1034,45 +540,15 @@ static int foc_serial_parameter(
             response->length = 18;
             return FOC_PROTO_ACCEPTED;
         }
-        switch (id) {
-        case PARAM_RX_BUDGET:
-            serial->rx_budget = value;
-            break;
-        case PARAM_CURRENT_LIMIT:
-            serial->current_limit_a = foc_serial_bits_float(value);
-            break;
-        case PARAM_POSITION_LIMIT:
-            serial->position_limit_rad = foc_serial_bits_float(value);
-            break;
-        case PARAM_OUTPUT_ZERO:
-            serial->output_zero_rad = foc_serial_bits_float(value);
-            break;
-        case PARAM_CAN_NODE_ID:
-            serial->can.node_id = value;
-            break;
-        case PARAM_CAN_BITRATE:
-            if (value != 125000U && value != 250000U && value != 500000U && value != 1000000U) {
-                return FOC_PROTO_INVALID_ARGUMENT;
-            }
-            serial->can.bitrate = value;
-            break;
-        case PARAM_CAN_HEARTBEAT:
-            serial->can.heartbeat_ms = value;
-            break;
-        case PARAM_CAN_ESTIMATES:
-            serial->can.estimates_ms = value;
-            break;
-        case PARAM_ELECTRICAL_OFFSET: {
+        if (entry->access == FOC_PARAM_ACCESS_TRIM) {
             const int trimmed =
                 serial->calibration
                     .trim(serial->calibration.context, now_us, foc_serial_bits_float(value));
             if (trimmed != FOC_PROTO_APPLIED) {
                 return trimmed;
             }
-            break;
-        }
-        default:
-            return FOC_PROTO_INTERNAL_ERROR;
+        } else {
+            foc_serial_field_set(serial, entry->offset, value);
         }
         serial->dirty = true;
         parameter.value = value;

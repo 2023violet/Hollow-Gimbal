@@ -8,9 +8,10 @@ remain at the Git tag `legacy-final`.
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/gates/check_falconfoc_quality_gate.ps1` | V2 quality gate: `git diff --check`, source contract, CMake quality |
+| `scripts/gates/check_falconfoc_quality_gate.ps1` | V2 quality gate: `git diff --check`, generated parameter files current, source contract, CMake quality |
 | `scripts/gates/check_falconfoc_source_contract.ps1` | C/H header sections, end-of-file marker, CMake header and kebab-case targets, README build command, for every V2 source root |
 | `scripts/gates/check_cmake_quality.ps1` | `# Themis` CMake header comment and `cmake-format --check` for the V2 CMake projects and the ARM toolchain file |
+| `scripts/gen/gen_parameters.py` | Generates the parameter table, CLI module, test data and `docs/parameters.md` from `firmware/at32f415/parameters.json`; `--check` (run by the quality gate) fails on stale outputs |
 | `scripts/format_themis.ps1` | clang-format / cmake-format over the V2 trees |
 | `scripts/clang-format.cmd` | Resolves the bundled `tools/clang-format/clang-format.exe` or one on PATH |
 | `scripts/flows/fwinteg/run_fwinteg.sh` | Full Board1 integration run (see below) |

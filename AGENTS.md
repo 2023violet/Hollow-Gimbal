@@ -87,6 +87,10 @@ If you change any of these, update docs in the same round:
 - UART/CAN protocol, parameters, persistence format or calibration stages
 - script, gate or test entry points
 
+Parameters have one source: edit `firmware/at32f415/parameters.json`, run
+`python -B scripts/gen/gen_parameters.py` and commit the generated files; never
+hand-edit `foc_parameter_table.{h,c}`, `falconfoc_params.py` or `docs/parameters.md`.
+
 Always append a concise entry to `docs/governance/Themis_工程维护日志.md`.
 
 ## 7. Verification Rule

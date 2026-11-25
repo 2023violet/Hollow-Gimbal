@@ -38,6 +38,8 @@
 
 ## 3. 参数分组
 
+> **以生成的参数表为准（PARAM-01，2026-11-24）**：已实现参数的 ID、类型、单位、读写方式、范围和是否保存，统一来自 `firmware/at32f415/parameters.json`，生成到 [docs/parameters.md](../../parameters.md)。本节的表格保留设计语义和写后动作说明，数字与之冲突时以生成表为准（例如单位编号：rad/s² 实际为 21，不是本节早期写的 19）。存储已改为 format 9 TLV，本文各节的 format 3–8 布局只是历史记录。
+
 列说明：
 
 - “写入”：单字段指 PARAM_WRITE，整组指 COMMUTATION_WRITE（第 5 节），只读指不可写。

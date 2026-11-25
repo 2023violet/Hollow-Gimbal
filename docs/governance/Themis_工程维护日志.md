@@ -3236,3 +3236,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 结果：默认镜像 Flash −5,596 B（97,156 B），持久化镜像 −5,588 B（101,972 B），RAM 不变；工具链代码 13,444 → 6,892 B。FirmwareSight diff 与 SIL 前后对比存入 [ROM-01 证据](../evidence/2026-11-24-rom-01.md)。LTO（−7.7 KB，但会内联掉 fwinteg 静态检查依赖的启动函数）和标定全单精度未做。
 - fwinteg：`build/fwinteg-rom01/run1` 有 1 项失败——sanitizer 工具链下 `test-foc-board1-sil` 的换电机场景，第一次启动仿真进程时 hello 等待 1 s 超时（不是 ASan 报告）；单独复跑该用例 2 次、整套 SIL 用 ctest 复跑 2 次均通过，`run2` VERDICT PASS，0 findings，三套工具链各 127 项全过。根因未确认，推测为 ASan 进程启动偶发变慢；若再出现，应查 `SimulatorTransport` 首帧 1 s 超时。
 - 门禁：`arm_static.py` 为 14 个删除的 libm 符号写明原因，新增 `no_libm_heavy_math` 检查。SDK：补上 2026-11-20 起漏进 `source-map.json` 的 `foc_virtual_bootstrap_instrument.h` 及本轮新文件，技术门禁恢复 PASS；更正上一条中“SDK 技术检查通过”的误记。
+
+## 2026-11-24 · PARAM-01 参数表统一来源与 TLV 存储
+
+- `firmware/at32f415/parameters.json` 成为 77 个 UART/CAN 参数的唯一来源；`scripts/gen/gen_parameters.py` 生成 `foc_parameter_table.{h,c}`、`tests/foc_parameter_documented.h`、`tools/falconfoc-cli/falconfoc_params.py`、`docs/parameters.md`，质量门禁新增 `--check`。CLI 改用生成模块，补上缺的 ID。新测试 `test-foc-parameter-table`（`expected_tests.tsv` 同步）与 SIL `test_parameter_table_matches_firmware`。
+- `foc_serial` 读写改为查表，`foc_can` 改用生成的 ID；SIL 锁步录制的 4,705 条 PARAM_READ/WRITE 回应与改前逐字节相同。Trip/VBUS/输出零点上下限宏移到 `foc_serial.h`。
+- 存储改为 format 9 TLV（42 个保存参数 + 启动身份 + 标定快照，最大 488 B），format 1–8 不再读取（报 INVALID_RECORD，用开机默认值）；未知 ID 忽略，缺项保持开机值，以后加参数不再升格式。保存按编码长度写入、分块回读。
+- fwinteg：`run1` 失败 159 项——`simulation/` 的 `falconfoc-virtual-device` 直接编译 `foc_serial.c` 却没编参数表，链接失败导致整个 simulation 套件没跑；补上 `foc_parameter_table.c` 后 `run2` VERDICT PASS，0 findings，三套工具链各 128 项全过。SDK 技术门禁 PASS。
+- 默认镜像 +156 B，带参数存储镜像 −860 B，RAM 不变。证据：[PARAM-01](../evidence/2026-11-24-param-01.md)。AGENTS.md、firmware/protocol/scripts/docs README 与契约第 3 节已更新（契约表格以生成表为准）。

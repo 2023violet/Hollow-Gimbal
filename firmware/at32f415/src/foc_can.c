@@ -15,6 +15,7 @@
 /* Includes --------------------------------------------------------------------- */
 
 #include "foc_can.h"
+#include "foc_parameter_table.h"
 
 #include <math.h>
 #include <string.h>
@@ -30,17 +31,6 @@
 #define CAN_TRAJ_DONE_RAD_S   0.05f
 
 enum {
-    PARAM_U32 = 1,
-    PARAM_F32 = 2,
-    PARAM_CURRENT_LIMIT = 2,
-    PARAM_VELOCITY_KP = 69,
-    PARAM_VELOCITY_KI = 70,
-    PARAM_POSITION_KP = 71,
-    PARAM_VELOCITY_REFERENCE_LIMIT = 72,
-    PARAM_ACCEL = 106,
-    PARAM_DECEL = 107,
-    PARAM_CAN_NODE_ID = 120,
-    PARAM_OUTPUT_ZERO = 124,
     /* Get_Version: protocol 2, Board1 hardware 1.0, FalconFOC V2 firmware 2.0.0 (unreleased). */
     VERSION_PROTOCOL = 2,
     VERSION_HW_MAJOR = 1,
@@ -481,9 +471,14 @@ static void can_address(
         return; /* another device's assignment, or another device's reply */
     }
     struct foc_protocol_frame response;
-    if (!can_accepted(
-            can_param_write(serial, runtime, PARAM_CAN_NODE_ID, frame->data[0], now_us, &response)
-        )) {
+    if (!can_accepted(can_param_write(
+            serial,
+            runtime,
+            FOC_PARAM_CAN_NODE_ID,
+            frame->data[0],
+            now_us,
+            &response
+        ))) {
         can->refused++;
         return;
     }
@@ -634,7 +629,7 @@ static void can_handle(
         result = can_param_write_f32(
             serial,
             runtime,
-            PARAM_VELOCITY_REFERENCE_LIMIT,
+            FOC_PARAM_VELOCITY_LIMIT,
             can_get_f32(frame->data) * CAN_TWO_PI * gear,
             now_us
         );
@@ -642,7 +637,7 @@ static void can_handle(
             result = can_param_write_f32(
                 serial,
                 runtime,
-                PARAM_CURRENT_LIMIT,
+                FOC_PARAM_REMOTE_CURRENT_CAP,
                 can_get_f32(frame->data + 4),
                 now_us
             );
@@ -655,7 +650,7 @@ static void can_handle(
         result = can_param_write_f32(
             serial,
             runtime,
-            PARAM_VELOCITY_REFERENCE_LIMIT,
+            FOC_PARAM_VELOCITY_LIMIT,
             can_get_f32(frame->data) * CAN_TWO_PI * gear,
             now_us
         );
@@ -667,7 +662,7 @@ static void can_handle(
         result = can_param_write_f32(
             serial,
             runtime,
-            PARAM_ACCEL,
+            FOC_PARAM_ACCEL,
             can_get_f32(frame->data) * CAN_TWO_PI * gear,
             now_us
         );
@@ -675,7 +670,7 @@ static void can_handle(
             result = can_param_write_f32(
                 serial,
                 runtime,
-                PARAM_DECEL,
+                FOC_PARAM_DECEL,
                 can_get_f32(frame->data + 4) * CAN_TWO_PI * gear,
                 now_us
             );
@@ -686,7 +681,7 @@ static void can_handle(
         result = can_length_is(can, frame, 4U) ? can_param_write_f32(
                                                      serial,
                                                      runtime,
-                                                     PARAM_POSITION_KP,
+                                                     FOC_PARAM_POSITION_KP,
                                                      can_get_f32(frame->data),
                                                      now_us
                                                  )
@@ -702,7 +697,7 @@ static void can_handle(
                                : can_param_write_f32(
                                      serial,
                                      runtime,
-                                     PARAM_VELOCITY_KP,
+                                     FOC_PARAM_VELOCITY_KP,
                                      can_get_f32(frame->data) / scale,
                                      now_us
                                  );
@@ -710,7 +705,7 @@ static void can_handle(
             result = can_param_write_f32(
                 serial,
                 runtime,
-                PARAM_VELOCITY_KI,
+                FOC_PARAM_VELOCITY_KI,
                 can_get_f32(frame->data + 4) / scale,
                 now_us
             );
@@ -729,7 +724,7 @@ static void can_handle(
         result = can_param_write_f32(
             serial,
             runtime,
-            PARAM_OUTPUT_ZERO,
+            FOC_PARAM_OUTPUT_ZERO,
             view.mechanical_rad / gear - can_get_f32(frame->data) * CAN_TWO_PI,
             now_us
         );

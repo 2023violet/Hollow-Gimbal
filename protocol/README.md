@@ -226,7 +226,10 @@ unverified.
 
 ## Parameters
 
-This section describes the implemented parameters. The planned grouping, IDs,
+The complete list (ID, name, type, unit, access, range, saved) is generated from
+`firmware/at32f415/parameters.json` into [docs/parameters.md](../docs/parameters.md);
+it takes precedence over any table here. CANSimple SDO uses the same IDs. This
+section describes the implemented parameters. The planned grouping, IDs,
 write rules and persistence of future parameters are in the
 [parameter contract design](../docs/superpowers/specs/2026-11-22-falconfoc-v2-parameter-contract-design.md);
 nothing there is implemented until it appears here.
@@ -680,7 +683,7 @@ CAN parameters (contract 25): ID 120 node 0–63 (63), ID 122 bit rate 125000, 2
 500000 or 1000000 (1000000, applied at boot), ID 123 heartbeat and ID 125 estimate
 periods 0–10000 ms (0 off), ID 126 read-only link status (bits 0–7 state: 0 off,
 1 active, 2 error passive, 3 bus-off, 4 no crystal; 8–15 refused commands; 16–31
-dropped frames), ID 127 read-only raw faults. IDs 120–125 are saved (store format 8).
+dropped frames), ID 127 read-only raw faults. IDs 120–125 are saved by PARAM_SAVE.
 Bit timing: APB1 75 MHz, 15 quanta (1 + 12 + 2), sample point 86.7 %, SJW 1; automatic
 bus-off recovery. The HICK fallback clock is too inaccurate for CAN: CAN stays off.
 `protocol/tests/cansimple_vectors.tsv` holds example frames.

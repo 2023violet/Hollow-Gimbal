@@ -75,6 +75,7 @@ add_library(
   src/foc_board_capture.c
   src/foc_serial.c
   src/foc_can.c
+  src/foc_parameter_table.c
   src/foc_uart_buffer.c
   "${repo}/core/src/foc_core.c"
   "${repo}/core/src/foc_trig.c"
@@ -247,6 +248,10 @@ else()
   add_executable(test-foc-serial tests/test_foc_serial.c)
   target_link_libraries(test-foc-serial PRIVATE falconfoc-board1)
   add_test(NAME test-foc-serial COMMAND test-foc-serial)
+  add_executable(test-foc-parameter-table tests/test_foc_parameter_table.c)
+  target_link_libraries(test-foc-parameter-table PRIVATE falconfoc-board1)
+  add_test(NAME test-foc-parameter-table COMMAND test-foc-parameter-table)
+
   add_executable(test-foc-can tests/test_foc_can.c)
   target_link_libraries(test-foc-can PRIVATE falconfoc-board1)
   add_test(NAME test-foc-can COMMAND test-foc-can)

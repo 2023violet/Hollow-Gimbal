@@ -248,13 +248,32 @@ image accepts SET_MODE and tuning as well, since neither touches output policy.
 
 ### M2 persistent settings
 
-`src/foc_board_store.c` implements the Board1 settings record ("FBP1", 108
-bytes, layout in the file header): controller tuning and UART RAM policies,
-bound to the effective motor configuration, in two slots with the
+`src/foc_board_store.c` implements the Board1 settings record ("FBP1" format 9,
+layout in the file header): a header and 8-byte TLV entries (ID, type, value)
+for every parameter the [table](../../docs/parameters.md) marks as saved, the
+boot identity and an applied rotor calibration, bound to the effective motor
+configuration, in two slots with the
 configuration-store transaction (erase inactive slot, program and verify body,
 program and verify the commit word). `foc_board_persistence_restore()` applies
 a matching, valid record at boot before any producer; the UART adapter gains
-PARAM_SAVE, CONFIG_ERASE and readback IDs 48–50.
+PARAM_SAVE, CONFIG_ERASE and readback IDs 48–51. Decoding ignores entry IDs it does
+not know and the restore keeps the boot value of any saved parameter a record does
+not carry, so adding a parameter needs no new format. The fixed-offset formats 1–8
+are no longer read: such a record reports INVALID_RECORD (ID 48 = 3) and the boot
+configuration stays in use.
+
+### Parameter table
+
+`parameters.json` is the single source of every UART/CAN parameter: ID, CLI name,
+wire type, unit, access, bounds, the struct field it binds, whether it is saved and
+which derivations a write triggers. `python -B scripts/gen/gen_parameters.py`
+generates `include/foc_parameter_table.h`, `src/foc_parameter_table.c`,
+`tests/foc_parameter_documented.h`, `tools/falconfoc-cli/falconfoc_params.py` and
+[`docs/parameters.md`](../../docs/parameters.md); the quality gate fails when they are
+stale. `foc_serial.c` reads and writes through the table; only the startup, store,
+commissioning, receipt, rotor, Kt and status groups keep small value switches.
+`test-foc-parameter-table` checks the table, and the SIL test
+`test_parameter_table_matches_firmware` reads every ID back against the JSON.
 
 The SIL backs the slots with `--flash <file>`; restarting it on the same file is
 a power cycle (`sil-demo --sil-scenario persist`). On the AT32 the slots are the
@@ -303,7 +322,7 @@ add Kt x age / J to Rs. The d-axis fit also identifies the inverter dead-time
 voltage against each record's phase-current sign vector (`fit_dead_time`); the q
 axis and CAL-4 subtract it, and ID 95 reports it (`sil-demo --sil-scenario
 dead-time`, with the SIL's `--dead-time-v`). The current loop can compensate it
-(`foc_current_config.dead_time_v`, ID 87, store format 7), off by default and
+(`foc_current_config.dead_time_v`, ID 87, saved), off by default and
 enabled by the Host (`sil-demo --sil-scenario dead-time-comp`). Each CAL-4 level starts its capture once the speed
 (mean over 100 ms from the encoder angle) has the level's sign and is within 5 %
 of steady, estimated from two successive changes; a heavy rotor takes seconds and
@@ -363,7 +382,7 @@ lowered limits, `--motor-damping`), clears a latch and checks that a deliberate
 +5 → −5 rad/s reversal does not trip. Torque-mode reversal from a wrong offset is
 not detected.
 
-### Motor profile and store format 3
+### Motor profile
 
 The motor model (Rs, Ld, Lq, flux, inertia, damping), the user profile (rated
 and peak current, maximum speed, gear ratio) and the current-loop bandwidth
@@ -372,10 +391,8 @@ the protection thresholds as one candidate. `foc_board_profile` is the unified
 refresh: a model or bandwidth write re-derives the current PI with
 `foc_motor_pi_design()` at the H0 period, a peak current or maximum speed
 tightens the limits, and CAL-3/4/5 write the identified model through the same
-path. Store format 3 (212 bytes) adds the profile and IDs 112–118 after the
-format-2 bytes; format 4 (216 bytes) adds the output zero (ID 124), format 5
-(224 bytes) the acceleration limits (IDs 106/107) and format 6 (232 bytes) IDs
-108/109; older records load with the boot profile.
+path. Every profile, bandwidth and protection parameter is a saved TLV entry
+of the settings record.
 
 ### Inertia identification (CAL-7)
 

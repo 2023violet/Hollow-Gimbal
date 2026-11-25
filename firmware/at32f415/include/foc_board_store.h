@@ -92,7 +92,7 @@ struct foc_board_settings {
     float remote_position_cap_rad;
     /** Output-position zero offset in output rad (PARAM 124). */
     float output_zero_rad;
-    /** CAN settings (IDs 120, 122, 123, 125). */
+    /** CAN settings (IDs 120–125, 128–134). */
     struct foc_serial_can_settings can;
     /** NTC protection settings (IDs 138–146, 148). */
     struct foc_serial_thermal_settings thermal;

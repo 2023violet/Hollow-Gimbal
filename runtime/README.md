@@ -123,12 +123,13 @@ Run `test-foc-motion-model` for direct and Runtime PMSM dynamics, including `100
 ## Runtime IMPEDANCE mode
 
 For a C API integration, enable `motion.impedance` alongside `motion.enabled`
-at initialization. Supply the qualified positive motor-shaft Kt in N*m/A,
-positive torque cap, nonnegative ceilings for stiffness, damping and absolute
-feedforward, and a nonzero mechanical frame identity. The copied policy is
-immutable. The existing `motion.iq_limit_a` is the configured q limit and must
-fit the Current limit. A separate live thermal or power derating input is
-outside this interface.
+at initialization. Supply the qualified positive motor-shaft Kt in N*m/A, or set
+`torque_constant_from_profile` to derive Kt = 1.5 × pole pairs × flux from the live
+profile (refreshed with every applied tuning; the mode is refused while it is 0),
+a positive torque cap, nonnegative ceilings for stiffness, damping and absolute
+feedforward, and a nonzero mechanical frame identity. The existing
+`motion.iq_limit_a` is the configured q limit and must fit the Current limit; the
+thermal ceiling (below) reduces it live.
 
 In DISABLED with confirmed INHIBIT, publish a lifecycle SET_MODE request for
 `FOC_RUNTIME_MODE_IMPEDANCE`. After the H0 acknowledgement, read the current
@@ -153,8 +154,8 @@ phase input.
 After successful Core validation, H1 publishes zero q for ARM and START
 readiness, then computes q from `foc_impedance_step()` during RUNNING. H0
 checks the target's mode, Session and original command and sensor timing,
-then uses the existing guarded Pipeline. UART V1 does not admit IMPEDANCE
-setpoints. Zero-initialized policy leaves the mode disabled, including Board1.
+then uses the existing guarded Pipeline. Zero-initialized policy leaves the mode
+disabled; Board1 enables it for UART SETPOINT mode 3 and CAN MIT (protocol README).
 The Runtime public structs have grown and binary consumers must recompile.
 
 `motion.impedance.damping_filter_hz` is an immutable initial policy. Zero
@@ -175,6 +176,26 @@ the configuration storage schemas and FCAL v1 do not serialize it.
 Run `test-foc-runtime-impedance` and
 `test-foc-runtime-impedance-virtual` for the transaction and virtual motor
 contracts. The simulation test accepts `--trace` for the six Host scenarios.
+
+## Protection, thermal ceiling and cogging feedforward
+
+With `trip_enabled`, H0 evaluates `g3/safe/foc_protect` after every accepted running
+cycle and latches its fault bits through the stop path. The same instance runs the
+I²t model (`foc_thermal_i2t_*`) from the profile's rated current and
+`thermal_tau_s`: θ ≥ 1 folds the current-vector ceiling back to the rated current,
+θ ≥ 1.25 latches `FOC_SAFE_FAULT_OVERLOAD`, and FAULT_CLEAR waits for θ < 1. The
+caller's fast input adds `thermal_derate` (share of the current limit to remove) and
+`thermal_faults` (board temperature trips, latched like `driver_fault`). The combined
+ceiling clamps the Pipeline's current target (`foc_pipeline_input.target_limit_a`) and
+the outer loops' q limit; `foc_runtime_read_thermal()` reads θ and the ceiling.
+
+`motion.cogging_table` (caller storage, 1024 int8 bins per turn) and tuning
+`cogging_enabled` add the interpolated q current at the sample's angle modulo one turn
+in VELOCITY, POSITION and IMPEDANCE, within the live q limit and the thermal ceiling.
+`cogging_enabled` is refused without a non-empty table. Host builds with
+`FOC_RUNTIME_HOST_COGGING` resample a reviewed 32-knot `foc_runtime_cogging_lut` into
+the instance's own table at init. `test-foc-runtime-thermal` and
+`test-foc-runtime-impedance` cover both.
 
 ## NEXT-SYSTEM-01 full-chain Host stability
 

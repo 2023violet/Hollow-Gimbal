@@ -40,9 +40,7 @@
 - `components/utils/`
 - 未来新增的可移植协议库，例如 `canopen`、纯 parser、纯 codec、纯 container
 
-正式入口文档：
-
-- `docs/governance/Themis_Utils与通用组件代码规范指南.md`
+V2 中对应的可移植目录是 `core/`、`runtime/`、`calibration/`、`sensors/`、`g3/`、`protocol/`，其依赖边界见 [AGENTS.md](../../AGENTS.md) 第 8 节。
 
 ### 1.3 规则优先级
 
@@ -50,7 +48,7 @@
 
 1. 系统级与仓库级强制规则
 2. `AGENTS.md`
-3. `docs/governance/Themis_工程宪章与AI协作规则.md`
+3. `docs/architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md`
 4. 已成立的架构文档、分层文档、ADR
 5. 仓库根目录 `.clang-format`
 6. 本文
@@ -71,31 +69,15 @@
 - 长期维护优先于短期“先跑起来”
 - 先把 owner、生命周期、上下文说明白，再补业务逻辑
 
-### 1.6 三份底层规范的分工
-
-下面三份文档共同构成 Themis 当前代码书写与契约治理的底层基础：
+### 1.6 两份底层规范的分工
 
 - `Themis_代码规范指南.md`
-- `Themis_Utils与通用组件代码规范指南.md`
-- `Themis_C与H文件布局与注释书写规范.md`
-
-它们不是三份互相替代的“相似文档”，而是分工明确的一个整体：
-
-- `Themis_代码规范指南.md`
-  - 裁决分层、owner、命名、返回值、RTOS/ISR、blocking、验证与文档同步。
-- `Themis_Utils与通用组件代码规范指南.md`
-  - 裁决 portability-first / generic library 的依赖边界、API 契约和验证口径。
+  - 裁决分层、owner、命名、返回值、ISR、blocking、验证与文档同步。
 - `Themis_C与H文件布局与注释书写规范.md`
   - 裁决 `.c/.h` 的布局、头文件入口手册化写法、API 分组、注释颗粒度与视觉组织。
 
-任何正式代码整改、注释收口、架构提纯或 AI 执行提示词，都必须同时与这三份文档保持一致。
-
-一旦出现冲突，按下面口径裁决：
-
-- 语义、owner、生命周期、上下文、验证问题，以本文为准。
-- portability-first / generic library 的特殊例外，以 `Themis_Utils与通用组件代码规范指南.md` 为准。
-- 文件布局、头文件注释、public symbol 注释、API 分组、字段注释样式，以
-  `Themis_C与H文件布局与注释书写规范.md` 为准。
+一旦出现冲突，语义、owner、生命周期、上下文、验证问题以本文为准；文件布局、头文件注释、
+public symbol 注释、API 分组、字段注释样式以 `Themis_C与H文件布局与注释书写规范.md` 为准。
 
 ## 第二章：代码框架
 
@@ -106,7 +88,7 @@
 | `applications/` | 产品业务编排、产品服务、应用任务、应用启动入口 |
 | `bsp/` | 板级事实、板级默认实例、板级 transport glue、早期 console glue |
 | `components/` | 可复用领域组件，不承载板级事实 |
-| `components/utils/` | portability-first 工具组件，具体代码规范以 `Themis_Utils与通用组件代码规范指南.md` 为准 |
+| `components/utils/` | portability-first 工具组件 |
 | `device/` | 统一设备模型、typed device class、northbound 设备语义 |
 | `drivers/` | southbound 芯片驱动、IRQ/DMA/register/runtime bridge |
 | `subsys/` | framework 机制层，例如 export、log、ipc、time、daemon |
@@ -461,10 +443,7 @@ AI 或人工在开工前必须先把问题分成至少两类：
 
 也就是说，Themis 新写的 `.h` 不允许再停留在“只有文件头 + 函数声明列表”的水平。
 
-当前仓库存量代码的批量注释整改范围、分层顺序和验收口径，见：
-
-- `docs/governance/Themis_注释规范化补强基线.md`
-- `docs/governance/Themis_C与H文件布局与注释书写规范.md`
+文件布局与注释的具体写法，见 `docs/governance/Themis_C与H文件布局与注释书写规范.md`。
 
 ### 3.6 注释语言
 
@@ -1089,8 +1068,7 @@ ISR 中只允许调用明确声明为 `ISR-safe` 的接口。
 
 ```text
 **任务**：对 `<scope>` 目录进行一次完整的书写规范收口，并让结果同时符合
-`AGENTS.md`、`Themis_代码规范指南.md`、`Themis_Utils与通用组件代码规范指南.md`
-和 `Themis_C与H文件布局与注释书写规范.md`。
+`AGENTS.md`、`Themis_代码规范指南.md` 和 `Themis_C与H文件布局与注释书写规范.md`。
 
 **硬要求**：
 

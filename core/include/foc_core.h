@@ -235,7 +235,8 @@ int foc_angle_normalize(float angle_rad, float *wrapped_rad);
 int foc_clarke(const struct foc_vector_abc *input, struct foc_vector_alpha_beta *output);
 
 /**
- * Apply the Legacy-compatible Park sign convention without mutating input.
+ * Apply Park, d = alpha cos(theta) + beta sin(theta) and q = -alpha sin(theta) + beta cos(theta),
+ * without mutating input.
  *
  * @param input Stationary alpha/beta vector.
  * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted;
@@ -249,7 +250,7 @@ int foc_park(const struct foc_vector_alpha_beta *input,
              struct foc_vector_dq *output);
 
 /**
- * Apply inverse Park using the Legacy-compatible sign convention.
+ * Apply inverse Park, alpha = d cos(theta) - q sin(theta) and beta = d sin(theta) + q cos(theta).
  *
  * @param input Rotating d/q vector.
  * @param theta_elec_rad Electrical angle in radians. Any finite angle is accepted;

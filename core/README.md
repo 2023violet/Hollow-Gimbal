@@ -1,13 +1,13 @@
 # FalconFOC Core
 
-`core/` is the standalone control core for FalconFOC V2. It is a host-buildable C11 static library with no dependency on the Legacy firmware, MCU headers, vendor SDK, RTOS, shell, transport, flash, DMA, or board code.
+`core/` is the standalone control core for FalconFOC V2. It is a host-buildable C11 static library with no dependency on MCU headers, vendor SDK, RTOS, transport, flash, DMA, or board code.
 
 ## Scope
 
 The G2 slice contains the voltage-open-loop path.
 
 - amplitude-invariant Clarke transform
-- Park and inverse Park transforms using the Legacy sign convention
+- Park and inverse Park transforms (d = α cos θ + β sin θ, q = −α sin θ + β cos θ)
 - electrical-angle wrapping to `[0, 2π)`
 - centered common-mode SVPWM with six-sector reporting
 - configured voltage and duty limits

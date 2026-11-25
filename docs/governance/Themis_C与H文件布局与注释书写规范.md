@@ -16,12 +16,8 @@
 
 本文不是下列文档的替代品：
 
-- 分层、owner、返回值、RTOS、blocking、lifecycle 规则：
+- 分层、owner、返回值、blocking、lifecycle 规则：
   - [Themis_代码规范指南.md](./Themis_代码规范指南.md)
-- portability-first / utils / generic library 特殊规则：
-  - [Themis_Utils与通用组件代码规范指南.md](./Themis_Utils与通用组件代码规范指南.md)
-- 存量注释整改顺序与阶段性结论：
-  - [Themis_注释规范化补强基线.md](./Themis_注释规范化补强基线.md)
 
 一句话裁决：
 

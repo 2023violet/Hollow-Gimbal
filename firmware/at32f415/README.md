@@ -288,8 +288,8 @@ commissioning, receipt, rotor, Kt and status groups keep small value switches.
 
 The SIL backs the slots with `--flash <file>`; restarting it on the same file is
 a power cycle (`sil-demo --sil-scenario persist`). On the AT32 the slots are the
-top two 2 KiB regions (0x0801F000, 0x0801F800); `store-reserve.ld` keeps every
-image below them. The Flash driver `src/foc_at32_store.c` is linked only with
+top two 2 KiB regions (0x0801F000, 0x0801F800) and the cogging/encoder page the
+region below them (0x0801E800); `store-reserve.ld` keeps every image below it. The Flash driver `src/foc_at32_store.c` is linked only with
 `-DFALCONFOC_BOARD_PERSISTENCE=ON`, so the default image still contains no
 Flash erase or program code. Target facts still to confirm before enabling it:
 the sector size, the instruction-fetch stall during erase while H0/H1 IRQs are
@@ -348,10 +348,9 @@ calibrate` uses a plant whose Rs, L and flux also differ from the Board1 default
 
 ### M3c stored calibration
 
-The settings record grows to format 2 (140 bytes): a flags word and the applied
-calibration snapshot (calibrated ADC zero, pole pairs, electrical offset,
-calibration and Runtime directions). The identity stays the image's boot
-configuration, so a calibrated motor still matches. At boot
+The settings record carries the applied calibration snapshot (calibrated ADC zero,
+pole pairs, electrical offset, calibration and Runtime directions). The identity
+stays the image's boot configuration, so a calibrated motor still matches. At boot
 `foc_board_persistence_restore()` re-initializes the instance with
 `foc_board_reconfigure()` before applying the tuning; a refused calibration
 restores the boot tuning and reports VALUE_REJECTED. The manager adopts the
@@ -363,12 +362,9 @@ power-cycles, runs velocity without recalibrating, reruns CAL-3/4/5 and erases.
 
 ### M3-R calibration correctness
 
-A source audit of M0–M3 found calibration paths that ended FAILED with CAL-1/2
-already applied, left the Runtime in CALIBRATION mode, or read back zeros
-after a boot restore. The run now commits in two named phases (rotor at APPLY,
-electrical at TUNE); a failure after SET_MODE CALIBRATION passes through RESTORE
-to CURRENT mode first; CALIBRATE_READ grows to 93 bytes with the committed
-phases, the results present, the active source (boot / run / storage), the ring
+A run commits in two named phases (rotor at APPLY, electrical at TUNE); a failure
+after SET_MODE CALIBRATION passes through RESTORE to CURRENT mode first;
+CALIBRATE_READ (93 bytes) reports the committed phases, the results present, the active source (boot / run / storage), the ring
 high-water mark and the active Runtime pole pairs, offset and ADC zero. CAL-1
 refuses a zero noisier than 4 counts rms before driving. The CAL-2 sweep runs at
 half an electrical turn per second: at one turn per second the reversal rang
@@ -385,8 +381,8 @@ H0 evaluates `g3/safe/foc_protect` after every accepted running cycle:
 over-current, bus over/under-voltage, over-speed, sustained current, stall and
 tracking divergence (protocol README, Motor protection). A trip latches fault bits
 9–15 with INHIBIT and a snapshot (FAULT_SNAPSHOT_READ, 0x22); FAULT_CLEAR clears
-protection latches. Thresholds are tuning IDs 112–118, RAM-only until the
-parameter record grows (contract format 3). `sil-demo --sil-scenario protect`
+protection latches. Thresholds are tuning IDs 112–118 and persist with PARAM_SAVE;
+the thermal causes (bits 17–19) are under Thermal protection. `sil-demo --sil-scenario protect`
 drives the nominal profile against six SIL motors (same, 17°, 86°, 172° offset,
 11 and 14 pole pairs), injects each rule (`--adc-step us,counts`, `--vbus-v`,
 lowered limits, `--motor-damping`), clears a latch and checks that a deliberate

@@ -1,6 +1,10 @@
 # FalconFOC V2 G3-SAFE
 
-`g3/safe/` is the first no-power software safety slice. It defines the state, freshness, heartbeat, watchdog-permission, Flash-guard, and output-inhibit contract without accessing AT32 registers or changing the Legacy runtime.
+`g3/safe/` is the portable safety layer, compiled into the Runtime and the Board1 image. It never accesses AT32 registers.
+
+- `foc_safe` — state, freshness, heartbeat, watchdog-permission, Flash-guard and output-inhibit contract (below).
+- `foc_protect` — motor-protection rules (over-current, bus voltage, over-speed, sustained current, stall, tracking divergence); returns fault bits, never latches.
+- `foc_thermal` — NTC β conversion, filtered temperature, linear derating and trip, and the I²t state; pure calculations, no libm.
 
 ## Contract
 
@@ -34,4 +38,4 @@ cmake --build build/g3-safe --clean-first --parallel
 ctest --test-dir build/g3-safe --output-on-failure
 ```
 
-This is a host-only contract. G3-SAFE hardware acceptance still requires WDT selection and reset evidence, output-inhibit register evidence, timing evidence, and the safety matrix's applicable board measurements.
+The tests (`test-foc-safe-contract`, `test-foc-protect`, `test-foc-thermal`) are Host evidence. Hardware acceptance still requires WDT selection and reset evidence, output-inhibit register evidence, timing evidence, and the safety matrix's applicable board measurements.

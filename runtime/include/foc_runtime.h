@@ -89,7 +89,7 @@ enum foc_runtime_action {
     FOC_RUNTIME_ACTION_SET_MODE,
 };
 
-/** Closed-loop modes. Legacy voltage open loop remains a separate Core path. */
+/** Closed-loop modes. Voltage open loop remains a separate Core path. */
 enum foc_runtime_mode {
     /** Foreground supplies d/q current in A. */
     FOC_RUNTIME_MODE_CURRENT = 0,

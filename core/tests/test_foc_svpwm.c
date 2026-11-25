@@ -9,7 +9,7 @@
  * This executable is the host acceptance owner for the SVPWM contract.
  *
  * This test checks expected duties, sector continuity, limiting, and the
- * non-mutating input contract without linking Legacy implementation code.
+ * non-mutating input contract against the Core implementation alone.
  */
 
 /* Includes --------------------------------------------------------------------- */

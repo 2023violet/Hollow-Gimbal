@@ -15,11 +15,14 @@ is a standalone CMake project; there is no root CMake project.
 ## V2 product map
 
 - **FalconFOC Core** — Clarke/Park, SVPWM, Current PI, Velocity PI, Position P,
-  and Trajectory in portable C11.
+  Trajectory and impedance in portable C11.
 - **FalconFOC Runtime** — H0/H1/Foreground execution domains, lifecycle,
   command and sensor publication, Safety, and output submission.
 - **Reference targets** — Host Virtual Motor and the locked AT32F415 Board1
-  reference firmware.
+  reference firmware: UART V1, CANSimple and CAN MIT, on-MCU calibration (ADC
+  zero, rotor, R/L, flux, PI, inertia, cogging, encoder linearization), motor and
+  thermal protection, and persistent settings
+  ([Board1 README](firmware/at32f415/README.md)).
 - **Tools** — Python V1 CLI, virtual-device demonstrations, control-quality
   measurements, and Host-only tuning research.
 

@@ -1,6 +1,6 @@
 # FalconFOC V2 G3-NP
 
-`g3/np/` is a host-only, no-power validation slice for the first Core/Device boundary. It is intentionally separate from the root firmware build and does not call the Legacy ADC ISR, PWM helpers, generated platform code, vendor headers, FreeRTOS, or any hardware register.
+`g3/np/` is the Core/Device boundary: Board1 ADC and PWM facts as data and pure functions (`foc_device.c`, compiled into the Runtime and the Board1 image) and a no-power mock register simulator (`foc_device_sim.c`). It includes no vendor headers and touches no hardware register.
 
 ## G3-01 Device contract
 

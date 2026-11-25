@@ -255,7 +255,7 @@ MOTOR PHYSICAL OPERATION UNVERIFIED
 
 1. FalconFOC 代码与当前分支：`https://github.com/2023violet/Hollow-Gimbal/tree/codex/falconfoc-v2-vm01a`
 2. 本次固定 HEAD：`https://github.com/2023violet/Hollow-Gimbal/commit/f00e9a414d4de2e4d7a82cab47ebbeef6d54179b`
-3. 项目目标早期设计：`docs/2026-11-07-falconfoc-v2-platform-design.md`（以仓库实际路径为准）与用户 11-11 产品重定义记录；早期属于 Proposal，非最新验收。
+3. 项目目标早期设计：[`docs/superpowers/specs/2026-11-07-falconfoc-v2-platform-design.md`](../superpowers/specs/2026-11-07-falconfoc-v2-platform-design.md)与用户 11-11 产品重定义记录；早期属于 Proposal，非最新验收。
 4. Code Review 03：`https://github.com/2023violet/Hollow-Gimbal/blob/f00e9a4/docs/evidence/2026-11-17-next-code-review-03.md`
 5. Quality Gate 01：`https://github.com/2023violet/Hollow-Gimbal/blob/f00e9a4/docs/evidence/2026-11-17-next-quality-gate-01.md`
 6. Motion Contract 01：`https://github.com/2023violet/Hollow-Gimbal/blob/f00e9a4/docs/evidence/2026-11-17-next-motion-contract-01.md`

@@ -3274,3 +3274,11 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - Board1：`foc_board_encoder_lut`（正反平均抵消摩擦滞后，去均值保留电角度偏置，保留每圈 1–16 次中非极对数倍数的谐波，128 节点原始计数修正）；编码器初始化按表的启用状态选择 `foc_encoder_init_with_lut`；校准管理器 CAL-9（掩码 32，状态 23–28，失败码 19，结果位 64，分桶复用 CAL-8），空闲静止时按 ID 157 重新初始化；表存在齿槽页第二块（"FBE1"，编码器分辨率与方向，CRC32），PARAM_SAVE 整页重写，CONFIG_ERASE 清除。方案里的滑动平均改为直接取谐波（去掉的成分相同，不衰减编码器 2、3 次谐波）。
 - 协议 ENCODER_LUT_READ 0x56；参数 157–161；CLI `request calibrate --cal-stages encoder`、`encoder-lut-read`；SIL `--encoder-error-rad` 与场景 `encoder-lut`、SIL 测试 `test_encoder_linearization`（位置误差 −97.6%，开关即时生效，断电重启恢复）。
 - 默认镜像 +2,940 B（109,916 B），带参数存储镜像 +3,564 B（115,532 B），RAM +304 B。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 133 项全过；SDK 技术门禁 PASS。证据：[ENC-01](../evidence/2026-11-25-enc-01.md)。protocol README 新增 "Encoder linearization (CAL-9)"，契约第 29 节，firmware/CLI README 更新。
+
+## 2026-11-25 · 文档与代码对齐（THERMAL-01 至 ENC-01 收尾）
+
+- protocol README：持久化段落从错放的 "Output frame" 小节移回 "Persistent settings"，按现状重写（format 9 TLV、未知 ID 忽略、缺项保持开机值、format 1–8 不读、齿槽/编码器页、ID 149 无表时恢复为关、CONFIG_ERASE 擦页）；删除 format 1–6 的过时描述与"全有或全无"说法。
+- firmware README：存储区域加上 0x0801E800 齿槽/编码器页；M3c/M3-R 去掉 format 2 与审计过程叙述；保护阈值改为随 PARAM_SAVE 保存并指向温度保护。runtime README：阻抗 Kt 可随档案、Board1 已启用 UART 模式 3 与 CAN MIT、新增保护/热上限/齿槽前馈一节。core、g3/safe、g3/np README 去掉 Legacy 与"仅主机"说法，g3/safe 列出 foc_protect、foc_thermal。根 README 与 docs/README 补上 CAN MIT 和 Board1 功能清单。
+- 治理文档：删除对不存在的 Utils 指南、工程宪章、注释补强基线和 prompts 模板的引用（改指 AGENTS.md、项目章程、ADR）；章程中平台设计文档改为实际路径。
+- 代码注释：Park/逆 Park 写明公式（不再称 Legacy 约定），CAN 设置 ID 范围、IDs 1–3 不再标 RAM-only。仅注释，ARM 镜像不变。
+- 静态审计剩余失效链接均在历史资料（`docs/code-wiki`、`docs/evidence`、本日志早期条目）、SDK 包内生成文件与 AGENTS.md 的禁止清单中。

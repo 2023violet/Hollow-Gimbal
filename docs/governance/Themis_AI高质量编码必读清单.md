@@ -6,7 +6,7 @@
 
 这份文档是 Themis 面向新 AI 和新同学的高质量编码必读清单。
 
-它不替代 `Themis_工程宪章与AI协作规则.md`，而是把“怎样让 AI 写出更好的代码”收口成一套可执行的工作流、检查单和回头看制度。
+它不替代 [AGENTS.md](../../AGENTS.md) 与[项目章程](../architecture/FalconFOC_Project_Charter_and_Engineering_Memory_v1.0.md)，而是把“怎样让 AI 写出更好的代码”收口成一套可执行的工作流、检查单和回头看制度。
 
 如果只允许新增一份必须遵守的协作文档，那么这份文档就应该成为那份文档。
 
@@ -174,18 +174,7 @@ Themis 后续给 AI 任务时，推荐固定带上四个包：
 - 证据包：现状文件、已有文档、已有错误信息、已有基线。
 - 回头看包：要求 AI 在结束前做 reviewer 复核、验证复核、文档复核。
 
-这比单纯说一句“认真点”有效得多。
-
-当前正式模板入口：
-
-- `docs/governance/prompts/README.md`
-- `docs/governance/prompts/Themis_AI提示词工程规范.md`
-
-首次把一个全新的 AI 拉进仓库时，优先使用：
-
-- `docs/governance/prompts/Themis_新AI入场与架构接手提示词模板.md`
-
-等它完成首次接手、已经建立仓库心智图以后，再切回审查型、执行型或轻量型模板。
+这比单纯说一句“认真点”有效得多。新 AI 接手时，先按 [AGENTS.md](../../AGENTS.md) 第 1 节的读序建立仓库心智图。
 
 ### 3.12 把规则写进 AI 真会读取的入口文件
 
@@ -371,8 +360,9 @@ Themis 后续建议每轮至少固定检查下面九项：
 - 收尾前复查 diff / test / docs / size / git status
 ```
 
-如果任务不是轻量小修，而是路线图审查或直接整改，请优先改用
-`docs/governance/prompts/` 里的正式模板，而不是临时自由发挥。
+如果任务不是轻量小修，而是路线图审查或架构整改，先按 ADR 的 Architecture Change Gate
+（[FalconFOC_BareMetal_Execution_ADR.md](../architecture/FalconFOC_BareMetal_Execution_ADR.md)）
+写清方案、验收与回滚，再动手。
 
 ## 5. Themis 的“高质量完成”定义
 

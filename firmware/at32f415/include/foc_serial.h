@@ -323,13 +323,13 @@ struct foc_serial {
     uint32_t crc_errors;
     /** Number of frames/gap markers discarded by the consumer. */
     uint32_t dropped;
-    /** Applied RAM-only remote current-vector limit in A. */
+    /** Applied remote current-vector limit in A (ID 2). */
     float current_limit_a;
-    /** Applied RAM-only absolute position-reference limit in output rad. */
+    /** Applied absolute position-reference limit in output rad (ID 3). */
     float position_limit_rad;
     /** Output-position zero offset in output rad (PARAM 124, SET_ZERO). */
     float output_zero_rad;
-    /** Applied RAM-only RX service cap in bytes per poll. */
+    /** Applied RX service cap in frames per poll (ID 1). */
     uint32_t rx_budget;
     /** Whether the ordinary sequence watermark is initialized. */
     bool request_seen;
@@ -352,7 +352,7 @@ struct foc_serial {
     struct foc_serial_persistence persistence;
     /** Optional calibration manager; CALIBRATE_* are NOT_SUPPORTED without it. */
     struct foc_serial_calibration calibration;
-    /** CAN settings (IDs 120, 122, 123, 125); defaults from foc_serial_can_defaults(). */
+    /** CAN settings (IDs 120–125, 128–134); defaults from foc_serial_can_defaults(). */
     struct foc_serial_can_settings can;
     /** Optional CAN link status (ID 126). */
     struct foc_serial_can_link can_link;

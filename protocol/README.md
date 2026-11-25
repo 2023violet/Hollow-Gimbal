@@ -522,6 +522,39 @@ CAL-4 also ends TIMEOUT when a speed level is not steady in its direction within
 
 ### Persistent settings
 
+PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
+pending tuning. PARAM_SAVE stores every parameter marked persistent in
+[docs/parameters.md](../docs/parameters.md) (generated from
+`firmware/at32f415/parameters.json`) and, when one is applied, the on-MCU
+calibration result (ADC zero, direction, pole pairs, electrical offset) in one
+"FBP1" format 9 record: a 20-byte header, 8-byte entries (ID u16, type u8, value
+u32) and a CRC. A restore ignores IDs it does not know and keeps the boot value of
+any persistent ID the record does not carry, so adding a parameter needs no new
+format. Formats 1–8 are not read (ID 48 = 3, boot configuration in use). The CAL-8
+cogging table and the CAL-9 encoder correction live on their own page below the
+record slots (Cogging compensation, Encoder linearization); PARAM_SAVE rewrites it
+when either changed.
+
+The record is bound to the image's boot motor configuration. A restore applies the
+stored PI as saved; it does not re-derive it from the model. At boot, before any
+interrupt, a record is applied only when that boot configuration is identical, every
+value passes the same checks as a UART write and the calibration passes the same
+re-initialization as a live run; otherwise ID 48 reports why and the boot
+configuration stays. One exception: cogging compensation (ID 149) restores as off
+when no cogging table was restored, instead of refusing the record. Nothing on
+Board1 identifies the motor, so after replacing the motor or moving the encoder,
+send CONFIG_ERASE or recalibrate. ID 51 = 1 means "restored", not "verified on this
+motor". Two slots and a separately programmed commit word keep the previous record
+when a save is interrupted. A successful save clears the dirty flag. CONFIG_ERASE
+erases both slots and the cogging page and returns the settings to their boot values.
+
+| ID | Readback | Values |
+| --- | --- | --- |
+| 48 | Boot outcome | 0 unavailable (no storage), 1 empty, 2 loaded, 3 invalid record, 4 identity mismatch, 5 value rejected, 6 I/O error |
+| 49 | Applied record sequence | 0 when none was applied |
+| 50 | Newest stored record sequence | 0 when storage is erased |
+| 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot (0 after CONFIG_ERASE) |
+
 ### Output frame
 
 Host positions and speeds are output-side: SETPOINT velocity and position targets,
@@ -544,36 +577,6 @@ restarts the rotor position at the single-turn angle, so the stored zero gives t
 same output position after a power cycle only within one rotor turn
 (2π / gear ratio output rad). CONFIG_ERASE returns IDs 99 and 124 to 1 and 0.
 
-PARAM_SAVE and CONFIG_ERASE require DISABLED with INHIBIT confirmed and no
-pending tuning. PARAM_SAVE stores the live controller tuning (IDs 64–74), the
-motor profile (IDs 80–83, 85, 86, 96–99, 104), the protection thresholds (IDs
-112–118), the RAM policies (IDs 1–3), the output zero (ID 124) and, when one is
-applied, the on-MCU calibration result (ADC zero, direction, pole pairs,
-electrical offset) in one record (format 6, 232 bytes: the format-2 bytes 0–135,
-then the profile at 136–179, the thresholds at 180–207, the output zero at 208,
-acceleration and deceleration (IDs 106/107) at 212/216, IDs 108/109 at 220/224
-and the CRC at 228). Format-5 (224 bytes, boot IDs 108/109), format-4 (216 bytes,
-no acceleration limits), format-3 (212 bytes, no output
-zero), format-2 (140 bytes) and format-1 records still load; formats 1 and 2 keep
-the boot profile and thresholds. The
-record is bound to the image's boot motor configuration. A restore applies the
-stored PI as saved; it does not re-derive it from the model. At boot, before any interrupt, a stored
-record is applied only when that boot configuration is identical and every
-value passes the same checks as a UART write and the calibration passes the
-same re-initialization as a live run; it applies completely or not at all,
-otherwise the boot configuration stays in use. The record is bound to the
-board's boot configuration, not to a motor: nothing on Board1 identifies the
-motor, so after replacing the motor or moving the encoder, send CONFIG_ERASE
-or recalibrate. ID 51 = 1 means "restored", not "verified on this motor".
-Two slots and a separately programmed commit word keep the previous record
-when a save is interrupted. A successful save clears the dirty flag.
-
-| ID | Readback | Values |
-| --- | --- | --- |
-| 48 | Boot outcome | 0 unavailable (no storage), 1 empty, 2 loaded, 3 invalid record, 4 identity mismatch, 5 value rejected, 6 I/O error |
-| 49 | Applied record sequence | 0 when none was applied |
-| 50 | Newest stored record sequence | 0 when storage is erased |
-| 51 | Calibration restored | 1 when the applied record carried a calibration that was re-applied at boot (0 after CONFIG_ERASE) |
 
 ### Commutation gate
 

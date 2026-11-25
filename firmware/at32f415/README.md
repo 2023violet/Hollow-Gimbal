@@ -48,7 +48,7 @@ A clock-tree change must update both together.
 The program must stay below the cogging page at `0x0801E800` (122 KB usable; the settings
 slots follow at `0x0801F000`; `store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
 the persistent-settings image 101,972 B; after THERMAL-01 102,976 B and 107,048 B; after
-COG-01 they are 106,976 B and 111,968 B. AT32F415 has no FPU, so every libm call
+COG-01 106,976 B and 111,968 B; after ENC-01 they are 109,916 B and 115,532 B. AT32F415 has no FPU, so every libm call
 is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
@@ -430,6 +430,16 @@ current when tuning `cogging_enabled` (ID 149) is 1. The page below the settings
 (driver slot 2, 0x0801E800) stores it with the image built with persistence, so the
 program limit is 0x0801E800 (122 KB). `sil-demo --sil-scenario cogging` runs it against a
 plant cogging torque (`--cogging-nm amp,cycles[,phase]`); contract 28.
+
+### Encoder linearization (CAL-9)
+
+`foc_board_encoder_lut` holds Board1's 128-knot correction and the harmonic fit; the
+calibration manager runs the field sweep for stage mask 32 (states 23–28) with the CAL-8
+bins. `foc_board_encoder_init_sensor()` initializes the sensor with the table while it is
+active (`foc_encoder_init_with_lut`); every re-initialization picks up the current state,
+and the manager re-initializes when ID 157 changes. The table is the second block of the
+cogging page. `sil-demo --sil-scenario encoder-lut` injects a raw-angle error
+(`--encoder-error-rad e1,p1[,e2,p2]`) next to plant cogging; contract 29.
 
 ### Inertia identification (CAL-7)
 

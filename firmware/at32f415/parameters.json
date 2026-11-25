@@ -109,6 +109,11 @@
     {"id": 153, "name": "cogging-peak", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 table peak q current."},
     {"id": 154, "name": "cogging-rms", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 table RMS q current."},
     {"id": 155, "name": "cogging-friction", "type": "f32", "unit": "A", "access": "ro", "group": "commission", "brief": "CAL-8 Coulomb friction current (half the forward/backward difference)."},
-    {"id": 156, "name": "cogging-consistency", "type": "f32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted."}
+    {"id": 156, "name": "cogging-consistency", "type": "f32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted."},
+    {"id": 157, "name": "encoder-lut-enable", "type": "u32", "unit": "none", "access": "rw", "group": "serial", "field": "encoder.lut_enabled", "min": 0, "max": 1, "persist": "encoder.lut_enabled", "brief": "CAL-9 encoder correction: 1 uses a stored table (applied while DISABLED), 0 the raw encoder."},
+    {"id": 158, "name": "encoder-lut-status", "type": "u32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-9: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range."},
+    {"id": 159, "name": "encoder-lut-peak", "type": "f32", "unit": "rad", "access": "ro", "group": "commission", "brief": "CAL-9 correction peak, mechanical."},
+    {"id": 160, "name": "encoder-lut-rms", "type": "f32", "unit": "rad", "access": "ro", "group": "commission", "brief": "CAL-9 correction RMS, mechanical."},
+    {"id": 161, "name": "encoder-lut-consistency", "type": "f32", "unit": "none", "access": "ro", "group": "commission", "brief": "CAL-9 correlation of the forward and backward errors; 0.5 or more is accepted."}
   ]
 }

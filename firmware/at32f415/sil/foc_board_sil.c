@@ -39,6 +39,7 @@
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
 #include "foc_board_cogging.h"
+#include "foc_board_encoder_lut.h"
 #include "foc_board_store.h"
 #include "foc_board_thermal.h"
 #include "foc_board_timing.h"
@@ -163,6 +164,8 @@ struct sil_device {
     /* Fault injection: the DRV8311 nFAULT line is low in [driver_fault_on_us, _off_us). */
     uint32_t driver_fault_on_us;
     uint32_t driver_fault_off_us;
+    /* Encoder error in the raw angle: e1 sin(a + p1) + e2 sin(2 a + p2) rad (--encoder-error-rad). */
+    double encoder_error[4];
     /* NTC plant: the winding follows ambient + Rth x 1.5 Rs i^2 with time constant tau, the
      * power stage half that rise at tau / 2. Both read through a 10 kOhm beta 3950 NTC to
      * ground with a 10 kOhm pull-up; in [override_on_us, _off_us) both read override_c. */
@@ -199,6 +202,8 @@ struct sil_device {
 };
 
 /* Private Helpers -------------------------------------------------------------- */
+
+static void sil_encoder_error(struct sil_device *device);
 
 static uint32_t sil_slot_index(uint32_t now_us)
 {
@@ -439,6 +444,7 @@ static void sil_tmr5(struct sil_device *device, uint32_t phase_us)
                         &device->plant.encoder,
                         &device->spi_code
                     ) == 0) {
+                    sil_encoder_error(device);
                     device->encoder.captured_us = now;
                     device->spi_phase = SIL_SPI_SELECTED;
                     return;
@@ -650,6 +656,19 @@ static bool sil_driver_fault_line(void *argument)
     const struct sil_device *device = argument;
     return device->now_us >= device->driver_fault_on_us &&
         device->now_us < device->driver_fault_off_us;
+}
+
+/* Add the injected encoder error to the raw code at its own angle. */
+static void sil_encoder_error(struct sil_device *device)
+{
+    const double *e = device->encoder_error;
+    if (e[0] == 0.0 && e[2] == 0.0) {
+        return;
+    }
+    const double angle = (double)device->spi_code * (6.283185307179586 / 65536.0);
+    const double error = e[0] * sin(angle + e[1]) + e[2] * sin(2.0 * angle + e[3]);
+    const long shifted = (long)device->spi_code + lround(error * (65536.0 / 6.283185307179586));
+    device->spi_code = (uint16_t)(((shifted % 65536L) + 65536L) % 65536L);
 }
 
 /* Advance the NTC plant to now with the present copper loss. */
@@ -891,7 +910,8 @@ static void sil_usage(const char *name)
         "          [--motor-offset-rad rad] [--motor-inertia j] [--motor-damping b]\n"
         "          [--load-torque-nm t[,on_us]] [--driver-fault-us on_us[,off_us]]\n"
         "          [--dead-time-v v] [--can serial] [--thermal ambient_c,rth_k_per_w,tau_s]\n"
-        "          [--ntc-override-us on_us,off_us,celsius] [--cogging-nm amp,cycles[,phase]]\n",
+        "          [--ntc-override-us on_us,off_us,celsius] [--cogging-nm amp,cycles[,phase]]\n"
+        "          [--encoder-error-rad e1,p1[,e2,p2]]\n",
         name
     );
 }
@@ -1060,6 +1080,13 @@ int main(int argc, char **argv)
             device.driver_fault_on_us = (uint32_t)strtoul(value, &rest, 0);
             device.driver_fault_off_us =
                 rest != NULL && *rest == ',' ? (uint32_t)strtoul(rest + 1, NULL, 0) : UINT32_MAX;
+        } else if (strcmp(option, "--encoder-error-rad") == 0) {
+            /* Raw-angle encoder error: e1,p1[,e2,p2] in rad. */
+            char *rest = (char *)value;
+            for (unsigned int index = 0U; index < 4U && rest != NULL && *rest != '\0'; ++index) {
+                device.encoder_error[index] = strtod(rest, &rest);
+                rest = rest != NULL && *rest == ',' ? rest + 1 : NULL;
+            }
         } else if (strcmp(option, "--cogging-nm") == 0) {
             /* Plant cogging torque: amplitude N*m, cycles per turn, phase rad. */
             char *rest = NULL;
@@ -1175,6 +1202,7 @@ int main(int argc, char **argv)
         &device
     );
     foc_board_calibration_attach_cogging(&device.calibration, &foc_board_cogging_state);
+    foc_board_calibration_attach_encoder_lut(&device.calibration, &foc_board_encoder_lut_state);
     const struct foc_serial_calibration calibration =
         foc_board_calibration_serial(&device.calibration);
     foc_serial_attach_calibration(&device.serial, &calibration);
@@ -1189,6 +1217,7 @@ int main(int argc, char **argv)
         .program = sil_flash_program,
     };
     device.persistence.cogging = &foc_board_cogging_state;
+    device.persistence.encoder_lut = &foc_board_encoder_lut_state;
     foc_board_persistence_restore(
         &device.persistence,
         &device.boot,

@@ -148,6 +148,19 @@ struct foc_serial_commission_view {
     float cogging_rms_a;
     float cogging_friction_a;
     float cogging_consistency;
+    /** CAL-9 result (IDs 158-161): status, peak and RMS correction in rad, consistency. */
+    uint8_t encoder_status;
+    float encoder_peak_rad;
+    float encoder_rms_rad;
+    float encoder_consistency;
+};
+
+/** CAL-9 table for ENCODER_LUT_READ: knots, counts per turn (0 empty), active, offsets. */
+struct foc_serial_encoder_lut_view {
+    uint32_t knots;
+    uint32_t counts_per_revolution;
+    bool active;
+    const int16_t *offsets;
 };
 
 struct foc_serial_calibration {
@@ -169,6 +182,8 @@ struct foc_serial_calibration {
     bool (*commission)(const void *context, struct foc_serial_commission_view *view);
     /** After CONFIG_ERASE: return the instance to the boot configuration. */
     int (*reset)(void *context, uint32_t now_us);
+    /** ENCODER_LUT_READ source; NULL: NOT_SUPPORTED. Appended member. */
+    bool (*encoder_lut)(const void *context, struct foc_serial_encoder_lut_view *view);
 };
 
 /** CAN settings (contract 25), owned by Foreground and saved with the parameters. */
@@ -229,6 +244,12 @@ struct foc_serial_cogging_settings {
     float speed_rad_s;
     /** 1 keeps the once-per-turn component in the table, 0 removes it. */
     uint32_t keep_first_harmonic;
+};
+
+/** CAL-9 encoder correction switch (ID 157); defaults from foc_serial_encoder_defaults(). */
+struct foc_serial_encoder_settings {
+    /** 1 uses a stored CAL-9 correction (applied while DISABLED), 0 the raw encoder. */
+    uint32_t lut_enabled;
 };
 
 /** Latest filtered temperatures in °C, NaN without a reading (IDs 119, 147). */
@@ -341,6 +362,8 @@ struct foc_serial {
     struct foc_serial_temperatures temperature;
     /** CAL-8 sweep settings. */
     struct foc_serial_cogging_settings cogging;
+    /** CAL-9 encoder correction switch. */
+    struct foc_serial_encoder_settings encoder;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -398,6 +421,9 @@ struct foc_serial_cogging_settings foc_serial_cogging_defaults(void);
 
 /** True within the PARAM_WRITE ranges of IDs 150 and 151. */
 bool foc_serial_cogging_settings_valid(const struct foc_serial_cogging_settings *settings);
+
+/** Default CAL-9 switch: on (a correction applies once one exists). */
+struct foc_serial_encoder_settings foc_serial_encoder_defaults(void);
 
 /** Attach the CAN link status before receiving bytes. */
 void foc_serial_attach_can_link(struct foc_serial *serial, const struct foc_serial_can_link *link);

@@ -304,6 +304,14 @@ foc_serial_commission_value(const struct foc_serial_commission_view *view, uint1
         return foc_serial_float_bits(view->cogging_friction_a);
     case FOC_PARAM_COGGING_CONSISTENCY:
         return foc_serial_float_bits(view->cogging_consistency);
+    case FOC_PARAM_ENCODER_LUT_STATUS:
+        return view->encoder_status;
+    case FOC_PARAM_ENCODER_LUT_PEAK:
+        return foc_serial_float_bits(view->encoder_peak_rad);
+    case FOC_PARAM_ENCODER_LUT_RMS:
+        return foc_serial_float_bits(view->encoder_rms_rad);
+    case FOC_PARAM_ENCODER_LUT_CONSISTENCY:
+        return foc_serial_float_bits(view->encoder_consistency);
     default:
         return foc_serial_float_bits(view->dead_time_v);
     }
@@ -903,6 +911,41 @@ static int foc_serial_cogging_read(
     return FOC_PROTO_OK;
 }
 
+/* ENCODER_LUT_READ: 40 knots of the CAL-9 correction from an offset (u16). Body: knots u16,
+ * counts per turn u32 (0: no table), active u8, offset u16, count u8, offsets int16. */
+static int foc_serial_encoder_lut_read(
+    const struct foc_serial *serial,
+    const struct foc_protocol_frame *request,
+    struct foc_protocol_frame *response
+)
+{
+    struct foc_serial_encoder_lut_view view;
+    if (serial->calibration.encoder_lut == NULL ||
+        !serial->calibration.encoder_lut(serial->calibration.context, &view)) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    if (request->length != 2U) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    const uint32_t offset = foc_protocol_read_u16(request->payload);
+    if (offset >= view.knots) {
+        return FOC_PROTO_INVALID_ARGUMENT;
+    }
+    const uint32_t remaining = view.knots - offset;
+    const uint32_t count = remaining < 40U ? remaining : 40U;
+    uint8_t *body = response->payload;
+    foc_protocol_write_u16(body + 1, (uint16_t)view.knots);
+    foc_protocol_write_u32(body + 3, view.counts_per_revolution);
+    body[7] = view.active ? 1U : 0U;
+    foc_protocol_write_u16(body + 8, (uint16_t)offset);
+    body[10] = (uint8_t)count;
+    for (uint32_t index = 0U; index < count; ++index) {
+        foc_protocol_write_u16(body + 11U + 2U * index, (uint16_t)view.offsets[offset + index]);
+    }
+    response->length = (uint16_t)(11U + 2U * count);
+    return FOC_PROTO_OK;
+}
+
 /* SET_ZERO: the present output position becomes zero. DISABLED with INHIBIT confirmed and
  * a fresh sensor, as for a parameter write; PARAM_SAVE stores it. */
 static int foc_serial_set_zero(
@@ -1030,7 +1073,7 @@ static int foc_serial_dispatch(
         const unsigned int stages = request->length == 0U ? 3U : request->payload[0];
         /* 1-4 as before; 8 (CAL-7) alone or with the rotor/electrical bits (8-11). */
         if (request->length > 1U || stages < 1U ||
-            (stages > 4U && (stages < 8U || stages > 11U) && stages != 16U)) {
+            (stages > 4U && (stages < 8U || stages > 11U) && stages != 16U && stages != 32U)) {
             return FOC_PROTO_INVALID_ARGUMENT;
         }
         return serial->calibration.start == NULL
@@ -1058,6 +1101,9 @@ static int foc_serial_dispatch(
     }
     if (request->type == FOC_MSG_COGGING_READ) {
         return foc_serial_cogging_read(runtime, request, response);
+    }
+    if (request->type == FOC_MSG_ENCODER_LUT_READ) {
+        return foc_serial_encoder_lut_read(serial, request, response);
     }
     if (request->length != 0U) {
         return FOC_PROTO_INVALID_ARGUMENT;
@@ -1192,6 +1238,7 @@ void foc_serial_init_with_policy(
         .thermal = foc_serial_thermal_defaults(),
         .temperature = {NAN, NAN},
         .cogging = foc_serial_cogging_defaults(),
+        .encoder = foc_serial_encoder_defaults(),
     };
     struct foc_runtime_lifecycle_result lifecycle;
     if (foc_runtime_read_lifecycle_result((struct foc_runtime *)runtime, &lifecycle) ==
@@ -1307,6 +1354,11 @@ bool foc_serial_thermal_settings_valid(const struct foc_serial_thermal_settings 
 struct foc_serial_cogging_settings foc_serial_cogging_defaults(void)
 {
     return (struct foc_serial_cogging_settings){.speed_rad_s = 0.25f, .keep_first_harmonic = 0U};
+}
+
+struct foc_serial_encoder_settings foc_serial_encoder_defaults(void)
+{
+    return (struct foc_serial_encoder_settings){.lut_enabled = 1U};
 }
 
 bool foc_serial_cogging_settings_valid(const struct foc_serial_cogging_settings *settings)

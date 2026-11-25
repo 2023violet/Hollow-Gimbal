@@ -28,6 +28,7 @@
 #include "foc_board_store.h"
 
 #include "foc_board_cogging.h"
+#include "foc_board_encoder_lut.h"
 
 #include <math.h>
 #include <string.h>
@@ -285,6 +286,7 @@ static bool settings_from_live(
     settings->can = serial->can;
     settings->thermal = serial->thermal;
     settings->cogging = serial->cogging;
+    settings->encoder = serial->encoder;
     return true;
 }
 
@@ -299,7 +301,8 @@ static bool serial_caps_valid(const struct foc_board_settings *settings)
         fabsf(settings->output_zero_rad) <= 1000.0f &&
         foc_serial_can_settings_valid(&settings->can) &&
         foc_serial_thermal_settings_valid(&settings->thermal) &&
-        foc_serial_cogging_settings_valid(&settings->cogging);
+        foc_serial_cogging_settings_valid(&settings->cogging) &&
+        settings->encoder.lut_enabled <= 1U;
 }
 
 /* Public Functions ------------------------------------------------------------- */
@@ -602,13 +605,137 @@ static void cogging_header(
     );
 }
 
+#define STORE_ENCODER_MAGIC UINT32_C(0x31454246) /* "FBE1" */
+
+static void encoder_header(
+    const struct foc_board_store_identity *identity,
+    const struct foc_board_encoder_lut *table,
+    uint8_t header[24]
+)
+{
+    put_u32(header, STORE_ENCODER_MAGIC);
+    put_u32(header + 4, 1U | ((uint32_t)FOC_BOARD_ENCODER_LUT_KNOTS << 16));
+    put_u32(header + 8, identity->encoder_counts_per_revolution);
+    put_u32(header + 12, (uint32_t)identity->runtime_encoder_direction);
+    put_u32(header + 16, table->counts_per_revolution);
+    const uint32_t crc = store_crc32_update(UINT32_MAX, header, 20U);
+    put_u32(
+        header + 20,
+        ~store_crc32_update(crc, (const uint8_t *)table->offsets, sizeof table->offsets)
+    );
+}
+
+static int encoder_block_save(
+    const struct foc_board_store_driver *driver,
+    const struct foc_board_store_identity *identity,
+    const struct foc_board_encoder_lut *table
+)
+{
+    if (table == NULL || table->counts_per_revolution == 0U) {
+        return FOC_BOARD_STORE_OK;
+    }
+    uint8_t header[24];
+    encoder_header(identity, table, header);
+    const uint8_t *offsets = (const uint8_t *)table->offsets;
+    if (driver->program(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET + 24U,
+            offsets,
+            sizeof table->offsets
+        ) != 0 ||
+        driver->program(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET,
+            header,
+            sizeof header
+        ) != 0 ||
+        !slot_matches(
+            driver,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET,
+            header,
+            sizeof header
+        ) ||
+        !slot_matches(
+            driver,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET + 24U,
+            offsets,
+            sizeof table->offsets
+        )) {
+        return FOC_BOARD_STORE_ERR_VERIFY;
+    }
+    return FOC_BOARD_STORE_OK;
+}
+
+int foc_board_store_encoder_lut_load(
+    const struct foc_board_store_driver *driver,
+    const struct foc_board_store_identity *identity,
+    struct foc_board_encoder_lut *table
+)
+{
+    if (driver == NULL || identity == NULL || table == NULL) {
+        return FOC_BOARD_STORE_ERR_INPUT;
+    }
+    uint8_t header[24];
+    int status = FOC_BOARD_STORE_OK;
+    if (driver->read(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET,
+            header,
+            sizeof header
+        ) != 0 ||
+        driver->read(
+            driver->context,
+            FOC_BOARD_STORE_COGGING_SLOT,
+            FOC_BOARD_STORE_ENCODER_OFFSET + 24U,
+            (uint8_t *)table->offsets,
+            sizeof table->offsets
+        ) != 0) {
+        status = FOC_BOARD_STORE_ERR_IO;
+    } else if (erased(header, sizeof header)) {
+        status = FOC_BOARD_STORE_ERR_EMPTY;
+    } else {
+        table->counts_per_revolution = get_u32(header + 16);
+        uint8_t expected[24];
+        encoder_header(identity, table, expected);
+        struct foc_encoder_lut descriptor;
+        if (memcmp(header, expected, sizeof header) != 0 ||
+            !foc_board_encoder_lut_descriptor(
+                table,
+                identity->encoder_counts_per_revolution,
+                &descriptor
+            )) {
+            status = FOC_BOARD_STORE_ERR_RECORD;
+        }
+    }
+    if (status != FOC_BOARD_STORE_OK) {
+        table->counts_per_revolution = 0U;
+        memset(table->offsets, 0, sizeof table->offsets);
+    }
+    return status;
+}
+
 int foc_board_store_cogging_save(
     const struct foc_board_store_driver *driver,
     const struct foc_board_store_identity *identity,
     const struct foc_runtime_cogging_table *table
 )
 {
-    if (driver == NULL || identity == NULL || table == NULL) {
+    return foc_board_store_page_save(driver, identity, table, NULL);
+}
+
+int foc_board_store_page_save(
+    const struct foc_board_store_driver *driver,
+    const struct foc_board_store_identity *identity,
+    const struct foc_runtime_cogging_table *table,
+    const struct foc_board_encoder_lut *encoder
+)
+{
+    if (driver == NULL || identity == NULL) {
         return FOC_BOARD_STORE_ERR_INPUT;
     }
     if (driver->erase(driver->context, FOC_BOARD_STORE_COGGING_SLOT) != 0 ||
@@ -617,12 +744,16 @@ int foc_board_store_cogging_save(
             FOC_BOARD_STORE_COGGING_SLOT,
             0U,
             NULL,
-            FOC_BOARD_STORE_COGGING_BYTES
+            FOC_BOARD_STORE_ENCODER_OFFSET + FOC_BOARD_STORE_ENCODER_BYTES
         )) {
         return FOC_BOARD_STORE_ERR_IO;
     }
-    if (!(table->scale_a > 0.0f)) {
-        return FOC_BOARD_STORE_OK; /* an empty table is an erased page */
+    const int encoder_status = encoder_block_save(driver, identity, encoder);
+    if (encoder_status != FOC_BOARD_STORE_OK) {
+        return encoder_status;
+    }
+    if (table == NULL || !(table->scale_a > 0.0f)) {
+        return FOC_BOARD_STORE_OK; /* an empty table leaves its block erased */
     }
     uint8_t header[28];
     cogging_header(identity, table, header);
@@ -730,6 +861,7 @@ void foc_board_persistence_restore(
     persistence->stored = false;
     persistence->calibration_restored = false;
     persistence->cogging_restored = false;
+    persistence->encoder_lut_restored = false;
     if (!foc_board_store_identity_from_boot(boot, &persistence->identity)) {
         persistence->state = FOC_BOARD_STORE_UNAVAILABLE;
         return;
@@ -742,6 +874,17 @@ void foc_board_persistence_restore(
                                             &persistence->cogging->table
                                         ) == FOC_BOARD_STORE_OK;
         persistence->cogging->dirty = false;
+    }
+    if (persistence->encoder_lut != NULL) {
+        persistence->encoder_lut_restored = foc_board_store_encoder_lut_load(
+                                                &persistence->driver,
+                                                &persistence->identity,
+                                                persistence->encoder_lut
+                                            ) == FOC_BOARD_STORE_OK;
+        persistence->encoder_lut->dirty = false;
+        /* Active with the default switch; a restored record's switch is applied below. */
+        persistence->encoder_lut->active =
+            persistence->encoder_lut_restored && serial->encoder.lut_enabled != 0U;
     }
     struct foc_board_store_identity identity;
     struct foc_board_settings settings;
@@ -782,6 +925,7 @@ void foc_board_persistence_restore(
         .can = serial->can,
         .thermal = serial->thermal,
         .cogging = serial->cogging,
+        .encoder = serial->encoder,
         .calibration_present = settings.calibration_present,
         .calibration = settings.calibration,
     };
@@ -834,6 +978,11 @@ void foc_board_persistence_restore(
     serial->can = settings.can;
     serial->thermal = settings.thermal;
     serial->cogging = settings.cogging;
+    serial->encoder = settings.encoder;
+    if (persistence->encoder_lut != NULL) {
+        persistence->encoder_lut->active =
+            persistence->encoder_lut_restored && serial->encoder.lut_enabled != 0U;
+    }
     persistence->loaded_sequence = sequence;
     persistence->state = FOC_BOARD_STORE_LOADED;
 }
@@ -867,15 +1016,23 @@ static int persistence_save(
         FOC_BOARD_STORE_OK) {
         return FOC_PROTO_INTERNAL_ERROR;
     }
-    if (persistence->cogging != NULL && persistence->cogging->dirty) {
-        if (foc_board_store_cogging_save(
+    const bool cogging_dirty = persistence->cogging != NULL && persistence->cogging->dirty;
+    const bool encoder_dirty = persistence->encoder_lut != NULL && persistence->encoder_lut->dirty;
+    if (cogging_dirty || encoder_dirty) {
+        if (foc_board_store_page_save(
                 &persistence->driver,
                 &persistence->identity,
-                &persistence->cogging->table
+                persistence->cogging != NULL ? &persistence->cogging->table : NULL,
+                persistence->encoder_lut
             ) != FOC_BOARD_STORE_OK) {
             return FOC_PROTO_INTERNAL_ERROR;
         }
-        persistence->cogging->dirty = false;
+        if (persistence->cogging != NULL) {
+            persistence->cogging->dirty = false;
+        }
+        if (persistence->encoder_lut != NULL) {
+            persistence->encoder_lut->dirty = false;
+        }
     }
     persistence->stored_sequence = *sequence;
     persistence->stored = true;
@@ -891,7 +1048,7 @@ static int persistence_erase(void *context)
     if (foc_board_store_erase(&persistence->driver) != FOC_BOARD_STORE_OK) {
         return FOC_PROTO_INTERNAL_ERROR;
     }
-    if (persistence->cogging != NULL &&
+    if ((persistence->cogging != NULL || persistence->encoder_lut != NULL) &&
         (persistence->driver.erase(persistence->driver.context, FOC_BOARD_STORE_COGGING_SLOT) !=
              0 ||
          !slot_matches(
@@ -899,7 +1056,7 @@ static int persistence_erase(void *context)
              FOC_BOARD_STORE_COGGING_SLOT,
              0U,
              NULL,
-             FOC_BOARD_STORE_COGGING_BYTES
+             FOC_BOARD_STORE_ENCODER_OFFSET + FOC_BOARD_STORE_ENCODER_BYTES
          ))) {
         return FOC_PROTO_INTERNAL_ERROR;
     }

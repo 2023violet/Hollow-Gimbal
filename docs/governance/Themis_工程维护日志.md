@@ -3268,3 +3268,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 协议 COGGING_READ 0x55；参数 149–156 进 `parameters.json`；CLI `request calibrate --cal-stages cogging`、`cogging-read`；SIL `--cogging-nm`、场景 `cogging` 与 SIL 测试 `test_cogging_compensation`（齿槽阶次速度波动 −92%，断电重启后表与开关恢复）；SIL flash 文件多一页，persist 场景的损坏偏移改为按 2048 B 槽计算。
 - 修正 THERMAL-01 遗漏：Board1 默认配置没有写 I²t 时间常数（实际默认关闭），现为 30 s；板级测试与 SIL thermal 场景加了检查。
 - 默认镜像 +4,000 B（106,976 B），带参数存储镜像 +4,920 B（111,968 B），RAM +6,248 B（分桶 5 KB 只在标定时用，方案估计偏低）。SIL 套件首轮 persist（两槽偏移）与 profile（τ 默认开启后 I²t 接管定时跳闸）两项失败，已修正场景；fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 132 项全过；SDK 技术门禁 PASS。证据：[COG-01](../evidence/2026-11-25-cog-01.md)。protocol README 新增 "Cogging compensation (CAL-8)"，契约第 28 节，firmware/CLI README 更新。
+
+## 2026-11-25 · ENC-01 编码器线性化（CAL-9）
+
+- Board1：`foc_board_encoder_lut`（正反平均抵消摩擦滞后，去均值保留电角度偏置，保留每圈 1–16 次中非极对数倍数的谐波，128 节点原始计数修正）；编码器初始化按表的启用状态选择 `foc_encoder_init_with_lut`；校准管理器 CAL-9（掩码 32，状态 23–28，失败码 19，结果位 64，分桶复用 CAL-8），空闲静止时按 ID 157 重新初始化；表存在齿槽页第二块（"FBE1"，编码器分辨率与方向，CRC32），PARAM_SAVE 整页重写，CONFIG_ERASE 清除。方案里的滑动平均改为直接取谐波（去掉的成分相同，不衰减编码器 2、3 次谐波）。
+- 协议 ENCODER_LUT_READ 0x56；参数 157–161；CLI `request calibrate --cal-stages encoder`、`encoder-lut-read`；SIL `--encoder-error-rad` 与场景 `encoder-lut`、SIL 测试 `test_encoder_linearization`（位置误差 −97.6%，开关即时生效，断电重启恢复）。
+- 默认镜像 +2,940 B（109,916 B），带参数存储镜像 +3,564 B（115,532 B），RAM +304 B。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 133 项全过；SDK 技术门禁 PASS。证据：[ENC-01](../evidence/2026-11-25-enc-01.md)。protocol README 新增 "Encoder linearization (CAL-9)"，契约第 29 节，firmware/CLI README 更新。

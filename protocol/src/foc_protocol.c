@@ -51,6 +51,7 @@ static bool foc_protocol_known(uint8_t type)
     case FOC_MSG_COMMUTATION_WRITE:
     case FOC_MSG_SET_ZERO:
     case FOC_MSG_COGGING_READ:
+    case FOC_MSG_ENCODER_LUT_READ:
         return true;
     default:
         return false;

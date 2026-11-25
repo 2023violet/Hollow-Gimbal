@@ -81,6 +81,8 @@ enum foc_protocol_message {
     FOC_MSG_SET_ZERO = 0x54,
     /** Read 64 codes of the cogging table from an offset (appended). */
     FOC_MSG_COGGING_READ = 0x55,
+    /** Read 40 knots of the CAL-9 encoder correction from an offset (appended). */
+    FOC_MSG_ENCODER_LUT_READ = 0x56,
 };
 
 /** First response payload byte. MORE is local to the stream parser. */

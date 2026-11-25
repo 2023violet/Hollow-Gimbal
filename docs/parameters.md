@@ -118,3 +118,8 @@ settings record. Semantics, derivations and calibration stages are in the
 | 154 | `cogging-rms` | f32 | A | RO |  |  | CAL-8 table RMS q current. |
 | 155 | `cogging-friction` | f32 | A | RO |  |  | CAL-8 Coulomb friction current (half the forward/backward difference). |
 | 156 | `cogging-consistency` | f32 |  | RO |  |  | CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted. |
+| 157 | `encoder-lut-enable` | u32 |  | RW | 0 … 1 | yes | CAL-9 encoder correction: 1 uses a stored table (applied while DISABLED), 0 the raw encoder. |
+| 158 | `encoder-lut-status` | u32 |  | RO |  |  | CAL-9: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range. |
+| 159 | `encoder-lut-peak` | f32 | rad | RO |  |  | CAL-9 correction peak, mechanical. |
+| 160 | `encoder-lut-rms` | f32 | rad | RO |  |  | CAL-9 correction RMS, mechanical. |
+| 161 | `encoder-lut-consistency` | f32 |  | RO |  |  | CAL-9 correlation of the forward and backward errors; 0.5 or more is accepted. |

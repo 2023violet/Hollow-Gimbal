@@ -112,6 +112,11 @@ PARAMETER_INFO = {
     'cogging-rms': {'id': 154, 'type': 'f32', 'unit': 'A', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 1, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 table RMS q current.'},
     'cogging-friction': {'id': 155, 'type': 'f32', 'unit': 'A', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 1, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 Coulomb friction current (half the forward/backward difference).'},
     'cogging-consistency': {'id': 156, 'type': 'f32', 'unit': 'none', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-8 correlation of the forward and backward shapes; 0.5 or more is accepted.'},
+    'encoder-lut-enable': {'id': 157, 'type': 'u32', 'unit': 'none', 'access': 'rw', 'group': 'serial', 'persist': True, 'unit_code': 0, 'calibration': False, 'min': 0, 'max': 1, 'brief': 'CAL-9 encoder correction: 1 uses a stored table (applied while DISABLED), 0 the raw encoder.'},
+    'encoder-lut-status': {'id': 158, 'type': 'u32', 'unit': 'none', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-9: 0 none, 1 valid, 2 negligible, 3 inconsistent, 4 too few samples, 5 failed, 6 out of range.'},
+    'encoder-lut-peak': {'id': 159, 'type': 'f32', 'unit': 'rad', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 2, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-9 correction peak, mechanical.'},
+    'encoder-lut-rms': {'id': 160, 'type': 'f32', 'unit': 'rad', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 2, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-9 correction RMS, mechanical.'},
+    'encoder-lut-consistency': {'id': 161, 'type': 'f32', 'unit': 'none', 'access': 'ro', 'group': 'commission', 'persist': False, 'unit_code': 0, 'calibration': False, 'min': None, 'max': None, 'brief': 'CAL-9 correlation of the forward and backward errors; 0.5 or more is accepted.'},
 }
 
 # Name -> wire ID.

@@ -62,7 +62,7 @@ static void cogging_clear_bins(struct foc_board_cogging *cogging, unsigned int d
     memset(cogging->count, 0, sizeof cogging->count);
 }
 
-static uint32_t cogging_empty_bins(const int16_t *bins)
+uint32_t foc_board_cogging_empty_bins(const int16_t *bins)
 {
     uint32_t empty = 0U;
     for (unsigned int bin = 0U; bin < COGGING_BINS; ++bin) {
@@ -72,7 +72,7 @@ static uint32_t cogging_empty_bins(const int16_t *bins)
 }
 
 /* Fill empty bins by circular linear interpolation between the nearest filled ones. */
-static bool cogging_fill(int16_t *bins)
+bool foc_board_cogging_fill_bins(int16_t *bins)
 {
     unsigned int first = COGGING_BINS;
     for (unsigned int bin = 0U; bin < COGGING_BINS; ++bin) {
@@ -178,11 +178,11 @@ int foc_board_cogging_step(
         offset = lead;
     }
     if (previous == FOC_BOARD_COGGING_FORWARD && cogging->phase != FOC_BOARD_COGGING_FORWARD) {
-        cogging->empty[0] = cogging_empty_bins(cogging->mean[0]);
+        cogging->empty[0] = foc_board_cogging_empty_bins(cogging->mean[0]);
         memset(cogging->count, 0, sizeof cogging->count);
     }
     if (previous == FOC_BOARD_COGGING_BACKWARD && cogging->phase == FOC_BOARD_COGGING_END) {
-        cogging->empty[1] = cogging_empty_bins(cogging->mean[1]);
+        cogging->empty[1] = foc_board_cogging_empty_bins(cogging->mean[1]);
     }
     *reference_rad = cogging->origin_rad + offset;
     return direction;
@@ -225,10 +225,10 @@ enum foc_board_cogging_status foc_board_cogging_finish(
     int16_t *forward = cogging->mean[0];
     int16_t *backward = cogging->mean[1];
     const uint32_t limit = (uint32_t)(FOC_BOARD_COGGING_MAX_EMPTY * (float)COGGING_BINS);
-    cogging->empty[0] = cogging_empty_bins(forward);
-    cogging->empty[1] = cogging_empty_bins(backward);
-    if (cogging->empty[0] > limit || cogging->empty[1] > limit || !cogging_fill(forward) ||
-        !cogging_fill(backward)) {
+    cogging->empty[0] = foc_board_cogging_empty_bins(forward);
+    cogging->empty[1] = foc_board_cogging_empty_bins(backward);
+    if (cogging->empty[0] > limit || cogging->empty[1] > limit ||
+        !foc_board_cogging_fill_bins(forward) || !foc_board_cogging_fill_bins(backward)) {
         cogging->status = FOC_BOARD_COGGING_SAMPLES;
         return cogging->status;
     }

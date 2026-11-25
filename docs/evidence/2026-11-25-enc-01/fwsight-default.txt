@@ -1,0 +1,47 @@
+Base    falconfoc-v2-at32f415.elf  ea6e73eb1432
+Target  falconfoc-v2-at32f415.elf  389807eb2c66
+
+Memory
+  Nonvolatile / load image: 106976 bytes → 109916 bytes   delta +2940 [exact]
+  Runtime RAM:              21836 bytes → 22132 bytes   delta +296 [exact]
+  Comparability:            exact
+  Base side states:         nonvolatile exact / RAM exact
+  Target side states:       nonvolatile exact / RAM exact
+
+Counts
+  Sections  +0 -0 ~14 (0 rows whose name repeats)
+  Symbols   +887 -858 ~553 (1730 rows whose key repeats)
+  Identical, so left out of the tables: 5 section(s), 193 symbol(s)
+
+Top section growth (Changed rows)
+      +2840  .text                        106200 bytes  [Changed]
+       +464  .symtab                      26144 bytes  [Changed]
+       +322  .strtab                      14424 bytes  [Changed]
+       +296  .bss                         21020 bytes  [Changed]
+       +100  .rodata                      3248 bytes  [Changed]
+
+Largest added sections (absence, never 0)
+  none
+
+Top symbol growth (Changed rows)
+       +688  foc_board_calibration_poll   7356 bytes  [Changed]
+       +192  foc_board_calibration_start  1080 bytes  [Changed]
+       +182  foc_serial_dispatch          2862 bytes  [Changed]
+       +100  foc_parameter_table          2260 bytes  [Changed]
+        +72  cal_serial_commission        224 bytes  [Changed]
+
+Largest added symbols (absence, never 0)
+          -  foc_board_encoder_lut_fit    1068 bytes  [Added]
+          -  foc_board_encoder_lut_state  280 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_inverse_park_cached      276 bytes  [Added]
+          -  foc_board_cogging_fill_bins  222 bytes  [Added]
+
+Object / module attribution
+  unavailable
+
+Warnings
+  [SYMBOL-AMBIGUOUS] 1730 symbol row(s) repeat a name, kind and binding combination on one or both sides and were left unpaired; a row position is not an identity
+diagnostics: old map parsed with the gnu_ld adapter
+diagnostics: new map parsed with the gnu_ld adapter
+diagnostics: operation op-4f88-18eb55f268ee6f88

@@ -121,8 +121,10 @@
  * and the slack added to its nominal time before TIMEOUT. */
 #define CAL_COGGING_TRAVEL_RAD \
     (3.0f * FOC_BOARD_COGGING_LEAD_RAD + 2.0f * (CAL_TWO_PI + FOC_BOARD_COGGING_MARGIN_RAD))
-#define CAL_COGGING_SLACK_US   5000000U
-#define CAL_COAST_MAX_RESIDUAL 0.1
+#define CAL_COGGING_SLACK_US    5000000U
+/* CAL-9: rotor speed of the field sweep in rad/s. */
+#define CAL_ENCODER_SPEED_RAD_S 1.0f
+#define CAL_COAST_MAX_RESIDUAL  0.1
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -152,8 +154,13 @@ cal_fail(struct foc_board_calibration *cal, enum foc_board_cal_failure failure, 
     if ((cal->state >= FOC_BOARD_CAL_DRIVE_MODE && cal->state <= FOC_BOARD_CAL_SWEEP) ||
         (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
         cal->state == FOC_BOARD_CAL_INERTIA ||
-        (cal->state >= FOC_BOARD_CAL_COGGING_ARM && cal->state <= FOC_BOARD_CAL_COGGING)) {
+        (cal->state >= FOC_BOARD_CAL_COGGING_ARM && cal->state <= FOC_BOARD_CAL_COGGING) ||
+        (cal->state >= FOC_BOARD_CAL_ENCODER_ARM && cal->state <= FOC_BOARD_CAL_ENCODER)) {
         foc_runtime_revoke_command(cal->runtime);
+    }
+    if (cal->state >= FOC_BOARD_CAL_ENCODER_MODE && cal->state <= FOC_BOARD_CAL_ENCODER &&
+        cal->encoder_lut != NULL) {
+        cal->encoder_lut->status = FOC_BOARD_ENCODER_LUT_FAILED;
     }
     if (cal->state >= FOC_BOARD_CAL_COGGING_MODE && cal->state <= FOC_BOARD_CAL_COGGING &&
         cal->cogging != NULL) {
@@ -1498,6 +1505,211 @@ static void cal_tune(struct foc_board_calibration *cal, uint32_t now_us)
 
 /* Public Functions ------------------------------------------------------------- */
 
+/* Re-initialize so the board encoder takes the table's active state; the instance must be
+ * quiet. The calibration and tuning are kept. */
+static int cal_encoder_apply(struct foc_board_calibration *cal, bool active, uint32_t now_us)
+{
+    struct foc_runtime_tuning tuning;
+    if (foc_runtime_read_tuning(cal->runtime, &tuning) != FOC_RUNTIME_OK) {
+        return FOC_RUNTIME_ERR_INPUT;
+    }
+    const bool previous = cal->encoder_lut->active;
+    cal->encoder_lut->active = active;
+    const int status =
+        cal_reconfigure(cal, cal->snapshot.accepted ? &cal->snapshot : NULL, &tuning, now_us);
+    if (status != FOC_RUNTIME_OK) {
+        cal->encoder_lut->active = previous;
+    }
+    return status;
+}
+
+/* Idle: follow ID 157 (and a cleared table) once the drive is quiet. */
+static void cal_encoder_follow(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (cal->encoder_lut == NULL) {
+        return;
+    }
+    const bool wanted =
+        cal->serial->encoder.lut_enabled != 0U && cal->encoder_lut->counts_per_revolution != 0U;
+    struct foc_runtime_snapshot view;
+    if (wanted == cal->encoder_lut->active ||
+        foc_runtime_read_snapshot(cal->runtime, &view) != FOC_RUNTIME_OK || !cal_quiet(&view) ||
+        fabsf(view.mechanical_rad_s) > CAL_STILL_RAD_S) {
+        return;
+    }
+    (void)cal_encoder_apply(cal, wanted, now_us);
+}
+
+/* CAL-9 start: the raw encoder for the acquisition, then CALIBRATION mode. */
+static int cal_encoder_start(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    if (cal->encoder_lut == NULL || cal->cogging == NULL) {
+        return FOC_PROTO_NOT_SUPPORTED;
+    }
+    if (foc_board_calibration_gate(cal) != FOC_PROTO_OK || !cal->runtime->config.motion.enabled ||
+        cal->runtime->config.motion.rotor.pole_pairs < 2U) {
+        return FOC_PROTO_BAD_STATE;
+    }
+    if (cal->encoder_lut->active && cal_encoder_apply(cal, false, now_us) != FOC_RUNTIME_OK) {
+        return FOC_PROTO_INTERNAL_ERROR;
+    }
+    cal->failure = FOC_BOARD_CAL_FAILURE_NONE;
+    cal->failed_state = FOC_BOARD_CAL_IDLE;
+    cal->admission_failure = FOC_CALIBRATION_ADMISSION_NONE;
+    cal->lifecycle_sequence = 0U;
+    cal->last_us = now_us;
+    cal->stages = FOC_BOARD_CAL_STAGE_ENCODER;
+    cal->committed = 0U;
+    cal->mode_claimed = false;
+    cal->failing = false;
+    cal->voltage_v = 0.0f;
+    cal->encoder_lut->status = FOC_BOARD_ENCODER_LUT_FAILED;
+    cal_enter(cal, FOC_BOARD_CAL_ENCODER_MODE, now_us);
+    return FOC_PROTO_ACCEPTED;
+}
+
+/* CAL-9 after the drive stopped: fit, then the board encoder takes the new table. */
+static void cal_encoder_finish(struct foc_board_calibration *cal, uint32_t now_us)
+{
+    const enum foc_board_encoder_lut_status status = foc_board_encoder_lut_fit(
+        cal->encoder_lut,
+        cal->cogging,
+        cal->runtime->config.motion.rotor.pole_pairs,
+        cal->encoder->sensor.config.counts_per_revolution
+    );
+    if (status != FOC_BOARD_ENCODER_LUT_VALID && status != FOC_BOARD_ENCODER_LUT_NEGLIGIBLE) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_ENCODER, now_us);
+        return;
+    }
+    const bool valid = status == FOC_BOARD_ENCODER_LUT_VALID;
+    if (valid) {
+        cal->serial->encoder.lut_enabled = 1U;
+        cal->committed = FOC_BOARD_CAL_STAGE_ENCODER;
+    }
+    cal->serial->dirty = true;
+    /* The re-initialization ends CALIBRATION mode; RESTORE then confirms CURRENT. */
+    if (cal_encoder_apply(cal, valid, now_us) != FOC_RUNTIME_OK) {
+        cal_fail(cal, FOC_BOARD_CAL_FAILURE_APPLY, now_us);
+        return;
+    }
+    cal->lifecycle_sequence = 0U;
+    cal_enter(cal, FOC_BOARD_CAL_RESTORE, now_us);
+}
+
+/* CAL-9 states: CALIBRATION mode, ARM and START at the rotor's electrical angle, a hold
+ * current ramp, the field sweep, the stop. */
+static void cal_encoder(
+    struct foc_board_calibration *cal,
+    const struct foc_runtime_snapshot *view,
+    float dt_s,
+    uint32_t now_us
+)
+{
+    const float pole_pairs = (float)cal->runtime->config.motion.rotor.pole_pairs;
+    const float sign =
+        cal->encoder->sensor.config.direction == FOC_ENCODER_DIRECTION_REVERSED ? -1.0f : 1.0f;
+    switch (cal->state) {
+    case FOC_BOARD_CAL_ENCODER_MODE:
+        /* The field starts at the rotor's electrical angle: the hold does not jerk it. */
+        cal->theta_rad = pole_pairs * view->mechanical_rad +
+            cal->runtime->config.motion.rotor.electrical_offset_rad;
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_SET_MODE,
+            FOC_RUNTIME_MODE_CALIBRATION,
+            FOC_BOARD_CAL_ENCODER_ARM,
+            now_us
+        );
+        if (cal->state == FOC_BOARD_CAL_ENCODER_ARM) {
+            cal->mode_claimed = true;
+        }
+        break;
+    case FOC_BOARD_CAL_ENCODER_ARM:
+        cal_drive(cal, now_us);
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_ARM,
+            FOC_RUNTIME_MODE_CALIBRATION,
+            FOC_BOARD_CAL_ENCODER_START,
+            now_us
+        );
+        break;
+    case FOC_BOARD_CAL_ENCODER_START:
+        cal_drive(cal, now_us);
+        cal_step_lifecycle(
+            cal,
+            FOC_RUNTIME_ACTION_START,
+            FOC_RUNTIME_MODE_CALIBRATION,
+            FOC_BOARD_CAL_ENCODER_ALIGN,
+            now_us
+        );
+        break;
+    case FOC_BOARD_CAL_ENCODER_ALIGN: {
+        const float current = view->current_valid ? sqrtf(
+                                                        view->measured_id_a * view->measured_id_a +
+                                                        view->measured_iq_a * view->measured_iq_a
+                                                    )
+                                                  : 0.0f;
+        const float limit = cal->runtime->pipeline.current.config.pwm.voltage_limit_v;
+        if (current < CAL_ALIGN_CURRENT_A && cal->voltage_v < limit) {
+            cal->voltage_v = fminf(cal->voltage_v + CAL_RAMP_V_PER_S * dt_s, limit);
+            cal->state_us = now_us;
+        } else if (current < CAL_MIN_CURRENT_A) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_CURRENT, now_us);
+            break;
+        } else if (now_us - cal->state_us >= CAL_SETTLE_US) {
+            foc_board_cogging_begin(
+                cal->cogging,
+                cal->theta_rad / pole_pairs,
+                CAL_ENCODER_SPEED_RAD_S
+            );
+            cal->cogging_start_us = now_us;
+            cal_enter(cal, FOC_BOARD_CAL_ENCODER, now_us);
+        }
+        cal_drive(cal, now_us);
+        break;
+    }
+    case FOC_BOARD_CAL_ENCODER: {
+        float reference;
+        const uint32_t elapsed_us = now_us - cal->cogging_start_us;
+        const int direction = foc_board_cogging_step(cal->cogging, elapsed_us, &reference);
+        if (view->sensor_valid) {
+            /* Field reference minus reading, in the raw encoder frame, by raw angle. */
+            const float field = cal->theta_rad / pole_pairs;
+            foc_board_cogging_sample(
+                cal->cogging,
+                direction,
+                view->sensor_us,
+                sign * view->mechanical_rad,
+                sign * (field - view->mechanical_rad)
+            );
+        }
+        cal->theta_rad = reference * pole_pairs;
+        if (cal->cogging->phase == FOC_BOARD_COGGING_END) {
+            foc_runtime_revoke_command(cal->runtime);
+            cal_enter(cal, FOC_BOARD_CAL_ENCODER_STOP, now_us);
+        } else if (
+            elapsed_us > (uint32_t)(CAL_COGGING_TRAVEL_RAD / CAL_ENCODER_SPEED_RAD_S * 1.0e6f) +
+                CAL_COGGING_SLACK_US
+        ) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+        } else {
+            cal_drive(cal, now_us);
+        }
+        break;
+    }
+    case FOC_BOARD_CAL_ENCODER_STOP:
+        if (cal_quiet(view)) {
+            cal_encoder_finish(cal, now_us);
+        } else if (now_us - cal->state_us > CAL_STOP_TIMEOUT_US) {
+            cal_fail(cal, FOC_BOARD_CAL_FAILURE_TIMEOUT, now_us);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 /* CAL-8 hold or sweep reference: a POSITION command on the shared publication sequence. */
 static void cal_cogging_command(struct foc_board_calibration *cal, float reference, uint32_t now_us)
 {
@@ -1712,6 +1924,21 @@ int foc_board_calibration_start(
     unsigned int stages
 )
 {
+    if (stages == FOC_BOARD_CAL_STAGE_ENCODER) {
+        if (cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
+            cal->output->backend == NULL) {
+            return FOC_PROTO_OUTPUT_LOCKED;
+        }
+        if (foc_board_calibration_busy(cal)) {
+            return FOC_PROTO_BUSY;
+        }
+        struct foc_runtime_snapshot quiet;
+        if (foc_runtime_read_snapshot(cal->runtime, &quiet) != FOC_RUNTIME_OK ||
+            !cal_quiet(&quiet) || fabsf(quiet.mechanical_rad_s) > CAL_STILL_RAD_S) {
+            return FOC_PROTO_BAD_STATE;
+        }
+        return cal_encoder_start(cal, now_us);
+    }
     if (stages == FOC_BOARD_CAL_STAGE_COGGING) {
         if (cal->serial->target_policy != FOC_SERIAL_TARGET_VIRTUAL_ONLY &&
             cal->output->backend == NULL) {
@@ -1860,6 +2087,16 @@ void foc_board_calibration_attach_cogging(
     }
 }
 
+void foc_board_calibration_attach_encoder_lut(
+    struct foc_board_calibration *calibration,
+    struct foc_board_encoder_lut *encoder_lut
+)
+{
+    if (calibration != NULL) {
+        calibration->encoder_lut = encoder_lut;
+    }
+}
+
 void foc_board_calibration_attach_phase_voltage(
     struct foc_board_calibration *calibration,
     foc_board_phase_voltage_read read,
@@ -1968,10 +2205,20 @@ int foc_board_calibration_reset(struct foc_board_calibration *cal, uint32_t now_
     cal->serial->can = foc_serial_can_defaults();
     cal->serial->thermal = foc_serial_thermal_defaults();
     cal->serial->cogging = foc_serial_cogging_defaults();
+    cal->serial->encoder = foc_serial_encoder_defaults();
     if (cal->cogging != NULL) {
         /* The boot tuning switched compensation off before the table is cleared. */
         foc_board_cogging_init(cal->cogging);
         cal->cogging->dirty = true;
+    }
+    if (cal->encoder_lut != NULL) {
+        /* Cleared after the re-initialization above, which used the raw encoder only if the
+         * table was inactive: re-initialize again when it was active. */
+        const bool was_active = cal->encoder_lut->active;
+        *cal->encoder_lut = (struct foc_board_encoder_lut){.dirty = true};
+        if (was_active) {
+            (void)cal_reconfigure(cal, boot, &cal->boot_tuning, now_us);
+        }
     }
     cal->snapshot = boot != NULL ? *boot : (struct foc_calibration_snapshot){0};
     cal->active_source = boot != NULL ? FOC_BOARD_CAL_SOURCE_SUPPLY : FOC_BOARD_CAL_SOURCE_BOOT;
@@ -2006,6 +2253,7 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
 {
     if (!foc_board_calibration_busy(cal)) {
         cal_auto_zero(cal, now_us);
+        cal_encoder_follow(cal, now_us);
         return;
     }
     const float dt_s = (float)(now_us - cal->last_us) * 1.0e-6f;
@@ -2020,7 +2268,8 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     }
     const bool driving = (cal->state >= FOC_BOARD_CAL_ALIGN && cal->state <= FOC_BOARD_CAL_SWEEP) ||
         (cal->state >= FOC_BOARD_CAL_RL_D && cal->state <= FOC_BOARD_CAL_FLUX) ||
-        cal->state == FOC_BOARD_CAL_INERTIA || cal->state == FOC_BOARD_CAL_COGGING;
+        cal->state == FOC_BOARD_CAL_INERTIA || cal->state == FOC_BOARD_CAL_COGGING ||
+        cal->state == FOC_BOARD_CAL_ENCODER_ALIGN || cal->state == FOC_BOARD_CAL_ENCODER;
     if (driving && view.state != FOC_SAFE_STATE_RUNNING) {
         cal_fail(cal, FOC_BOARD_CAL_FAILURE_DRIVE, now_us);
         return;
@@ -2196,6 +2445,14 @@ void foc_board_calibration_poll(struct foc_board_calibration *cal, uint32_t now_
     case FOC_BOARD_CAL_COGGING_STOP:
         cal_cogging(cal, &view, now_us);
         break;
+    case FOC_BOARD_CAL_ENCODER_MODE:
+    case FOC_BOARD_CAL_ENCODER_ARM:
+    case FOC_BOARD_CAL_ENCODER_START:
+    case FOC_BOARD_CAL_ENCODER_ALIGN:
+    case FOC_BOARD_CAL_ENCODER:
+    case FOC_BOARD_CAL_ENCODER_STOP:
+        cal_encoder(cal, &view, dt_s, now_us);
+        break;
     case FOC_BOARD_CAL_RESTORE:
         if (cal->failing && !cal_quiet(&view)) {
             if (now_us - cal->state_us > CAL_FAIL_QUIET_US) {
@@ -2281,6 +2538,10 @@ static bool cal_serial_read(const void *context, struct foc_serial_calibration_v
                       (cal->mech_result.usable ? FOC_BOARD_CAL_RESULT_INERTIA : 0U) |
                       (cal->cogging != NULL && cal->cogging->status == FOC_BOARD_COGGING_VALID
                            ? FOC_BOARD_CAL_RESULT_COGGING
+                           : 0U) |
+                      (cal->encoder_lut != NULL &&
+                               cal->encoder_lut->status == FOC_BOARD_ENCODER_LUT_VALID
+                           ? FOC_BOARD_CAL_RESULT_ENCODER
                            : 0U)),
         .active_source = cal->active_source,
         .ring_high_water = cal->ring_high_water,
@@ -2345,6 +2606,25 @@ static bool cal_serial_commission(const void *context, struct foc_serial_commiss
         .cogging_rms_a = cal->cogging != NULL ? cal->cogging->rms_a : 0.0f,
         .cogging_friction_a = cal->cogging != NULL ? cal->cogging->friction_a : 0.0f,
         .cogging_consistency = cal->cogging != NULL ? cal->cogging->consistency : 0.0f,
+        .encoder_status = cal->encoder_lut != NULL ? (uint8_t)cal->encoder_lut->status : 0U,
+        .encoder_peak_rad = cal->encoder_lut != NULL ? cal->encoder_lut->peak_rad : 0.0f,
+        .encoder_rms_rad = cal->encoder_lut != NULL ? cal->encoder_lut->rms_rad : 0.0f,
+        .encoder_consistency = cal->encoder_lut != NULL ? cal->encoder_lut->consistency : 0.0f,
+    };
+    return true;
+}
+
+static bool cal_serial_encoder_lut(const void *context, struct foc_serial_encoder_lut_view *view)
+{
+    const struct foc_board_calibration *cal = context;
+    if (cal->encoder_lut == NULL) {
+        return false;
+    }
+    *view = (struct foc_serial_encoder_lut_view){
+        .knots = FOC_BOARD_ENCODER_LUT_KNOTS,
+        .counts_per_revolution = cal->encoder_lut->counts_per_revolution,
+        .active = cal->encoder_lut->active,
+        .offsets = cal->encoder_lut->offsets,
     };
     return true;
 }
@@ -2369,6 +2649,7 @@ struct foc_serial_calibration foc_board_calibration_serial(
         .gate = cal_serial_gate,
         .commission = cal_serial_commission,
         .reset = cal_serial_reset,
+        .encoder_lut = cal_serial_encoder_lut,
     };
 }
 

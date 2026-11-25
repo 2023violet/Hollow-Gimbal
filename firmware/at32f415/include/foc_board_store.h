@@ -40,6 +40,7 @@
 #include <stdint.h>
 
 struct foc_board_cogging;
+struct foc_board_encoder_lut;
 
 /* Public Types ---------------------------------------------------------------- */
 
@@ -50,6 +51,9 @@ enum foc_board_store_limits {
     FOC_BOARD_STORE_COGGING_SLOT = 2,
     /** Cogging page: 28-byte header, then one int8 code per bin. */
     FOC_BOARD_STORE_COGGING_BYTES = 28 + FOC_RUNTIME_COGGING_BINS,
+    /** CAL-9 block in the same page: 24-byte header, then 128 int16 offsets. */
+    FOC_BOARD_STORE_ENCODER_OFFSET = 1280,
+    FOC_BOARD_STORE_ENCODER_BYTES = 24 + 2 * 128,
     /** Largest format-9 record: header, CRC and every entry (parameters, identity,
      * calibration); the encoded length may be smaller. */
     FOC_BOARD_STORE_RECORD_BYTES = 20 + 4 + 8 * (FOC_PARAMETER_PERSIST_COUNT + 8 + 1 + 7),
@@ -94,6 +98,8 @@ struct foc_board_settings {
     struct foc_serial_thermal_settings thermal;
     /** CAL-8 sweep settings (IDs 150, 151). */
     struct foc_serial_cogging_settings cogging;
+    /** CAL-9 switch (ID 157). */
+    struct foc_serial_encoder_settings encoder;
     /** An applied on-MCU rotor calibration (CAL-1/CAL-2) to restore first. */
     bool calibration_present;
     struct foc_calibration_snapshot calibration;
@@ -147,6 +153,10 @@ struct foc_board_persistence {
     struct foc_board_cogging *cogging;
     /** True when boot restore loaded a cogging table. */
     bool cogging_restored;
+    /** CAL-9 table boot restore loads and PARAM_SAVE stores with the cogging page; may be NULL. */
+    struct foc_board_encoder_lut *encoder_lut;
+    /** True when boot restore loaded an encoder correction. */
+    bool encoder_lut_restored;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -165,6 +175,18 @@ size_t foc_board_store_encode(const struct foc_board_store_identity *identity,
 int foc_board_store_cogging_save(const struct foc_board_store_driver *driver,
                                  const struct foc_board_store_identity *identity,
                                  const struct foc_runtime_cogging_table *table);
+
+/** Rewrite the page with both blocks; an empty table or a NULL one leaves its block erased. */
+int foc_board_store_page_save(const struct foc_board_store_driver *driver,
+                              const struct foc_board_store_identity *identity,
+                              const struct foc_runtime_cogging_table *cogging,
+                              const struct foc_board_encoder_lut *encoder);
+
+/** Load the CAL-9 block; OK only for an intact block of this encoder. Otherwise the table
+ * is emptied. */
+int foc_board_store_encoder_lut_load(const struct foc_board_store_driver *driver,
+                                     const struct foc_board_store_identity *identity,
+                                     struct foc_board_encoder_lut *table);
 
 /** Load the cogging page; OK only for an intact page of the same pole pairs and encoder.
  * Any other result leaves the table empty. */

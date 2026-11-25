@@ -27,6 +27,7 @@ MESSAGES = {
     "save": 0x32, "erase-config": 0x33, "telemetry": 0x40, "stream": 0x41,
     "calibrate": 0x50, "calibrate-read": 0x51, "calibrate-abort": 0x52,
     "commutation-write": 0x53, "set-zero": 0x54, "cogging-read": 0x55,
+    "encoder-lut-read": 0x56,
 }
 RESULTS = [
     "OK", "ACCEPTED", "APPLIED", "BAD_FRAME", "BAD_CRC",
@@ -61,15 +62,17 @@ def fault_names(mask):
 CAL_STATES = ["IDLE", "ADC_ZERO", "DRIVE_MODE", "DRIVE_ARM", "DRIVE_START", "ALIGN", "SWEEP",
               "DRIVE_STOP", "APPLY", "DONE", "FAILED", "RL_D", "RL_Q", "FLUX", "TUNE", "RESTORE",
               "INERTIA", "COAST", "COGGING_MODE", "COGGING_ARM", "COGGING_START", "COGGING",
-              "COGGING_STOP"]
+              "COGGING_STOP", "ENCODER_MODE", "ENCODER_ARM", "ENCODER_START", "ENCODER_ALIGN",
+              "ENCODER", "ENCODER_STOP"]
 CAL_FAILURES = ["NONE", "STATE", "ADC", "LIFECYCLE", "DRIVE", "CURRENT", "SENSOR", "ROTOR",
                 "OFFSET", "ADMISSION", "APPLY", "ABORTED", "TIMEOUT", "RL", "FLUX", "TUNE",
-                "CAPTURE", "INERTIA", "COGGING"]
+                "CAPTURE", "INERTIA", "COGGING", "ENCODER"]
 CAL_STAGES = {"all": 3, "rotor": 1, "electrical": 2, "zero": 4, "mechanical": 8,
-              "electrical-mechanical": 10, "all-mechanical": 11, "cogging": 16}
+              "electrical-mechanical": 10, "all-mechanical": 11, "cogging": 16,
+              "encoder": 32}
 CAL_SOURCES = ["BOOT", "RUN", "STORAGE", "HOST", "SUPPLY"]
 CAL_RESULT_BITS = (("rotor", 1), ("rl", 2), ("flux", 4), ("pi", 8), ("inertia", 16),
-                   ("cogging", 32))
+                   ("cogging", 32), ("encoder", 64))
 COGGING_STATUS = ["NONE", "VALID", "NEGLIGIBLE", "INCONSISTENT", "SAMPLES", "FAILED", "RANGE"]
 STORE_STATES = ["UNAVAILABLE", "EMPTY", "LOADED", "INVALID_RECORD", "IDENTITY_MISMATCH",
                 "VALUE_REJECTED", "IO_ERROR"]
@@ -371,6 +374,12 @@ def describe(frame):
         bins, scale, offset = struct.unpack_from("<HfH", body, 1)
         result.update(bins=bins, scale_a=scale, offset=offset,
                       codes=list(struct.unpack_from(f"<{body[9]}b", body, 10)))
+    elif frame.type == 0x56 and body[0] == 0:
+        if len(body) < 11 or len(body) != 11 + 2 * body[10]:
+            raise ValueError("BAD_RESPONSE")
+        knots, counts, active, offset = struct.unpack_from("<HIBH", body, 1)
+        result.update(knots=knots, counts_per_revolution=counts, active=bool(active),
+                      offset=offset, offsets=list(struct.unpack_from(f"<{body[10]}h", body, 11)))
     elif frame.type == 0x54 and body[0] == 2:
         if len(body) != 5:
             raise ValueError("BAD_RESPONSE")
@@ -917,7 +926,7 @@ SIL_SCENARIOS = ("current", "velocity", "position", "tuning", "recover", "persis
                  "calibrate-persist", "calibrate-faults", "protect", "profile", "swap", "frame",
                  "trajectory", "inertia", "rotor-range", "driver-fault", "coast",
                  "dead-time", "dead-time-comp", "can", "can-multi", "mit", "thermal",
-                 "cogging")
+                 "cogging", "encoder-lut")
 # Scenario defaults: reference, virtual duration in µs, telemetry key, plant key, firmware key,
 # tail tolerance and plant/firmware agreement tolerance.
 SIL_DEFAULTS = {
@@ -1334,6 +1343,20 @@ def cogging_table(client):
     current = [scale * code for code in codes]
     peak = max((abs(value) for value in current), default=0.0)
     return {"bins": bins, "scale_a": scale, "peak_a": peak, "codes": codes, "iq_a": current}
+
+
+def encoder_lut_table(client):
+    """Read the whole CAL-9 correction (ENCODER_LUT_READ chunks): knots, counts per turn
+    (0: none), whether the encoder uses it, and the offsets in raw counts."""
+    offsets, knots, counts, active = [], None, 0, False
+    while knots is None or len(offsets) < knots:
+        frame = describe(client.call("encoder-lut-read", struct.pack("<H", len(offsets))))
+        if frame.get("result") != "OK":
+            raise ValueError(f"ENCODER_LUT_READ {frame.get('result')}")
+        knots, counts, active = frame["knots"], frame["counts_per_revolution"], frame["active"]
+        offsets += frame["offsets"]
+    return {"knots": knots, "counts_per_revolution": counts, "active": active,
+            "offsets": offsets}
 
 
 def _harmonic(values, order):
@@ -2627,6 +2650,133 @@ def run_sil_cogging(simulator, base_arguments, flash_path, json_path=None):
     return summary
 
 
+def run_sil_encoder_lut(simulator, base_arguments, flash_path, json_path=None):
+    """CAL-9 encoder linearization (parameter contract section 29) on a SIL encoder with a
+    0.01 rad 1st and 0.004 rad 2nd harmonic error in its raw angle and a plant with 84-cycle
+    cogging (12 x 7 pole pairs): the field sweep fits the negative error, ignores the
+    cogging lag, the position error against the plant drops, and the table survives a power
+    cycle. Nothing here is physical evidence."""
+
+    flash_path = pathlib.Path(flash_path)
+    checks, metrics = {}, {}
+    e1, p1, e2, p2 = 0.01, 0.4, 0.004, -1.0
+    counts = 65536
+
+    def boot(fresh):
+        arguments = list(base_arguments) + [
+            "--encoder-error-rad", f"{e1},{p1},{e2},{p2}", "--cogging-nm", "0.004,84,0.3",
+            "--flash", str(flash_path)]
+        transport = SimulatorTransport(simulator, arguments)
+        client = Client(transport)
+        client.hello()
+        session = SilSession(client, transport)
+        session.status()
+        if fresh:
+            session.tune("command-lease-us", 50000)
+            assert commission(client) == "APPLIED"
+        return transport, session
+
+    def position_error(session):
+        """Spin one turn at 2 rad/s; the firmware position against the plant's, after the
+        frame sign and the constant offset, as an RMS."""
+        session.metadata.clear()
+        session.lifecycle("set-mode", SIL_STATE_DISABLED, mode="velocity")
+        steps, _ = session.run("velocity", 2.0, 4500000)
+        session.stop()
+        _wait_still(session)
+        records = [r for r in session.sil_records() if r["state"] == SIL_STATE_RUNNING]
+        records = records[len(records) // 3:]
+        if len(records) < 10:
+            return {"steps": steps, "rms_rad": None}
+        plant = [r["plant_position_rad"] for r in records]
+        firmware = [r["firmware_position_rad"] for r in records]
+        sign = 1.0 if (plant[-1] - plant[0]) * (firmware[-1] - firmware[0]) > 0 else -1.0
+        difference = [f - sign * p for f, p in zip(firmware, plant)]
+        mean = sum(difference) / len(difference)
+        rms = math.sqrt(sum((d - mean) ** 2 for d in difference) / len(difference))
+        return {"steps": steps, "rms_rad": rms, "samples": len(records),
+                "turns": abs(plant[-1] - plant[0]) / (2.0 * math.pi)}
+
+    if flash_path.exists():
+        flash_path.unlink()
+
+    # 1. Before: the raw encoder.
+    transport, session = boot(True)
+    gains = [session.tune("velocity-kp", 0.5), session.tune("velocity-ki", 10.0)]
+    before = position_error(session)
+    metrics["before"] = {"gains": gains, **before}
+
+    # 2. CAL-9.
+    _wait_still(session)
+    started = session.call("calibrate", bytes([32]))["result"]
+    view = None
+    for _ in range(400000):
+        view = session.call("calibrate-read", quiet=True)
+        if view["calibration_state"] in ("DONE", "FAILED"):
+            break
+    result = {name: session.read(name) for name in (
+        "encoder-lut-status", "encoder-lut-peak", "encoder-lut-rms", "encoder-lut-consistency",
+        "encoder-lut-enable")}
+    table = encoder_lut_table(session.client)
+    expected = [-(e1 * math.sin(2 * math.pi * k / table["knots"] + p1)
+                  + e2 * math.sin(4 * math.pi * k / table["knots"] + p2)) * counts / (2 * math.pi)
+                for k in range(table["knots"])]
+    worst = max(abs(a - b) for a, b in zip(table["offsets"], expected))
+    peak = max(abs(v) for v in expected)
+    metrics["calibration"] = {"started": started, "state": view["calibration_state"],
+                              "failure": view["calibration_failure"],
+                              "results": view.get("results_present"), **result,
+                              "active": table["active"], "worst_knot_counts": worst,
+                              "expected_peak_counts": peak}
+    checks["calibration_done"] = (started == "ACCEPTED" and view["calibration_state"] == "DONE"
+                                  and result["encoder-lut-status"] == 1
+                                  and result["encoder-lut-enable"] == 1 and table["active"]
+                                  and "encoder" in (view.get("results_present") or []))
+    checks["table_matches_injected_error"] = (worst < 0.15 * peak
+                                              and result["encoder-lut-consistency"] > 0.9)
+
+    # 3. After: the corrected encoder.
+    after = position_error(session)
+    metrics["after"] = after
+    checks["position_error_reduced"] = (before["rms_rad"] is not None and after["rms_rad"] is not None
+                                        and after["rms_rad"] < 0.3 * before["rms_rad"])
+    # Switching it off returns the raw encoder.
+    off = describe(session.client.call(
+        "param-write", parameter_write(PARAMETERS["encoder-lut-enable"], "u32", 0)))["result"]
+    for _ in range(200):
+        session.status()
+    inactive = not encoder_lut_table(session.client)["active"]
+    on = describe(session.client.call(
+        "param-write", parameter_write(PARAMETERS["encoder-lut-enable"], "u32", 1)))["result"]
+    for _ in range(200):
+        session.status()
+    active = encoder_lut_table(session.client)["active"]
+    metrics["switch"] = {"off": off, "inactive": inactive, "on": on, "active": active}
+    checks["switch_applies"] = off == "APPLIED" and inactive and on == "APPLIED" and active
+    saved = session.call("save")["result"]
+    transport.__exit__()
+
+    # 4. Power cycle.
+    transport, session = boot(False)
+    restored = encoder_lut_table(session.client)
+    metrics["power_cycle"] = {"save": saved, "active": restored["active"],
+                              "same_table": restored["offsets"] == table["offsets"]}
+    checks["survives_power_cycle"] = (saved == "APPLIED" and restored["active"]
+                                      and restored["offsets"] == table["offsets"])
+    transport.__exit__()
+
+    passed = all(checks.values())
+    summary = {"kind": "summary", "demo": "board1-sil-encoder-lut", "scenario": "encoder-lut",
+               "status": "SIL_PASS" if passed else "SIL_FAIL", "simulated": True,
+               "physical_applied": False, "checks": checks,
+               "failed_checks": sorted(name for name, value in checks.items() if not value),
+               "metrics": metrics}
+    if json_path:
+        pathlib.Path(json_path).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(json.dumps(summary, allow_nan=False))
+    return summary
+
+
 def run_sil_coast(simulator, base_arguments, json_path=None):
     """Coast check after CAL-4 (parameter contract section 22): the drive spins up, the bridge
     turns off and the phase-voltage dividers (PA1-PA3) see the EMF alone, free of Rs, dead
@@ -3879,7 +4029,7 @@ def main():
     parser.add_argument(
         "action",
         choices=["encode", "decode", "vectors", "request", "demo", "virtual-demo", "sil-demo",
-                 "cogging-read",
+                 "cogging-read", "encoder-lut-read",
                  "calibrate", "motor-setup", "can"],
     )
     parser.add_argument("message", nargs="?", choices=sorted(MESSAGES))
@@ -4130,6 +4280,12 @@ def main():
                 summary = run_sil_coast(os.path.abspath(args.simulator), simulator_arguments,
                                         args.json)
                 return 0 if summary["status"] == "SIL_PASS" else 3
+            if args.action == "sil-demo" and args.sil_scenario == "encoder-lut":
+                flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
+                    "sil-encoder-lut-flash.bin"))
+                summary = run_sil_encoder_lut(os.path.abspath(args.simulator), simulator_arguments,
+                                              flash, args.json)
+                return 0 if summary["status"] == "SIL_PASS" else 3
             if args.action == "sil-demo" and args.sil_scenario == "cogging":
                 flash = args.sil_flash or str(pathlib.Path(args.simulator).resolve().with_name(
                     "sil-cogging-flash.bin"))
@@ -4213,6 +4369,9 @@ def main():
                 hello = client.hello()
                 if args.action == "cogging-read":
                     print(json.dumps(cogging_table(client), allow_nan=False))
+                    return 0
+                if args.action == "encoder-lut-read":
+                    print(json.dumps(encoder_lut_table(client), allow_nan=False))
                     return 0
                 if args.action == "motor-setup":
                     summary = motor_setup(client, args.rated_current, args.peak_current,

@@ -279,6 +279,15 @@ class Board1SilTest(unittest.TestCase):
         self.assertLess(abs(metrics["position"]["final_rad"] - 0.5), 0.02)
         self.assertLess(abs(metrics["torque"]["mean_reply_nm"] - 0.004), 0.0015)
 
+    def test_encoder_linearization(self):
+        """CAL-9 on an encoder with 1st and 2nd harmonic errors and a cogging plant: the
+        table matches the injected error, the position error drops, ID 157 switches it, and
+        it survives a power cycle."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
+            summary = cli.run_sil_encoder_lut(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")
+        self.assertEqual(summary["status"], "SIL_PASS", summary)
+
     def test_cogging_compensation(self):
         """CAL-8 on a plant with cogging: refused without a table, the MCU fits the table,
         the ripple drops, and the table survives a power cycle."""

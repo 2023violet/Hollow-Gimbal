@@ -13,6 +13,7 @@
 
 #include "foc_board.h"
 #include "foc_board_cogging.h"
+#include "foc_board_encoder_lut.h"
 #include "foc_board_thermal.h"
 #if defined(FALCONFOC_BOARD_CAPTURE)
 #include "foc_board_capture.h"
@@ -209,6 +210,21 @@ static int foc_board_encoder_init_sensor(struct foc_board_encoder *encoder)
     }
     const struct foc_encoder_config *config =
         encoder->config_valid ? &encoder->config : &encoder_config;
+    /* CAL-9 correction, while active and made for this encoder's resolution. */
+    struct foc_encoder_lut lut;
+    if (foc_board_encoder_lut_state.active &&
+        foc_board_encoder_lut_descriptor(
+            &foc_board_encoder_lut_state,
+            config->counts_per_revolution,
+            &lut
+        )) {
+        return foc_encoder_init_with_lut(
+            &encoder->sensor,
+            config,
+            FOC_BOARD_ENCODER_LUT_IDENTITY,
+            &lut
+        );
+    }
     return foc_encoder_init(&encoder->sensor, config);
 }
 

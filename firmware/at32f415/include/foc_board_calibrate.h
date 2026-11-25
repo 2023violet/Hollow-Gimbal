@@ -38,6 +38,7 @@
 #include "foc_flux_id.h"
 #include "foc_mechanical_id.h"
 #include "foc_board_cogging.h"
+#include "foc_board_encoder_lut.h"
 #include "foc_motor_id.h"
 #include "foc_serial.h"
 
@@ -76,6 +77,14 @@ enum foc_board_cal_state {
     FOC_BOARD_CAL_COGGING_START = 20,
     FOC_BOARD_CAL_COGGING = 21,
     FOC_BOARD_CAL_COGGING_STOP = 22,
+    /** CAL-9 encoder linearization (appended): CALIBRATION mode, ARM, START, the hold
+     * current ramp, the field sweep, then the fit once the drive is stopped. */
+    FOC_BOARD_CAL_ENCODER_MODE = 23,
+    FOC_BOARD_CAL_ENCODER_ARM = 24,
+    FOC_BOARD_CAL_ENCODER_START = 25,
+    FOC_BOARD_CAL_ENCODER_ALIGN = 26,
+    FOC_BOARD_CAL_ENCODER = 27,
+    FOC_BOARD_CAL_ENCODER_STOP = 28,
 };
 
 /** One coast sample: encoder position and its time, phase-voltage time and pair voltage. */
@@ -125,6 +134,9 @@ enum foc_board_cal_stages {
     /** CAL-8 cogging table, alone. Needs a valid group, this boot's ADC zero and working
      * position control; the rotor turns about 2.3 turns forward and back (IDs 150, 151). */
     FOC_BOARD_CAL_STAGE_COGGING = 16,
+    /** CAL-9 encoder correction, alone, with the same preconditions; the field drags the
+     * rotor about 2.3 turns forward and back at 1 rad/s (ID 157 switches the result). */
+    FOC_BOARD_CAL_STAGE_ENCODER = 32,
 };
 
 /** CALIBRATE_READ byte 73: where the active rotor calibration came from. */
@@ -154,6 +166,8 @@ enum foc_board_cal_result_bits {
     FOC_BOARD_CAL_RESULT_INERTIA = 16,
     /** CAL-8 fitted a table (ID 152 VALID). */
     FOC_BOARD_CAL_RESULT_COGGING = 32,
+    /** CAL-9 fitted an encoder correction (ID 158 VALID). */
+    FOC_BOARD_CAL_RESULT_ENCODER = 64,
 };
 
 /** Wire values of CALIBRATE_READ byte 2. */
@@ -195,6 +209,8 @@ enum foc_board_cal_failure {
     FOC_BOARD_CAL_FAILURE_INERTIA = 17,
     /** CAL-8 fit refused; ID 152 says why (appended). */
     FOC_BOARD_CAL_FAILURE_COGGING = 18,
+    /** CAL-9 fit refused; ID 158 says why (appended). */
+    FOC_BOARD_CAL_FAILURE_ENCODER = 19,
 };
 
 /** One H0 cycle as seen by the electrical stages (logical slot clock). */
@@ -360,6 +376,8 @@ struct foc_board_calibration {
     struct foc_board_cogging *cogging;
     float cogging_origin_rad;
     uint32_t cogging_start_us;
+    /* CAL-9: the correction table (NULL: not supported); the sweep borrows the CAL-8 bins. */
+    struct foc_board_encoder_lut *encoder_lut;
 };
 
 /* Public Functions ------------------------------------------------------------- */
@@ -398,6 +416,11 @@ void foc_board_calibration_capture_boot(struct foc_board_calibration *calibratio
 /** Attach the CAL-8 acquisition whose table the Runtime uses, before producers start. */
 void foc_board_calibration_attach_cogging(struct foc_board_calibration *calibration,
                                           struct foc_board_cogging *cogging);
+
+/** Attach the CAL-9 table the board encoder uses (needs the CAL-8 bins), before producers
+ * start. While idle the manager applies ID 157 changes by re-initialization. */
+void foc_board_calibration_attach_encoder_lut(struct foc_board_calibration *calibration,
+                                              struct foc_board_encoder_lut *encoder_lut);
 
 /** Write a commutation group (pole pairs 1-64, direction +1/-1, offset in [0, 2π)) with
  * the active ADC zero, by re-initialization. Returns a FOC_PROTO_* result. */

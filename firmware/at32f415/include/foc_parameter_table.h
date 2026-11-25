@@ -144,6 +144,11 @@ enum foc_parameter_id {
     FOC_PARAM_COGGING_RMS = 154,
     FOC_PARAM_COGGING_FRICTION = 155,
     FOC_PARAM_COGGING_CONSISTENCY = 156,
+    FOC_PARAM_ENCODER_LUT_ENABLE = 157,
+    FOC_PARAM_ENCODER_LUT_STATUS = 158,
+    FOC_PARAM_ENCODER_LUT_PEAK = 159,
+    FOC_PARAM_ENCODER_LUT_RMS = 160,
+    FOC_PARAM_ENCODER_LUT_CONSISTENCY = 161,
 };
 
 /** Wire type codes. */
@@ -249,8 +254,8 @@ struct foc_parameter_entry {
 
 /* Public Macros ---------------------------------------------------------------- */
 
-#define FOC_PARAMETER_COUNT         108U
-#define FOC_PARAMETER_PERSIST_COUNT 64U
+#define FOC_PARAMETER_COUNT         113U
+#define FOC_PARAMETER_PERSIST_COUNT 65U
 #define FOC_PARAM_NO_PERSIST        0xFFFFU
 
 /* Public Functions ------------------------------------------------------------ */

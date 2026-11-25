@@ -15,6 +15,7 @@
 #include "foc_board.h"
 #include "foc_board_boot.h"
 #include "foc_board_calibrate.h"
+#include "foc_board_encoder_lut.h"
 #include "foc_board_thermal.h"
 #include "foc_board_timing.h"
 #include "foc_can.h"
@@ -835,12 +836,14 @@ int main(void)
         foc_serial_attach_calibration(&serial, &calibrate);
         foc_board_calibration_attach_phase_voltage(&calibration, foc_at32_phase_voltage_read, NULL);
         foc_board_calibration_attach_cogging(&calibration, &foc_board_cogging_state);
+        foc_board_calibration_attach_encoder_lut(&calibration, &foc_board_encoder_lut_state);
         /* The boot configuration and tuning CONFIG_ERASE returns to, before any restore. */
         foc_board_calibration_capture_boot(&calibration, &boot);
 #if defined(FALCONFOC_BOARD_PERSISTENCE)
         /* Restore saved settings before any producer or IRQ starts. */
         persistence.driver = foc_at32_store_driver();
         persistence.cogging = &foc_board_cogging_state;
+        persistence.encoder_lut = &foc_board_encoder_lut_state;
         foc_board_persistence_restore(&persistence, &boot, &runtime, &output, &encoder, &serial);
         const struct foc_serial_persistence store = foc_board_persistence_serial(&persistence);
         foc_serial_attach_persistence(&serial, &store);

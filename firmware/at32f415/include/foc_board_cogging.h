@@ -149,6 +149,12 @@ enum foc_board_cogging_status foc_board_cogging_finish(struct foc_board_cogging 
                                                        bool keep_first_harmonic,
                                                        float iq_limit_a);
 
+/** Bins without samples (INT16_MIN) in one direction's array. */
+uint32_t foc_board_cogging_empty_bins(const int16_t *bins);
+
+/** Fill empty bins by circular linear interpolation; false when all are empty. */
+bool foc_board_cogging_fill_bins(int16_t *bins);
+
 #ifdef __cplusplus
 }
 #endif

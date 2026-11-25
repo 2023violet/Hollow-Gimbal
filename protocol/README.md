@@ -97,12 +97,13 @@ All empty requests reject extra bytes. Lengths below include the response result
 | 33 | CONFIG_ERASE | Empty | APPLIED; storage is erased and the running instance returns to the boot configuration, boot tuning and default RAM policies at once (commutation group invalid). NOT_SUPPORTED without storage |
 | 40 | TELEMETRY_READ | Empty | 83-byte status and telemetry |
 | 41 | TELEMETRY_STREAM | Empty | NOT_SUPPORTED |
-| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive), 8 inertia (CAL-7) alone or added to 1–3 (9–11); 8 without 2 needs Rs, Ld, Lq and flux in the profile; 16 cogging (CAL-8) alone, needs a valid group and this boot's ADC zero | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
+| 50 | CALIBRATE_START | Empty, or stage mask u8: 1 rotor (CAL-1/2), 2 electrical (CAL-3/4/5), 3 both (default), 4 ADC zero only (needs a valid group, no drive), 8 inertia (CAL-7) alone or added to 1–3 (9–11); 8 without 2 needs Rs, Ld, Lq and flux in the profile; 16 cogging (CAL-8) alone, needs a valid group and this boot's ADC zero; 32 encoder linearization (CAL-9) alone, same preconditions, 2 or more pole pairs | ACCEPTED; BAD_STATE unless DISABLED, INHIBIT confirmed and the shaft still (electrical alone also needs a rotor result applied in this boot); OUTPUT_LOCKED on the locked image; NOT_SUPPORTED without a manager |
 | 51 | CALIBRATE_READ | Empty | 93-byte calibration progress, results and active configuration (below) |
 | 52 | CALIBRATE_ABORT | Empty | ACCEPTED; the drive stops at the next Foreground pass. STOP also aborts |
 | 53 | COMMUTATION_WRITE | pole pairs u16 (1–64) + encoder direction i8 (+1/−1) + electrical offset f32 rad [0, 2π) | APPLIED (group source HOST); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY during a run or pending tuning; INVALID_ARGUMENT out of range |
 | 54 | SET_ZERO | Empty | APPLIED + zero offset f32 output rad (5 bytes): the present output position becomes zero (ID 124); BAD_STATE unless DISABLED with INHIBIT confirmed; BUSY without a fresh sensor or during a calibration run; PARAM_SAVE stores it |
 | 55 | COGGING_READ | Offset u16 (2 bytes) | OK + bins u16, A per code f32 (0: empty table), offset u16, count u8, up to 64 codes i8 (at most 74 bytes); INVALID_ARGUMENT for an offset at or beyond the bins; NOT_SUPPORTED without a table |
+| 56 | ENCODER_LUT_READ | Offset u16 (2 bytes) | OK + knots u16, counts per turn u32 (0: no table), active u8, offset u16, count u8, up to 40 offsets i16 in raw counts (at most 91 bytes); INVALID_ARGUMENT for an offset at or beyond the knots; NOT_SUPPORTED without a calibration manager |
 
 Modes are CURRENT 0, VELOCITY 1, POSITION 2 and IMPEDANCE 3. Units are A, mechanical rad/s
 and continuous mechanical rad. Setpoints must match the current Runtime mode. IMPEDANCE
@@ -189,6 +190,28 @@ depends only on the motor and the encoder mounting: a new electrical offset keep
 another motor needs a new run. PARAM_SAVE stores it on its own flash page (0x0801E800,
 pole pairs and encoder checked at boot; without it ID 149 restores as 0); CONFIG_ERASE
 clears it. COGGING_READ (0x55) reads it in 64-code chunks.
+
+### Encoder linearization (CAL-9)
+
+CALIBRATE_START 32 runs CAL-9 alone: the correction off (re-initialization), CALIBRATION
+mode, a field at the rotor's electrical angle ramped to 0.5 A, then the field turns at
+1 rad/s rotor over the CAL-8 path (lead-in, one forward turn plus 0.3 rad, turn-around,
+one backward turn). Each new encoder sample adds the field angle minus the reading, in the
+raw encoder frame, to the bin of its raw angle, per direction (the CAL-8 bins). The fit
+averages both directions (the friction lag cancels), removes the mean (the alignment, so
+the electrical offset stays valid) and keeps the harmonics 1–16 per turn that are not
+multiples of the pole pairs: the rotor's lag from cogging and pole torque ripple repeats
+at multiples of the pole pairs. The result is a 128-knot correction in raw counts that the
+sensor applies before direction (`foc_encoder_lut`, slope 0.5–1.5, at most 1/8 turn).
+Results (ID 158) as for CAL-8: VALID 1 (ID 157 set to 1, the encoder re-initialized with
+it), NEGLIGIBLE 2 (peak below 4 counts, table cleared), INCONSISTENT 3 (forward/backward
+correlation ID 161 below 0.5), SAMPLES 4, FAILED 5, RANGE 6 (outside the sensor's limits)
+keep the previous table. IDs 159/160 read the peak and RMS in rad. While idle and quiet
+the manager applies ID 157 changes by re-initialization (the continuous position restarts
+from the absolute angle). PARAM_SAVE stores it in the cogging page (second block, checked
+against the encoder's resolution and direction); CONFIG_ERASE clears it. Run CAL-9 before
+CAL-8, so the cogging table is measured with the corrected angle. A once-per-turn load
+torque (imbalance) lags the rotor like an encoder error: calibrate unloaded or balanced.
 
 ### Thermal protection
 
@@ -451,11 +474,13 @@ that is running, including a calibration restored at boot.
 States: IDLE 0, ADC_ZERO 1, DRIVE_MODE 2, DRIVE_ARM 3, DRIVE_START 4, ALIGN 5,
 SWEEP 6, DRIVE_STOP 7, APPLY 8, DONE 9, FAILED 10, RL_D 11, RL_Q 12, FLUX 13,
 TUNE 14, RESTORE 15, INERTIA 16, COAST 17, COGGING_MODE 18, COGGING_ARM 19,
-COGGING_START 20, COGGING 21, COGGING_STOP 22. Failures: none 0, state 1, ADC 2, lifecycle 3,
+COGGING_START 20, COGGING 21, COGGING_STOP 22, ENCODER_MODE 23, ENCODER_ARM 24,
+ENCODER_START 25, ENCODER_ALIGN 26, ENCODER 27, ENCODER_STOP 28. Failures: none 0, state 1, ADC 2, lifecycle 3,
 drive 4, current 5, sensor 6, rotor 7, offset 8, admission 9, apply 10, aborted
 11, timeout 12, R/L 13, flux 14, tune 15, capture 16, inertia 17, cogging 18 (ID 152 says
-why). Byte 71 bit 16 means CAL-8 committed a table; byte 72 bit 32 means a cogging
-table is present. Byte 4 carries
+why), encoder 19 (ID 158 says why). Byte 71 bit 16 means CAL-8 committed a table, bit 32
+that CAL-9 did; byte 72 bit 32 means a cogging table is present, bit 64 an encoder
+correction. Byte 4 carries
 the admission failure, or for R/L, flux and inertia failures the estimator's
 `foc_calibration_failure`. Byte 71 adds bit 8 (CAL-7 committed), byte 72 bit 16
 (inertia result present). After DONE, IDs 16, 17, 38–42, 64–67, 69–71 and 80–86

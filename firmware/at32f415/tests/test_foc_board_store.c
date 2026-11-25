@@ -17,6 +17,7 @@
 #include "foc_board.h"
 #include "foc_board_boot.h"
 #include "foc_board_cogging.h"
+#include "foc_board_encoder_lut.h"
 #include "foc_board_store.h"
 #include "foc_parameter_table.h"
 
@@ -123,6 +124,7 @@ static struct foc_board_settings settings_with_kp(float kp)
         .can = foc_serial_can_defaults(),
         .thermal = foc_serial_thermal_defaults(),
         .cogging = foc_serial_cogging_defaults(),
+        .encoder = foc_serial_encoder_defaults(),
     };
 }
 
@@ -289,8 +291,9 @@ struct restore_fixture {
     struct fake_flash flash;
 };
 
-/* Cogging acquisition a restore attaches, or NULL. */
+/* Cogging acquisition and encoder table a restore attaches, or NULL. */
 static struct foc_board_cogging *restore_cogging;
+static struct foc_board_encoder_lut *restore_encoder;
 
 static int restore_boot(struct restore_fixture *fixture, bool keep_flash)
 {
@@ -311,6 +314,7 @@ static int restore_boot(struct restore_fixture *fixture, bool keep_flash)
     foc_serial_init(&fixture->serial, &fixture->runtime);
     fixture->persistence.driver = driver_for(&fixture->flash);
     fixture->persistence.cogging = restore_cogging;
+    fixture->persistence.encoder_lut = restore_encoder;
     if (keep_flash) {
         fixture->flash = saved;
     }
@@ -808,11 +812,84 @@ static int test_cogging_page(void)
     return 0;
 }
 
+/* CAL-9 block in the cogging page: both blocks together, encoder identity, and a restore
+ * that activates the table with the switch. */
+static int test_encoder_block(void)
+{
+    static struct fake_flash flash;
+    static struct foc_runtime_cogging_table cogging;
+    static struct foc_board_encoder_lut table;
+    static struct foc_board_encoder_lut loaded;
+    memset(flash.slots, 0xFF, sizeof flash.slots);
+    const struct foc_board_store_driver driver = driver_for(&flash);
+    const struct foc_board_store_identity identity =
+        {1U, 7U, 65536U, -1, 0.5f, {2048.0f, 2048.0f, 2048.0f}};
+    cogging.scale_a = 0.01f;
+    cogging.code[3] = 9;
+    table.counts_per_revolution = 65536U;
+    for (unsigned int knot = 0U; knot < FOC_BOARD_ENCODER_LUT_KNOTS; ++knot) {
+        table.offsets[knot] =
+            (int16_t)(100.0 * sin(6.283185307179586 * knot / FOC_BOARD_ENCODER_LUT_KNOTS));
+    }
+    CHECK(
+        foc_board_store_encoder_lut_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_EMPTY
+    );
+    CHECK(foc_board_store_page_save(&driver, &identity, &cogging, &table) == FOC_BOARD_STORE_OK);
+    CHECK(foc_board_store_encoder_lut_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_OK);
+    CHECK(
+        loaded.counts_per_revolution == 65536U &&
+        memcmp(loaded.offsets, table.offsets, sizeof table.offsets) == 0
+    );
+    static struct foc_runtime_cogging_table cogging_loaded;
+    CHECK(foc_board_store_cogging_load(&driver, &identity, &cogging_loaded) == FOC_BOARD_STORE_OK);
+    CHECK(cogging_loaded.code[3] == 9);
+    /* Pole pairs do not matter for the encoder; its resolution and direction do. */
+    struct foc_board_store_identity other = identity;
+    other.pole_pairs = 11U;
+    CHECK(foc_board_store_encoder_lut_load(&driver, &other, &loaded) == FOC_BOARD_STORE_OK);
+    other = identity;
+    other.runtime_encoder_direction = 1;
+    CHECK(foc_board_store_encoder_lut_load(&driver, &other, &loaded) == FOC_BOARD_STORE_ERR_RECORD);
+    CHECK(loaded.counts_per_revolution == 0U && loaded.offsets[32] == 0);
+    flash.slots[FOC_BOARD_STORE_COGGING_SLOT][FOC_BOARD_STORE_ENCODER_OFFSET + 24 + 7] ^= 0x01U;
+    CHECK(
+        foc_board_store_encoder_lut_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_RECORD
+    );
+    /* Saving the cogging table alone leaves no encoder block. */
+    CHECK(foc_board_store_cogging_save(&driver, &identity, &cogging) == FOC_BOARD_STORE_OK);
+    CHECK(
+        foc_board_store_encoder_lut_load(&driver, &identity, &loaded) == FOC_BOARD_STORE_ERR_EMPTY
+    );
+
+    /* Restore: the stored table is active with the default switch, off with the switch 0. */
+    static struct restore_fixture fixture;
+    restore_encoder = &foc_board_encoder_lut_state;
+    CHECK(restore_boot(&fixture, false) == 0);
+    struct foc_board_store_identity boot_identity;
+    CHECK(foc_board_store_identity_from_boot(&fixture.boot, &boot_identity));
+    const struct foc_board_store_driver page =
+        {&fixture.flash, fake_read, fake_erase, fake_program};
+    CHECK(foc_board_store_page_save(&page, &boot_identity, NULL, &table) == FOC_BOARD_STORE_OK);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.encoder_lut_restored && foc_board_encoder_lut_state.active);
+    struct foc_board_settings in = settings_with_kp(2.2f);
+    in.tuning.command_timeout_us = 30000U;
+    in.encoder.lut_enabled = 0U;
+    CHECK(write_record(&fixture.flash, &boot_identity, &in) == 0);
+    CHECK(restore_boot(&fixture, true) == 0);
+    CHECK(fixture.persistence.state == FOC_BOARD_STORE_LOADED);
+    CHECK(fixture.persistence.encoder_lut_restored && !foc_board_encoder_lut_state.active);
+    CHECK(fixture.serial.encoder.lut_enabled == 0U);
+    restore_encoder = NULL;
+    foc_board_encoder_lut_state = (struct foc_board_encoder_lut){0};
+    return 0;
+}
+
 int main(void)
 {
     return test_codec() || test_slots() || test_sequence_wrap() || test_restore() ||
         test_calibration_record() || test_profile_record() || test_tlv_rules() ||
-        test_restore_calibration() || test_cogging_page();
+        test_restore_calibration() || test_cogging_page() || test_encoder_block();
 }
 
 /* ---------------------------------------- end of file ----------------------------------------- */

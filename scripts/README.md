@@ -36,7 +36,8 @@ minutes; run it alone.
 Steps, each with its raw exit code in `<out>/steps.tsv`:
 
 1. `baseline` — ARM images of the frozen baseline commit, for the static comparison.
-2. `matrix-{clang,gcc,sanitizer}` — every V2 Host project (`run_matrix.ps1`);
+2. `matrix-{clang,gcc,sanitizer}` — every V2 Host project (`run_matrix.ps1`, CTest
+   `-Jobs` 4 by default);
    the CTest names must equal `expected_tests.tsv`.
 3. `witness-*` — boot witnesses from `test-foc-board-boot(-default)`.
 4. `arm-*` — five ARM images (default, verification, two capture builds, trace).

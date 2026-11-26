@@ -235,8 +235,12 @@ command timeout stops the drive exactly as on the target.
 ```powershell
 cmake --build build/sw03-board-host --target falconfoc-board1-sil
 python tools/falconfoc-cli/falconfoc_cli.py --simulator build/sw03-board-host/falconfoc-board1-sil.exe sil-demo
-ctest --test-dir build/sw03-board-host -R '^test-foc-board1-sil$' -V
+ctest --test-dir build/sw03-board-host -R '^test-foc-board1-sil' -j 4
 ```
+
+Every `test_*` method of `tools/falconfoc-cli/test_board1_sil.py` is its own CTest
+(`test-foc-board1-sil.<scenario>`, registered from the file at configure time), so
+`ctest -j` runs the scenarios in parallel; `-R 'board1-sil.encoder'` runs one.
 
 The ARM image attaches no output backend, so every valid UPDATE remains
 `FOC_BOARD_UPDATE_NOT_APPLIED` there. A SIL pass is software evidence: it does
@@ -249,7 +253,7 @@ The same SIL exercises the M1 control surface: COMMAND_SET_MODE and its
 LIFECYCLE_READ receipt, controller tuning through the H0 tuning mailbox
 (`foc_runtime_publish_tuning`, applied only while DISABLED), and fault clear and
 re-run. `sil-demo --sil-scenario current|velocity|position|tuning|recover` runs
-each one; `test-foc-board1-sil` runs all of them in lockstep. The locked ARM
+each one; the `test-foc-board1-sil.*` tests run all of them in lockstep. The locked ARM
 image accepts SET_MODE and tuning as well, since neither touches output policy.
 
 ### M2 persistent settings

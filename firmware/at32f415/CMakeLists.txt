@@ -341,10 +341,27 @@ else()
     falconfoc-board1-sil PRIVATE "${repo}/simulation/include" "${repo}/simulation/src"
   )
   target_link_libraries(falconfoc-board1-sil PRIVATE falconfoc-board1-supply-none)
-  add_test(NAME test-foc-board1-sil COMMAND "${Python3_EXECUTABLE}" -B
-                                            "${repo}/tools/falconfoc-cli/test_board1_sil.py"
+  # One CTest per scenario (test-foc-board1-sil.<method without test_>) so ctest -j runs
+  # them in parallel; each starts its own SIL process. The list follows the file.
+  set(sil_tests "${repo}/tools/falconfoc-cli/test_board1_sil.py")
+  set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${sil_tests}"
   )
-  set_tests_properties(
-    test-foc-board1-sil PROPERTIES ENVIRONMENT "FOC_BOARD1_SIL=$<TARGET_FILE:falconfoc-board1-sil>"
-  )
+  file(STRINGS "${sil_tests}" sil_methods REGEX "^    def test_[a-z0-9_]+\\(self\\)")
+  if(NOT sil_methods)
+    message(FATAL_ERROR "No SIL scenarios found in ${sil_tests}")
+  endif()
+  foreach(line IN LISTS sil_methods)
+    string(REGEX REPLACE "^    def (test_[a-z0-9_]+)\\(self\\).*$" "\\1" method "${line}")
+    string(REGEX REPLACE "^test_" "" scenario "${method}")
+    add_test(NAME test-foc-board1-sil.${scenario} COMMAND "${Python3_EXECUTABLE}" -B "${sil_tests}"
+                                                          Board1SilTest.${method}
+    )
+    set_tests_properties(
+      test-foc-board1-sil.${scenario}
+      PROPERTIES ENVIRONMENT "FOC_BOARD1_SIL=$<TARGET_FILE:falconfoc-board1-sil>"
+    )
+  endforeach()
 endif()

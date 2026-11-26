@@ -8,7 +8,8 @@
 # test-foc-thermal and test-foc-runtime-thermal (THERMAL-01 NTC, derating, I2t) and
 # test-foc-board-cogging (COG-01 CAL-8 sweep and fit) and test-foc-board-encoder-lut
 # (ENC-01 CAL-9 fit); test-legacy-sincos-baseline left with the
-# Legacy removal. Any change must be explained here.
+# Legacy removal. TEST-01 split test-foc-board1-sil into one test per scenario
+# (test-foc-board1-sil.<scenario>, 29) so ctest -j runs them in parallel: 161 per toolchain. Any change must be explained here.
 # Suite names are the source directory with '/' replaced by '-'.
 calibration	test-foc-bootstrap
 calibration	test-foc-calibration
@@ -63,7 +64,35 @@ firmware-at32f415	test-foc-board-config
 firmware-at32f415	test-foc-board-encoder-lut
 firmware-at32f415	test-foc-board-store
 firmware-at32f415	test-foc-board1
-firmware-at32f415	test-foc-board1-sil
+firmware-at32f415	test-foc-board1-sil.calibration_failures_commit_only_what_they_report
+firmware-at32f415	test-foc-board1-sil.calibration_survives_power_cycles
+firmware-at32f415	test-foc-board1-sil.cansimple_single_node
+firmware-at32f415	test-foc-board1-sil.cansimple_two_nodes
+firmware-at32f415	test-foc-board1-sil.coast_check_flux_and_angle
+firmware-at32f415	test-foc-board1-sil.cogging_compensation
+firmware-at32f415	test-foc-board1-sil.controller_tuning_over_uart
+firmware-at32f415	test-foc-board1-sil.current_demo_lockstep
+firmware-at32f415	test-foc-board1-sil.dead_time_compensation_at_runtime
+firmware-at32f415	test-foc-board1-sil.dead_time_identified_in_cal3
+firmware-at32f415	test-foc-board1-sil.driver_fault_latch_and_recovery
+firmware-at32f415	test-foc-board1-sil.encoder_linearization
+firmware-at32f415	test-foc-board1-sil.fault_clear_and_rerun
+firmware-at32f415	test-foc-board1-sil.free_running_host_silence_trips_command_timeout
+firmware-at32f415	test-foc-board1-sil.inertia_identification_and_derived_control
+firmware-at32f415	test-foc-board1-sil.mit_impedance
+firmware-at32f415	test-foc-board1-sil.motor_profile_derives_limits_and_survives_power_cycles
+firmware-at32f415	test-foc-board1-sil.motor_replacement_workflow
+firmware-at32f415	test-foc-board1-sil.on_mcu_calibration_of_an_unknown_motor
+firmware-at32f415	test-foc-board1-sil.output_frame_gear_ratio_and_set_zero
+firmware-at32f415	test-foc-board1-sil.parameter_table_matches_firmware
+firmware-at32f415	test-foc-board1-sil.persistence_across_power_cycles
+firmware-at32f415	test-foc-board1-sil.plant_adc_offset_is_measured_on_the_mcu_at_boot
+firmware-at32f415	test-foc-board1-sil.position_mode_over_uart
+firmware-at32f415	test-foc-board1-sil.protection_trips_wrong_commutation_and_each_rule
+firmware-at32f415	test-foc-board1-sil.rotor_range_electrical_identification
+firmware-at32f415	test-foc-board1-sil.thermal_protection
+firmware-at32f415	test-foc-board1-sil.trajectory_acceleration_limits_and_load_hold
+firmware-at32f415	test-foc-board1-sil.velocity_mode_over_uart
 firmware-at32f415	test-foc-can
 firmware-at32f415	test-foc-capture-boot-import
 firmware-at32f415	test-foc-capture-import

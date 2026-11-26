@@ -6,7 +6,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$OutputRoot,
     [Parameter(Mandatory = $true)][ValidateSet("clang", "gcc", "sanitizer")][string]$Toolchain,
-    [Parameter(Mandatory = $true)][string]$RepoRoot
+    [Parameter(Mandatory = $true)][string]$RepoRoot,
+    # Parallel CTest jobs; the Board1 SIL scenarios are separate tests and use them.
+    [ValidateRange(1, 64)][int]$Jobs = 4
 )
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -43,7 +45,7 @@ foreach ($dir in $dirs) {
                 'examples/calibration-workflow' { @('-R', '^test-falconfoc-calibration-workflow-demo$') }
                 'tools/falconfoc-calibration-replay' { @('-R', '^test-falconfoc-calibration-replay$') }
             }
-            ctest --test-dir $out --no-tests=error --output-on-failure -j 2 @selected *>> $log
+            ctest --test-dir $out --no-tests=error --output-on-failure -j $Jobs @selected *>> $log
             $test = $LASTEXITCODE
         }
     }

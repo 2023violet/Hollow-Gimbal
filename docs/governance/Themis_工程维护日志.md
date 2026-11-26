@@ -3296,3 +3296,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - ROM：交叉编译加 `-flto`（链接 `-flto -Os`），fwinteg 静态检查锚定的 main/boot/输出适配器/supply 文件保持 `-fno-lto`；工具链改用 `gcc-ar`/`gcc-ranlib`。默认镜像 109,916 → 103,920 B，带存储 115,532 → 109,264 B，距 122 KB 上限约 15.3 KB。
 - fwinteg `arm_static.py`：`no_unexplained_symbols_removed` 换成 `protected_symbols_present`（启动选择链、输出适配器、标定准入与初始化、停机与监督入口）；LTO 内联造成的符号消失只列出。`stack-usage.su` 只覆盖非 LTO 文件。
 - SIL `encoder-lut` 增加同一次上电 CAL-9 → CAL-8 并要求两表 VALID、编码器表不变、断电后两表恢复。UART 录制 6,365 条与 ENC-01 逐字节相同。firmware README（Flash 预算、CAL-8 分桶）、scripts README、契约 28.7 已同步。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 133 项全过；SDK 技术门禁 PASS。证据：[RES-01](../evidence/2026-11-25-res-01.md)。
+
+## 2026-11-25 · TEST-01：Board1 SIL 按场景拆分并行
+
+- `test-foc-board1-sil` 拆成每个 unittest 方法一个 CTest（`test-foc-board1-sil.<scenario>`，CMake 配置时从 `test_board1_sil.py` 自动注册，29 项）；`run_matrix.ps1` 新增 `-Jobs`（默认 4，原为写死的 2）；`expected_tests.tsv` 每套工具链 133 → 161 项。
+- fwinteg 全程约 31.7 → 18.9 分钟；固件 CTest clang 299 → 158 s、gcc 766 → 357 s、sanitizer 368 → 188 s。4 个物理核时约 130 s 是下限（每个场景两个忙碌进程），关键路径是转子范围与电参数辨识场景。
+- 固件、ARM 镜像与测试内容不变。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 161 项全过；质量门禁通过。firmware README、scripts README 已同步。证据：[TEST-01](../evidence/2026-11-25-test-01.md)。

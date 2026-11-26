@@ -93,7 +93,7 @@ protocol  <-  firmware/at32f415, tools
 
 ## 10. 测试、验证与文档
 
-- 新模块配单元测试，CTest 名登记到 `scripts/flows/fwinteg/expected_tests.tsv` 并说明原因；功能级行为用 Board1 SIL 场景验证。
+- 新模块配单元测试，CTest 名登记到 `scripts/flows/fwinteg/expected_tests.tsv` 并说明原因；功能级行为用 Board1 SIL 场景验证。`test_board1_sil.py` 里每个 `test_*` 方法都会自动注册成一个 CTest（`test-foc-board1-sil.<场景>`），新增场景同样要登记。
 - 提交前至少跑：受影响工程的 Host 测试、ARM 镜像编译、质量门禁；较大改动单独跑 fwinteg（`run_fwinteg.sh`，不要和其他构建并行）。
 - 所有证据都是软件证据，不得写成硬件结论；证据记录放 `docs/evidence/`，带日期。
 - 改变分层、启动链、协议、参数、持久化格式、标定阶段或脚本入口时，同一轮更新相关 README 与契约，并在[维护日志](./Themis_工程维护日志.md)末尾追加一条。

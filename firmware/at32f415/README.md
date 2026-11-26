@@ -46,14 +46,13 @@ A clock-tree change must update both together.
 ## Flash budget
 
 The program must stay below the cogging page at `0x0801E800` (122 KB usable; the settings
-slots follow at `0x0801F000`; `store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
-the persistent-settings image 101,972 B; after THERMAL-01 102,976 B and 107,048 B; after
-COG-01 106,976 B and 111,968 B; after ENC-01 109,916 B and 115,532 B. Since RES-01 the ARM images
-use link-time optimization (`-flto`, set in this CMakeLists for cross builds; the toolchain
-file selects `gcc-ar`/`gcc-ranlib`) except for the files fwinteg's static checks anchor on
-(`main.c`, `foc_board.c`, `foc_board_boot.c` and the supply files), and are 103,920 B and
-109,264 B; static RAM is 14,036 B and 14,180 B
-([RES-01](../../docs/evidence/2026-11-25-res-01.md)). AT32F415 has no FPU, so every libm call
+slots follow at `0x0801F000`; `store-reserve.ld` asserts it). The ARM images use link-time
+optimization (`-flto`, set in this CMakeLists for cross builds; the toolchain file selects
+`gcc-ar`/`gcc-ranlib`) except for the files fwinteg's static checks anchor on (`main.c`,
+`foc_board.c`, `foc_board_boot.c` and the supply files), so stack-usage (`.su`) files cover
+only those. The default image is 103,920 B and the persistent-settings image 109,264 B
+(static RAM 14,036 B and 14,180 B); each change's evidence records its size delta
+([RES-01](../../docs/evidence/2026-11-25-res-01.md) is the latest). AT32F415 has no FPU, so every libm call
 is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double

@@ -398,4 +398,5 @@ plant cogging torque on the Board1 SIL (contract 28).
 `request calibrate --cal-stages encoder` (mask 32) runs CAL-9 on the MCU; IDs 158–161
 report the result and ID 157 switches the correction. `encoder-lut-read` prints the
 128-knot table as JSON. `sil-demo --sil-scenario encoder-lut --sil-lockstep-us 500` runs it
-against an injected encoder error on the Board1 SIL (contract 29). Run it before CAL-8.
+against an injected encoder error on the Board1 SIL (contract 29), then runs CAL-8 in the
+same boot (the two share their sweep bins). Run CAL-9 before CAL-8.

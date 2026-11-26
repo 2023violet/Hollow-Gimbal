@@ -149,7 +149,7 @@ Legacy `03bf34f^` 的生成式 ADC 选择 **TMR3 CH4（0x04）**，生成式 TMR
 | H1 + TMR5/SPI IRQ | Runtime 500/150/150 µs，三 TMR5 相位与单帧 SPI IRQ；同优先级序列化。H0 可在每一阶段抢占。 | OVF/CS、CH1/写 SPI、SPI1 entry/RX/exit、CH2/CS release、解码及 H1 publish。记录 close 与 RX 的最坏相对次序、BUSY/超时、预测年龄尾部及 nesting。 |
 | USART1 + Foreground | IRQ 接收/发送有界；Runtime 监督 200/150/100 µs、遥测 10,000/500/100 µs、前台预算 150 µs；两个成本入参均为 0。协议服务另计。 | USART 入口、错误/满队列路径与退出；`foreground_poll`、`foc_serial_poll` 前后。满速双向和错误帧施压。 |
 
-`STATIC_ESTIMATE` 包含链接器分区、`.su` 的单函数帧与反汇编。ARM 当前映像使用 soft-float，存在 `__aeabi_f*` 与 libm；目标板最重路径受相位、饱和、数学范围、Flash 等待和嵌套影响。H0 100 µs 配置值、栈预留 4 KiB 链接断言和 Host 模拟 cost 都不能作为 20/20 WCET。量化响应上界应包含同优先级占用、高优先级干扰及 Cortex-M exception frame；检查 H1、UART 和前台在 H0 最坏 burst 下的剩余窗口。 `TARGET_MEASURED_COST` 仅标记绑定板卡、镜像、编译器、应力输入与仪器的输出。
+`STATIC_ESTIMATE` 包含链接器分区、`.su` 的单函数帧与反汇编；映像启用 LTO 后，`.su` 只覆盖不参与 LTO 的文件，其余函数的帧要从反汇编读。ARM 当前映像使用 soft-float，热路径用 `__aeabi_f*` 与 libm，软件双精度只在 Foreground 标定估计里（fwinteg `no_double_in_hot_path` 检查）；目标板最重路径受相位、饱和、数学范围、Flash 等待和嵌套影响。H0 100 µs 配置值、栈预留 4 KiB 链接断言和 Host 模拟 cost 都不能作为 20/20 WCET。量化响应上界应包含同优先级占用、高优先级干扰及 Cortex-M exception frame；检查 H1、UART 和前台在 H0 最坏 burst 下的剩余窗口。 `TARGET_MEASURED_COST` 仅标记绑定板卡、镜像、编译器、应力输入与仪器的输出。
 
 锁定测量用 DWT CYCCNT 与必要的标记 GPIO 对准 TMR2/ADC/逻辑分析仪。先校准探针开销并记录计数 wrap；每域保留固定大小计数、最大值、直方图或有限 trace，只在前台排空，饱和须显式报告。验收检查任务尾部、最小 deadline slack、最大采样/预测年龄、漏事件和栈 watermark，并区分测得最大值与静态最坏上界。若 SPI IRQ 在峰值 H0/UART 负载下出现超时、年龄越界或占用侵入 H0 余量，再以同一帧、相位、校验和超时条件比较 DMA。DMA 方案要测启动成本、仲裁、缓冲生命周期、完成中断时刻、残留帧隔离及栈/内存；单 16-bit 传输没有自动 DMA 收益。
 

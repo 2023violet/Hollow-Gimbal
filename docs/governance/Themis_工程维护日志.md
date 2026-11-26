@@ -3308,3 +3308,10 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 审计：ARM 镜像链接 libgcc 软件双精度库（约 2.4 KiB），调用者全是 Foreground 的一次性标定估计（CAL-3/5 `foc_motor_id`、CAL-4 `foc_flux_id`、CAL-7 `foc_mechanical_id`、`foc_calibration_math`、滑行检查），热路径没有。这些估计累加正规方程、用展开式算残差，换成 float 后舍入误差界会超过残差上限，所以不改成 float（改用 float 需要重新设计算法，收益约 2.5–3 KiB）。
 - 代码规范第 6 节改为明确的例外（只限 Foreground 标定估计，写明原因）。新增 `scripts/gates/check_image_double.py`（质量门禁调用）：扫描 78 个镜像源文件，白名单外出现 double 判失败，白名单过期也判失败。`arm_static.py` 新增 `no_double_in_hot_path`：从中断入口和 H0 回调出发遍历直接调用图，到不了任何软件双精度函数。
 - 固件与 ARM 镜像不变。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 161 项全过。firmware README、scripts README 已同步。证据：[DBL-01](../evidence/2026-11-25-dbl-01.md)。
+
+## 2026-11-26 · 收尾：RES-01、TEST-01、DBL-01 之后对齐文档
+
+- firmware README Flash 预算一节去掉逐轮体积的历史串联，只保留当前值（默认 103,920 B、带存储 109,264 B）和最新证据链接，并注明开 LTO 后 `.su` 只覆盖锚点文件。执行 ADR 的静态估计一句同步说明 LTO 下 `.su` 的覆盖范围，以及软件双精度只在 Foreground 标定里。
+- AGENTS.md：SIL 改为按场景的 CTest 命令；新增 SIL 场景要登记进 `expected_tests.tsv`；禁止项增加"镜像代码在白名单外使用 double"。代码规范第 10 节同步。CLI README 写明 `encoder-lut` 场景会在同一次上电接着跑 CAL-8。
+- 修正上次收尾留下的失效链接：`2026-11-16-next-vm-01d.md` 里指向快速入门的链接多了 `:1`。
+- 静态审计剩余的失效链接仍在历史证据、本日志早期条目和 SDK 包模板中（打包时才生成目标文件），与上次相同，未改。

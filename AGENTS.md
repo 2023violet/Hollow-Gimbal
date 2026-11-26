@@ -103,8 +103,11 @@ For real code changes, run the lanes that apply:
 - ARM image:
   `cmake -S firmware/at32f415 -B build/m2-arm-default -G Ninja -DCMAKE_TOOLCHAIN_FILE=<repo>/tools/cmake/arm-gcc-toolchain.cmake`
   (add `-DFALCONFOC_BOARD_PERSISTENCE=ON` for the persistent-settings image).
-- Board1 SIL: `FOC_BOARD1_SIL=<abs path to falconfoc-board1-sil> python -B -m unittest test_board1_sil`
-  in `tools/falconfoc-cli`.
+- Board1 SIL: `ctest --test-dir build/m0-board -R '^test-foc-board1-sil' -j 4` (one CTest
+  per `test_*` method of `tools/falconfoc-cli/test_board1_sil.py`), or
+  `FOC_BOARD1_SIL=<abs path to falconfoc-board1-sil> python -B -m unittest test_board1_sil`
+  in `tools/falconfoc-cli`. A new SIL `test_*` method is a new CTest: add it to
+  `scripts/flows/fwinteg/expected_tests.tsv`.
 - Quality gate:
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gates/check_falconfoc_quality_gate.ps1 -RepoRoot <repo> -RequireCMakeFormatter`
 - Full integration (run alone, it is slow): `bash scripts/flows/fwinteg/run_fwinteg.sh build/fwinteg-<name>/run1`
@@ -122,6 +125,8 @@ Do not:
 - unlock physical output in ARM images without a recorded bench sign-off
 - keep stale tests or scripts that reference removed surfaces
 - run Host calibration math in place of the MCU path
+- use `double` in image code outside the Foreground calibration estimators listed in
+  `scripts/gates/check_image_double.py`
 
 ## 9. Default Decision Rule
 

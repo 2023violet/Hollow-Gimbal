@@ -9,7 +9,8 @@ locked main() prologue differs from baseline, the Board output adapter is neithe
 baseline (beyond one literal-pool word) nor the reviewed M0 adapter with its backend
 attach function absent from the image, selection is not between clock init and ADC init, a failed selection
 does not branch to WFI, Flash program/erase symbols exist, the default image links
-the synthetic verification supply, or a protected entry point is missing.
+the synthetic verification supply, a protected entry point is missing, or a soft-double
+routine is reachable from an interrupt handler.
 Since RES-01 the images use link-time optimization except for the anchor files (main.c,
 foc_board.c, foc_board_boot.c and the supply files): helpers inline or gain .lto_priv/.isra
 suffixes, so symbols removed relative to the baseline are reported, not failed, and the
@@ -97,6 +98,52 @@ BACKEND_ATTACH = "foc_board_output_attach"
 # symbols returning means a sinf/cosf/hypotf or double libm call slipped back in.
 HEAVY_LIBM = {"__ieee754_rem_pio2f", "__kernel_rem_pio2f", "__ieee754_hypotf", "__ieee754_hypot",
               "__ieee754_sqrt", "fmax", "fmin"}
+
+# Code style guide section 6: double is allowed only in the Foreground calibration estimators
+# (scripts/gates/check_image_double.py). Nothing an interrupt runs may reach libgcc's
+# soft-double routines or the double helpers. Roots: every interrupt handler with code of its
+# own, plus the H0 callbacks the ADC handler calls through function pointers (indirect calls
+# are not in the direct call graph).
+SOFT_DOUBLE = re.compile(r"^(__aeabi_(d\w+|\w*2d)|__\w+df[23]|__float\w*df|__extendsfdf2|__truncdfsf2|"
+                         r"__fix\w*df\w*|foc_calibration_(sqrt|fmax|fmin))(\.\w+)*$")
+HOT_CALLBACKS = ("cal_adc_tap", "cal_h0_observer")
+BRANCH = re.compile(r"^\s*[0-9a-f]+:\s+(?:bl|blx|b|b\.w|b\.n|b(?:eq|ne|cs|cc|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)"
+                    r"(?:\.w|\.n)?)\s+[0-9a-f]+ <([^>+]+)>", re.M)
+
+
+def call_graph(disassembly):
+    graph, addresses = {}, {}
+    for match in re.finditer(r"^([0-9a-f]+) <([^>]+)>:\n(.*?)(?=\n\n|\Z)", disassembly, re.S | re.M):
+        name = match.group(2)
+        addresses.setdefault(match.group(1), []).append(name)
+        graph[name] = {target for target in BRANCH.findall(match.group(3)) if target != name}
+    return graph, addresses
+
+
+def hot_double_paths(disassembly):
+    """Shortest call path from each interrupt root to a soft-double symbol, if any."""
+    graph, addresses = call_graph(disassembly)
+    # Weak handler aliases share Default_Handler's address; one name per address is enough.
+    # Reset_Handler is the Foreground (it calls main), not an interrupt.
+    roots = sorted({names[0] for names in addresses.values()
+                    for name in names if name.endswith("Handler") and name != "Reset_Handler"}
+                   | {name for name in graph if name.split(".")[0] in HOT_CALLBACKS})
+    found = []
+    for root in roots:
+        parent, queue = {root: None}, [root]
+        while queue:
+            node = queue.pop(0)
+            if SOFT_DOUBLE.match(node):
+                path = [node]
+                while parent[path[-1]] is not None:
+                    path.append(parent[path[-1]])
+                found.append(" -> ".join(reversed(path)))
+                break
+            for target in sorted(graph.get(node, ())):
+                if target not in parent:
+                    parent[target] = node
+                    queue.append(target)
+    return roots, found
 
 
 # Reviewed locked main() prologues (up to system_core_clock_update) that intentionally differ
@@ -256,6 +303,9 @@ for name, elf in IMAGES.items():
     flash_ok = not re.search(r"flash_(sector|page|word|halfword|byte|program|erase|unlock)", nm, re.I)
     supply_ok = ("foc_board_verification_supply" in syms) == name.startswith("verification")
     reach_ok = {"foc_board_init_with_calibration", "foc_calibration_admit", "foc_board_boot_select"} <= syms
+    hot_roots, hot_paths = hot_double_paths(dis)
+    roots_ok = {"ADC1_IRQHandler", "TMR1_CH_IRQHandler"} <= set(hot_roots)
+    hot_paths = hot_paths if roots_ok else ["interrupt roots ADC1_IRQHandler/TMR1_CH_IRQHandler not found"]
     checks = {
         "prologue_identical": prologue_ok,
         "selection_between_clock_and_adc": order_ok,
@@ -266,12 +316,15 @@ for name, elf in IMAGES.items():
         "calibration_init_reachable": reach_ok,
         "protected_symbols_present": PROTECTED_SYMBOLS <= syms,
         "no_libm_heavy_math": not (syms & HEAVY_LIBM),
+        "no_double_in_hot_path": not hot_paths,
     }
     lines = [f"{key}: {'PASS' if value else 'FAIL'}" for key, value in checks.items()]
     lines.append(f"baseline: {base_folder}")
     lines.append(f"adapter: {'baseline' if adapter_as_baseline else 'reviewed' if adapter_reviewed else 'UNREVIEWED'}"
                  f" sha256 {adapter_sha}; {BACKEND_ATTACH} linked: {BACKEND_ATTACH in syms}")
     lines.append(f"adapter differences from baseline: {len(adapter_diff)} lines")
+    lines.append(f"hot-path roots ({len(hot_roots)}): {' '.join(hot_roots)}")
+    lines.append("hot-path soft-double paths: " + ("; ".join(hot_paths) or "none"))
     lines.append("protected symbols missing: " + (" ".join(sorted(PROTECTED_SYMBOLS - syms)) or "none"))
     lines.append("explained removals: " + "; ".join(f"{sym}: {EXPLAINED_REMOVALS[sym]}" for sym in removed
                                                      if sym in EXPLAINED_REMOVALS))

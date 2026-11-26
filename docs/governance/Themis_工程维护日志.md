@@ -3302,3 +3302,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - `test-foc-board1-sil` 拆成每个 unittest 方法一个 CTest（`test-foc-board1-sil.<scenario>`，CMake 配置时从 `test_board1_sil.py` 自动注册，29 项）；`run_matrix.ps1` 新增 `-Jobs`（默认 4，原为写死的 2）；`expected_tests.tsv` 每套工具链 133 → 161 项。
 - fwinteg 全程约 31.7 → 18.9 分钟；固件 CTest clang 299 → 158 s、gcc 766 → 357 s、sanitizer 368 → 188 s。4 个物理核时约 130 s 是下限（每个场景两个忙碌进程），关键路径是转子范围与电参数辨识场景。
 - 固件、ARM 镜像与测试内容不变。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 161 项全过；质量门禁通过。firmware README、scripts README 已同步。证据：[TEST-01](../evidence/2026-11-25-test-01.md)。
+
+## 2026-11-25 · DBL-01：镜像 double 的使用范围写入规范并加检查
+
+- 审计：ARM 镜像链接 libgcc 软件双精度库（约 2.4 KiB），调用者全是 Foreground 的一次性标定估计（CAL-3/5 `foc_motor_id`、CAL-4 `foc_flux_id`、CAL-7 `foc_mechanical_id`、`foc_calibration_math`、滑行检查），热路径没有。这些估计累加正规方程、用展开式算残差，换成 float 后舍入误差界会超过残差上限，所以不改成 float（改用 float 需要重新设计算法，收益约 2.5–3 KiB）。
+- 代码规范第 6 节改为明确的例外（只限 Foreground 标定估计，写明原因）。新增 `scripts/gates/check_image_double.py`（质量门禁调用）：扫描 78 个镜像源文件，白名单外出现 double 判失败，白名单过期也判失败。`arm_static.py` 新增 `no_double_in_hot_path`：从中断入口和 H0 回调出发遍历直接调用图，到不了任何软件双精度函数。
+- 固件与 ARM 镜像不变。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 161 项全过。firmware README、scripts README 已同步。证据：[DBL-01](../evidence/2026-11-25-dbl-01.md)。

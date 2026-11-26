@@ -59,7 +59,12 @@ protocol  <-  firmware/at32f415, tools
 
 ## 6. 数值与资源（AT32F415 无 FPU）
 
-- 所有浮点都是软件实现。镜像代码不用 `double`，不用 `sinf/cosf/hypotf/fmax/fmin` 这类重库函数：三角函数用 `foc_sincosf()`，模长用 `sqrtf(x*x + y*y)`，标定数学用 `foc_calibration_math`。fwinteg 的 `no_libm_heavy_math` 会检查。
+- 所有浮点都是软件实现。镜像代码不用 `sinf/cosf/hypotf/fmax/fmin` 这类重库函数：三角函数用 `foc_sincosf()`，模长用 `sqrtf(x*x + y*y)`，标定数学用 `foc_calibration_math`。fwinteg 的 `no_libm_heavy_math` 会检查。
+- 镜像代码默认不用 `double`。唯一的例外是 Foreground 里一次性的标定估计，包括 CAL-3/5 `foc_motor_id`、CAL-4 `foc_flux_id`、CAL-7 `foc_mechanical_id`、`foc_calibration_math` 和 `foc_board_calibrate` 的滑行检查：
+  - 原因：它们累加最小二乘的正规方程，再用展开式算残差，拟合得越好相消越严重，换成 float（eps 约 1e-7）后舍入误差界会超过残差上限。
+  - 允许的文件列在 `scripts/gates/check_image_double.py` 里，质量门禁会检查。
+  - fwinteg 的 `no_double_in_hot_path` 证明从任何中断入口都到不了软件双精度函数。
+  - 新增 double 必须进白名单并写明原因，而且只能在 Foreground 用。
 - 热路径（H0、H1）里每加一次浮点运算都要想清楚代价；一次性计算放到 Foreground。
 - 连续位置用 float32 时注意精度随幅值下降：取模一圈用整数部分减法，Runtime 对位置域有显式上限（如 ±1024 rad、±4096 rad）。
 - 栈有限：Foreground 函数不在栈上放几百字节以上的数组，大缓冲用有明确所有者的静态或全局对象，并在注释里写清谁在什么时候写。
@@ -97,7 +102,7 @@ protocol  <-  firmware/at32f415, tools
 
 - [ ] 依赖方向正确，可移植层没有厂商头文件，热路径没有被包成 HAL
 - [ ] 新公开结构体字段追加在末尾，新代码用指定初始化
-- [ ] 镜像代码没有 `double` 和重 libm 调用，ROM/RAM 增量已量过
+- [ ] 镜像代码没有白名单外的 `double`，没有重 libm 调用，ROM/RAM 增量已量过
 - [ ] 跨执行域的数据有唯一写者和发布机制
 - [ ] 参数改 JSON 并重新生成；协议与契约文档已同步
 - [ ] UART 入口、CLI 命令、SIL 场景齐全，单元测试已登记

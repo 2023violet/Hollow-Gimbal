@@ -58,8 +58,12 @@ is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
 `sqrt`/`hypot`/`fmax`/`fmin`. fwinteg's `no_libm_heavy_math` check fails if those
-libm objects return. Measure changes with FirmwareSight `fwsight diff`
-([ROM-01](../../docs/evidence/2026-11-24-rom-01.md)).
+libm objects return. `double` (libgcc soft-double, about 2.4 KiB) is allowed only in the
+Foreground calibration estimators listed in `scripts/gates/check_image_double.py` (least
+squares whose expanded residual cancels below float precision); the quality gate enforces
+the list and fwinteg's `no_double_in_hot_path` proves no interrupt handler reaches it
+([DBL-01](../../docs/evidence/2026-11-25-dbl-01.md)). Measure changes with FirmwareSight
+`fwsight diff` ([ROM-01](../../docs/evidence/2026-11-24-rom-01.md)).
 
 ## Explicit calibrated initialization
 

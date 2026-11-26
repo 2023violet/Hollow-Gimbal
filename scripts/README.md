@@ -8,7 +8,8 @@ remain at the Git tag `legacy-final`.
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/gates/check_falconfoc_quality_gate.ps1` | V2 quality gate: `git diff --check`, generated parameter files current, source contract, CMake quality |
+| `scripts/gates/check_falconfoc_quality_gate.ps1` | V2 quality gate: `git diff --check`, generated parameter files current, image `double` confined, source contract, CMake quality |
+| `scripts/gates/check_image_double.py` | Fails when `double` appears in an image source outside the allowed calibration estimators, or when an allowed file no longer needs it (code style guide section 6) |
 | `scripts/gates/check_falconfoc_source_contract.ps1` | C/H header sections, end-of-file marker, CMake header and kebab-case targets, README build command, for every V2 source root |
 | `scripts/gates/check_cmake_quality.ps1` | `# Themis` CMake header comment and `cmake-format --check` for the V2 CMake projects and the ARM toolchain file |
 | `scripts/gen/gen_parameters.py` | Generates the parameter table, CLI module, test data and `docs/parameters.md` from `firmware/at32f415/parameters.json`; `--check` (run by the quality gate) fails on stale outputs |
@@ -42,8 +43,10 @@ Steps, each with its raw exit code in `<out>/steps.tsv`:
 3. `witness-*` — boot witnesses from `test-foc-board-boot(-default)`.
 4. `arm-*` — five ARM images (default, verification, two capture builds, trace).
 5. `arm-static` — `arm_static.py`: locked prologue digests, literals, output lock,
-   protected entry points. The images use link-time optimization, so symbols removed
-   relative to the baseline are listed, not failed.
+      protected entry points, no soft-double routine reachable from an interrupt handler
+   (or the H0 callbacks `cal_adc_tap`/`cal_h0_observer`) in the direct call graph. The
+   images use link-time optimization, so symbols removed relative to the baseline are
+   listed, not failed.
 6. `uart-check` — SIL UART demonstration against the Host matrix.
 7. `quality-gate` — `check_falconfoc_quality_gate.ps1 -RequireCMakeFormatter`.
 8. `fault-injection` — `test_fault_injection.py` drives `--stub` runs with

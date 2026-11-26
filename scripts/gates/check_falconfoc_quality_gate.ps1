@@ -68,6 +68,12 @@ try {
         throw "Generated parameter files are stale: run python -B scripts/gen/gen_parameters.py."
     }
 
+    Write-Host "[quality_gate] run: check_image_double.py"
+    & python -B (Join-Path $root "scripts\gates\check_image_double.py") $root
+    if ($LASTEXITCODE -ne 0) {
+        throw "double outside the allowed calibration estimators (code style guide section 6)."
+    }
+
     Invoke-ChildScript -ScriptPath (Join-Path $root "scripts\gates\check_falconfoc_source_contract.ps1") `
                        -Arguments @("-RepoRoot", $root)
 

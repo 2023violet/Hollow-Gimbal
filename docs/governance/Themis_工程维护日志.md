@@ -3288,3 +3288,4 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 用户确认后删除 `docs/code-wiki/`（Legacy 时代源码地图、台架调试记录与 AI 交接，134 条失效链接）和 `docs/superpowers/plans/`（16 份已完成的执行计划）；两者保留在 Git 历史（tag `legacy-final`、提交 `766bf95`）。仍在使用的 Host 虚拟快速入门移到 `docs/host-virtual-quickstart.md`，README 与 docs/README 链接已更新。
 - 2026-08 实电机调试的结论（电流链秩/相位与符号、原理图 A/C 门极对调、实测 Rs 约 3.5 Ω、1 A 电源塌压、高占空比采样死区、开环 I-f 9 圈）摘入 firmware README 的 "Bench history"。
 - `Themis_代码规范指南.md` 按 V2 重写（依赖方向、热路径直写与薄端口、无 FPU 数值约束、执行域单写者、结构体末尾追加、参数单一来源、验证与文档同步、自检清单），去掉 Legacy 的 applications/bsp/subsys、RTOS 与 ops 句柄规则。
+- 同日补充：删除 `docs/superpowers/specs/2026-08-27-at32f415-code-wiki-design.md`（code-wiki 的设计规格，目标目录已删除），保留在 Git 历史。

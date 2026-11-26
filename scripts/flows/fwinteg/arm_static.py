@@ -8,8 +8,12 @@ trace builds, and exits nonzero on any violated check:
 locked main() prologue differs from baseline, the Board output adapter is neither the
 baseline (beyond one literal-pool word) nor the reviewed M0 adapter with its backend
 attach function absent from the image, selection is not between clock init and ADC init, a failed selection
-does not branch to WFI, Flash program/erase symbols exist, or the default image links
-the synthetic verification supply.
+does not branch to WFI, Flash program/erase symbols exist, the default image links
+the synthetic verification supply, or a protected entry point is missing.
+Since RES-01 the images use link-time optimization except for the anchor files (main.c,
+foc_board.c, foc_board_boot.c and the supply files): helpers inline or gain .lto_priv/.isra
+suffixes, so symbols removed relative to the baseline are reported, not failed, and the
+collected stack-usage files cover only the anchor files.
 """
 import hashlib
 import re
@@ -31,7 +35,25 @@ IMAGES = {
     )
 }
 failures = []
-# Intentional removals relative to the option-matched baseline, each with its reason.
+# Entry points that must stay in every image as separate symbols: the boot selection chain
+# and the output adapter (anchor files, compiled without LTO), the calibration admission and
+# initialization, and the inhibit and supervisor entry points of the safety path.
+PROTECTED_SYMBOLS = {
+    "main",
+    "foc_board_calibration_expectation",
+    "foc_board_calibration_supply",
+    "foc_board_boot_select",
+    "foc_board_boot_select_with",
+    "foc_board_boot_qualify",
+    "foc_board_output_submit",
+    "foc_board_init_with_calibration",
+    "foc_calibration_admit",
+    "foc_runtime_request_inhibit",
+    "foc_device_output_inhibit",
+    "foc_safe_supervisor_tick",
+}
+# Reviewed removals relative to the option-matched baseline, each with its reason; other
+# removals are LTO inlining and are listed without one.
 EXPLAINED_REMOVALS = {
     "foc_board_capture_default_profile":
         "main() takes the capture profile from the effective boot configuration "
@@ -242,7 +264,7 @@ for name, elf in IMAGES.items():
         "no_flash_write_symbols": flash_ok,
         "verification_supply_only_in_verification": supply_ok,
         "calibration_init_reachable": reach_ok,
-        "no_unexplained_symbols_removed": not (set(removed) - set(EXPLAINED_REMOVALS)),
+        "protected_symbols_present": PROTECTED_SYMBOLS <= syms,
         "no_libm_heavy_math": not (syms & HEAVY_LIBM),
     }
     lines = [f"{key}: {'PASS' if value else 'FAIL'}" for key, value in checks.items()]
@@ -250,8 +272,12 @@ for name, elf in IMAGES.items():
     lines.append(f"adapter: {'baseline' if adapter_as_baseline else 'reviewed' if adapter_reviewed else 'UNREVIEWED'}"
                  f" sha256 {adapter_sha}; {BACKEND_ATTACH} linked: {BACKEND_ATTACH in syms}")
     lines.append(f"adapter differences from baseline: {len(adapter_diff)} lines")
+    lines.append("protected symbols missing: " + (" ".join(sorted(PROTECTED_SYMBOLS - syms)) or "none"))
     lines.append("explained removals: " + "; ".join(f"{sym}: {EXPLAINED_REMOVALS[sym]}" for sym in removed
                                                      if sym in EXPLAINED_REMOVALS))
+    lines.append(f"other removals ({len([s for s in removed if s not in EXPLAINED_REMOVALS])}, "
+                 "inlined or localized by LTO): "
+                 + " ".join(s for s in removed if s not in EXPLAINED_REMOVALS))
     lines.append(f"symbols added ({len(added)}): {' '.join(added)}")
     (out / "checks.txt").write_text("\n".join(lines) + "\n")
     summary.append(f"[{name}] " + ", ".join(lines[: len(checks)]))

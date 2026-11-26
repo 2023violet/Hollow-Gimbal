@@ -40,7 +40,9 @@ Steps, each with its raw exit code in `<out>/steps.tsv`:
    the CTest names must equal `expected_tests.tsv`.
 3. `witness-*` — boot witnesses from `test-foc-board-boot(-default)`.
 4. `arm-*` — five ARM images (default, verification, two capture builds, trace).
-5. `arm-static` — `arm_static.py`: locked prologue digests, literals, output lock.
+5. `arm-static` — `arm_static.py`: locked prologue digests, literals, output lock,
+   protected entry points. The images use link-time optimization, so symbols removed
+   relative to the baseline are listed, not failed.
 6. `uart-check` — SIL UART demonstration against the Host matrix.
 7. `quality-gate` — `check_falconfoc_quality_gate.ps1 -RequireCMakeFormatter`.
 8. `fault-injection` — `test_fault_injection.py` drives `--stub` runs with

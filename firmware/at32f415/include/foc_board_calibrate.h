@@ -267,11 +267,8 @@ struct foc_board_calibration {
     atomic_uint adc_active;
     atomic_uint adc_samples;
     struct foc_calibration_adc_context adc_estimator;
-    /* CAL-2: raw sweep, then forward/backward pairs feed the estimators. */
-    struct foc_calibration_angle_sample sweep[FOC_BOARD_CAL_SWEEP_SAMPLES];
+    /* CAL-2: raw sweep count (the samples and estimators are in the work area below). */
     uint32_t sweep_count;
-    struct foc_calibration_rotor_context rotor_estimator;
-    struct foc_calibration_offset_context offset_estimator;
     /* Results of the latest run and the applied snapshot. */
     struct foc_calibration_adc_result adc_result;
     struct foc_calibration_rotor_result rotor_result;
@@ -286,12 +283,9 @@ struct foc_board_calibration {
     atomic_uint ring_head;
     atomic_uint ring_tail;
     atomic_uint ring_overflow;
-    struct foc_board_cal_record ring[FOC_BOARD_CAL_RING];
-    struct foc_board_cal_record history[2];
     uint32_t history_count;
     /* CAL-3: the rotor angle interpolated to each current aperture between the two
      * latest encoder samples; records wait for the sample after their aperture. */
-    struct foc_board_cal_record rl_pending[FOC_BOARD_CAL_RL_PENDING];
     uint32_t rl_pending_count;
     uint32_t rl_points;
     uint32_t rl_point_us[2];
@@ -303,8 +297,6 @@ struct foc_board_calibration {
     uint32_t level;
     uint32_t capture_serial;
     uint32_t tuning_sequence;
-    struct foc_motor_id_context motor_id;
-    struct foc_flux_id flux_id;
     struct foc_motor_id_result rl_d;
     struct foc_motor_id_result rl_q;
     struct foc_motor_rl_model rl_model;
@@ -361,7 +353,6 @@ struct foc_board_calibration {
     struct foc_calibration_snapshot boot_snapshot;
     struct foc_runtime_tuning boot_tuning;
     /* P1 CAL-7: bang-bang q voltage around the start position. */
-    struct foc_mechanical_id_context mech_id;
     struct foc_mechanical_id_result mech_result;
     float inertia_origin_rad;
     float inertia_voltage_v;
@@ -378,6 +369,32 @@ struct foc_board_calibration {
     uint32_t cogging_start_us;
     /* CAL-9: the correction table (NULL: not supported); the sweep borrows the CAL-8 bins. */
     struct foc_board_encoder_lut *encoder_lut;
+    /*
+     * Work area: the stages of one run use it one after another, never together, so their
+     * scratch shares storage. Each stage initializes its part when it begins and leaves
+     * nothing in it that a later stage or a readback needs (results live above).
+     * - CAL-2 (ALIGN to APPLY): the raw sweep and the rotor and offset estimators.
+     * - CAL-3/4/7 (RL_D to INERTIA, COAST): the H0 record ring, written by H0 only while
+     *   record_active is set, and the R/L, flux and inertia contexts.
+     * - CAL-8/9 (alone): the sweep bins, lent to the attached acquisition (cogging->bins).
+     * The ADC estimator stays outside: the idle automatic zero uses it from H0.
+     */
+    union {
+        struct {
+            struct foc_calibration_angle_sample sweep[FOC_BOARD_CAL_SWEEP_SAMPLES];
+            struct foc_calibration_rotor_context rotor_estimator;
+            struct foc_calibration_offset_context offset_estimator;
+        };
+        struct {
+            struct foc_board_cal_record ring[FOC_BOARD_CAL_RING];
+            struct foc_board_cal_record history[2];
+            struct foc_board_cal_record rl_pending[FOC_BOARD_CAL_RL_PENDING];
+            struct foc_motor_id_context motor_id;
+            struct foc_flux_id flux_id;
+            struct foc_mechanical_id_context mech_id;
+        };
+        struct foc_board_cal_bins bins;
+    };
 };
 
 /* Public Functions ------------------------------------------------------------- */

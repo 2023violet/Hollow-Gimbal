@@ -21,10 +21,13 @@
  * foc_board_cogging_sample(), and call foc_board_cogging_finish() once the step reports
  * the end, with compensation off and the drive stopped.
  *
- * Ownership / lifecycle / context
+  * Ownership / lifecycle / context
  * -------------------------------
  * Foreground only. The table is read by Runtime H1 while compensation is on; finish writes
- * it only while compensation is off.
+ * it only while compensation is off. The bins are caller storage (`bins`, 5 KiB) that the
+ * owner may reuse between runs: Board1 lends the calibration manager's work area, which the
+ * other stages use while no sweep runs. Init keeps the pointer and does not touch the bins;
+ * begin clears them.
  *
  * Failure / recovery
  * ------------------
@@ -81,13 +84,19 @@ enum foc_board_cogging_phase {
     FOC_BOARD_COGGING_END = 5,
 };
 
+/** Sweep bins shared by CAL-8 and CAL-9: valid from begin until the fit has run. */
+struct foc_board_cal_bins {
+    /** Per-direction running mean per bin in 0.1 mA (INT16_MIN: no sample). */
+    int16_t mean[2][FOC_RUNTIME_COGGING_BINS];
+    /** Sample count of the direction being captured (saturating). */
+    uint8_t count[FOC_RUNTIME_COGGING_BINS];
+};
+
 struct foc_board_cogging {
     /** The live table the Runtime points at. */
     struct foc_runtime_cogging_table table;
-    /** Per-direction running mean per bin in 0.1 mA and the sample count of the
-     * direction being captured (saturating). */
-    int16_t mean[2][FOC_RUNTIME_COGGING_BINS];
-    uint8_t count[FOC_RUNTIME_COGGING_BINS];
+    /** Caller-owned bins; begin, sample and finish do nothing useful while NULL. */
+    struct foc_board_cal_bins *bins;
     uint32_t empty[2];
     /* Sweep. */
     enum foc_board_cogging_phase phase;
@@ -111,10 +120,11 @@ extern struct foc_board_cogging foc_board_cogging_state;
 
 /* Public Functions ------------------------------------------------------------- */
 
-/** Clear the table, the bins and the result. */
+/** Clear the table and the result; keeps the bins pointer and leaves the bins alone. */
 void foc_board_cogging_init(struct foc_board_cogging *cogging);
 
-/** Start a sweep at origin_rad (rotor) with speed_rad_s > 0; keeps the table. */
+/** Start a sweep at origin_rad (rotor) with speed_rad_s > 0 and clear the bins; keeps the
+ * table. */
 void foc_board_cogging_begin(struct foc_board_cogging *cogging,
                              float origin_rad,
                              float speed_rad_s);
@@ -143,7 +153,8 @@ void foc_board_cogging_sample(struct foc_board_cogging *cogging,
  *
  * @param keep_first_harmonic Keep the once-per-turn component.
  * @param iq_limit_a Outer q-current limit for the range check.
- * @return The status; the table changes only for VALID (new table) and NEGLIGIBLE (cleared).
+  * @return The status (FAILED without bins); the table changes only for VALID (new table) and
+ *         NEGLIGIBLE (cleared).
  */
 enum foc_board_cogging_status foc_board_cogging_finish(struct foc_board_cogging *cogging,
                                                        bool keep_first_harmonic,

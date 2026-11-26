@@ -96,7 +96,8 @@ table_error(const struct foc_board_cogging *cogging, const struct plant *plant, 
 
 static int test_fit(void)
 {
-    static struct foc_board_cogging cogging;
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
     struct plant plant = {0.2, 0.05, 0.3, 0.1, 0.005, false, 1U};
     foc_board_cogging_init(&cogging);
     CHECK(cogging.table.scale_a == 0.0f && cogging.status == FOC_BOARD_COGGING_NONE);
@@ -115,7 +116,8 @@ static int test_fit(void)
 
 static int test_refusals(void)
 {
-    static struct foc_board_cogging cogging;
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
     foc_board_cogging_init(&cogging);
     struct plant plant = {0.2, 0.05, 0.3, 0.0, 0.0, false, 1U};
     CHECK(sweep(&cogging, &plant, false) == FOC_BOARD_COGGING_VALID);
@@ -146,7 +148,8 @@ static int test_refusals(void)
 
 static int test_reference(void)
 {
-    static struct foc_board_cogging cogging;
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
     foc_board_cogging_init(&cogging);
     foc_board_cogging_begin(&cogging, 2.0f, 1.0f);
     float reference = 0.0f;
@@ -174,9 +177,35 @@ static int test_reference(void)
 
 /* Test Entry ------------------------------------------------------------------- */
 
+/* The bins are borrowed: init keeps the pointer and leaves them alone, and without bins
+ * the acquisition refuses instead of writing anywhere. */
+static int test_borrowed_bins(void)
+{
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
+    bins.mean[1][7] = 1234;
+    foc_board_cogging_init(&cogging);
+    CHECK(cogging.bins == &bins && bins.mean[1][7] == 1234);
+    foc_board_cogging_begin(&cogging, 0.0f, 1.0f);
+    CHECK(bins.mean[1][7] == INT16_MIN && bins.count[7] == 0U);
+
+    static struct foc_board_cogging detached;
+    foc_board_cogging_init(&detached);
+    CHECK(detached.bins == NULL);
+    foc_board_cogging_begin(&detached, 0.0f, 1.0f);
+    float reference = 0.0f;
+    const int direction = foc_board_cogging_step(&detached, 1000000U, &reference);
+    CHECK(direction == 0);
+    foc_board_cogging_sample(&detached, direction, 1U, 1.0f, 0.1f);
+    CHECK(foc_board_cogging_finish(&detached, false, 2.5f) == FOC_BOARD_COGGING_FAILED);
+    CHECK(detached.table.scale_a == 0.0f && !detached.dirty);
+    return 0;
+}
+
 int main(void)
 {
-    if (test_reference() != 0 || test_fit() != 0 || test_refusals() != 0) {
+    if (test_reference() != 0 || test_fit() != 0 || test_refusals() != 0 ||
+        test_borrowed_bins() != 0) {
         return 1;
     }
     puts("test-foc-board-cogging: PASS");

@@ -97,18 +97,18 @@ bool foc_board_encoder_lut_descriptor(
 
 enum foc_board_encoder_lut_status foc_board_encoder_lut_fit(
     struct foc_board_encoder_lut *table,
-    struct foc_board_cogging *bins,
+    struct foc_board_cal_bins *bins,
     uint32_t pole_pairs,
     uint32_t counts_per_revolution
 )
 {
-    int16_t *forward = bins->mean[0];
-    int16_t *backward = bins->mean[1];
-    const uint32_t limit = (uint32_t)(FOC_BOARD_COGGING_MAX_EMPTY * (float)LUT_BINS);
-    if (pole_pairs < 2U || counts_per_revolution < FOC_BOARD_ENCODER_LUT_KNOTS) {
+    if (bins == NULL || pole_pairs < 2U || counts_per_revolution < FOC_BOARD_ENCODER_LUT_KNOTS) {
         table->status = FOC_BOARD_ENCODER_LUT_FAILED;
         return table->status;
     }
+    int16_t *forward = bins->mean[0];
+    int16_t *backward = bins->mean[1];
+    const uint32_t limit = (uint32_t)(FOC_BOARD_COGGING_MAX_EMPTY * (float)LUT_BINS);
     if (foc_board_cogging_empty_bins(forward) > limit ||
         foc_board_cogging_empty_bins(backward) > limit || !foc_board_cogging_fill_bins(forward) ||
         !foc_board_cogging_fill_bins(backward)) {

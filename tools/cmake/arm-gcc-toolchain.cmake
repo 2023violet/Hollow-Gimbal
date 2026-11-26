@@ -42,6 +42,19 @@ find_program(
   DOC "ARM objcopy for binary/hex generation"
 )
 
+# The GCC wrappers load the LTO plugin, so archives of -flto objects keep a symbol index.
+find_program(
+  CMAKE_AR
+  NAMES "arm-none-eabi-gcc-ar${_TOOL_SUFFIX}" REQUIRED
+  DOC "ARM archiver with the LTO plugin"
+)
+
+find_program(
+  CMAKE_RANLIB
+  NAMES "arm-none-eabi-gcc-ranlib${_TOOL_SUFFIX}" REQUIRED
+  DOC "ARM ranlib with the LTO plugin"
+)
+
 find_program(
   CMAKE_SIZE
   NAMES "arm-none-eabi-size${_TOOL_SUFFIX}" REQUIRED

@@ -1,0 +1,85 @@
+{
+  "kind": "summary",
+  "demo": "board1-sil-encoder-lut",
+  "scenario": "encoder-lut",
+  "status": "SIL_PASS",
+  "simulated": true,
+  "physical_applied": false,
+  "checks": {
+    "calibration_done": true,
+    "table_matches_injected_error": true,
+    "position_error_reduced": true,
+    "switch_applies": true,
+    "cogging_after_encoder": true,
+    "survives_power_cycle": true
+  },
+  "failed_checks": [],
+  "metrics": {
+    "before": {
+      "gains": [
+        "APPLIED",
+        "APPLIED"
+      ],
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "rms_rad": 0.00759153346390983,
+      "samples": 6004,
+      "turns": 0.9553962053515516
+    },
+    "calibration": {
+      "started": "ACCEPTED",
+      "state": "DONE",
+      "failure": "NONE",
+      "results": [
+        "encoder"
+      ],
+      "encoder-lut-status": 1,
+      "encoder-lut-peak": 0.013977141119539738,
+      "encoder-lut-rms": 0.007612964604049921,
+      "encoder-lut-consistency": 0.9906560778617859,
+      "encoder-lut-enable": 1,
+      "active": true,
+      "worst_knot_counts": 6.879134671293624,
+      "expected_peak_counts": 145.57706281939915
+    },
+    "after": {
+      "steps": {
+        "arm": "APPLIED",
+        "start": "APPLIED"
+      },
+      "rms_rad": 0.00018395218933076038,
+      "samples": 6004,
+      "turns": 0.9553961735205628
+    },
+    "switch": {
+      "off": "APPLIED",
+      "inactive": true,
+      "on": "APPLIED",
+      "active": true
+    },
+    "cogging_after_cal9": {
+      "gains": [
+        "APPLIED",
+        "APPLIED",
+        "APPLIED"
+      ],
+      "speed": "APPLIED",
+      "started": "ACCEPTED",
+      "state": "DONE",
+      "failure": "NONE",
+      "cogging-status": 1,
+      "cogging-enable": 1,
+      "cogging-consistency": 0.6351246237754822,
+      "encoder_active": true,
+      "encoder_table_kept": true
+    },
+    "power_cycle": {
+      "save": "APPLIED",
+      "active": true,
+      "same_table": true,
+      "cogging-enable": 1
+    }
+  }
+}

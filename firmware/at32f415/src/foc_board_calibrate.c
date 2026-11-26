@@ -35,6 +35,7 @@
 #include "foc_trig.h"
 
 #include <math.h>
+#include <stddef.h>
 
 /* Private Macros --------------------------------------------------------------- */
 
@@ -125,6 +126,15 @@
 /* CAL-9: rotor speed of the field sweep in rad/s. */
 #define CAL_ENCODER_SPEED_RAD_S 1.0f
 #define CAL_COAST_MAX_RESIDUAL  0.1
+
+/* The three work-area branches must overlap; a stray member outside the union would
+ * silently restore the separate storage. */
+_Static_assert(
+    offsetof(struct foc_board_calibration, sweep) == offsetof(struct foc_board_calibration, ring) &&
+        offsetof(struct foc_board_calibration, ring) ==
+            offsetof(struct foc_board_calibration, bins),
+    "calibration work area branches must share storage"
+);
 
 /* Private Helpers -------------------------------------------------------------- */
 
@@ -1559,6 +1569,8 @@ static int cal_encoder_start(struct foc_board_calibration *cal, uint32_t now_us)
     cal->lifecycle_sequence = 0U;
     cal->last_us = now_us;
     cal->stages = FOC_BOARD_CAL_STAGE_ENCODER;
+    /* The bins overlay the H0 record ring: no record may land in them. */
+    atomic_store(&cal->record_active, 0U);
     cal->committed = 0U;
     cal->mode_claimed = false;
     cal->failing = false;
@@ -1573,7 +1585,7 @@ static void cal_encoder_finish(struct foc_board_calibration *cal, uint32_t now_u
 {
     const enum foc_board_encoder_lut_status status = foc_board_encoder_lut_fit(
         cal->encoder_lut,
-        cal->cogging,
+        cal->cogging->bins,
         cal->runtime->config.motion.rotor.pole_pairs,
         cal->encoder->sensor.config.counts_per_revolution
     );
@@ -1747,6 +1759,8 @@ static int cal_cogging_start(struct foc_board_calibration *cal, uint32_t now_us)
     cal->lifecycle_sequence = 0U;
     cal->last_us = now_us;
     cal->stages = FOC_BOARD_CAL_STAGE_COGGING;
+    /* The bins overlay the H0 record ring: no record may land in them. */
+    atomic_store(&cal->record_active, 0U);
     cal->committed = 0U;
     cal->mode_claimed = false;
     cal->failing = false;
@@ -2084,6 +2098,10 @@ void foc_board_calibration_attach_cogging(
 {
     if (calibration != NULL) {
         calibration->cogging = cogging;
+        if (cogging != NULL) {
+            /* The sweep bins share the work area with the other stages' scratch. */
+            cogging->bins = &calibration->bins;
+        }
     }
 }
 

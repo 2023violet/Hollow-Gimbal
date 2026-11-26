@@ -62,6 +62,23 @@ set(repo "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(vendor "${repo}/platform/at/at32f415/vendor")
 set(cmsis "${vendor}/cmsis/cm4")
 set(startup "${cmsis}/device_support/startup/gcc")
+if(CMAKE_CROSSCOMPILING)
+  # Link-time optimization for the ARM images (RES-01). The files the fwinteg static checks
+  # anchor on (main() and its boot-selection calls, the output adapter) are compiled without
+  # it, so their code stays separate functions comparable with the baseline. Stack-usage
+  # files then cover only these; LTO code has none.
+  add_compile_options($<$<COMPILE_LANGUAGE:C>:-flto>)
+  add_link_options(-flto -Os)
+  set_source_files_properties(
+    src/main.c
+    src/foc_board.c
+    src/foc_board_boot.c
+    src/foc_board_supply_none.c
+    src/foc_board_expectation.c
+    src/foc_board_supply_verification.c
+    PROPERTIES COMPILE_OPTIONS -fno-lto
+  )
+endif()
 add_subdirectory("${repo}/protocol" protocol)
 
 add_library(

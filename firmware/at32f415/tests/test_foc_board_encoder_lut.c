@@ -61,18 +61,18 @@ static double noise(struct encoder *encoder)
 /* Forward and backward sweep at 1 rad/s with 500 µs encoder samples, then the fit. */
 static enum foc_board_encoder_lut_status sweep(
     struct foc_board_encoder_lut *table,
-    struct foc_board_cogging *bins,
+    struct foc_board_cogging *cogging,
     struct encoder *encoder,
     uint32_t pole_pairs
 )
 {
-    foc_board_cogging_begin(bins, 0.7f, 1.0f);
+    foc_board_cogging_begin(cogging, 0.7f, 1.0f);
     uint32_t t = 0U;
     float reference = 0.0f;
     for (unsigned int guard = 0U; guard < 1000000U; ++guard) {
         t += 500U;
-        const int direction = foc_board_cogging_step(bins, t, &reference);
-        if (bins->phase == FOC_BOARD_COGGING_END) {
+        const int direction = foc_board_cogging_step(cogging, t, &reference);
+        if (cogging->phase == FOC_BOARD_COGGING_END) {
             break;
         }
         const double sign = direction == 1 ? -1.0 : 1.0;
@@ -80,14 +80,14 @@ static enum foc_board_encoder_lut_status sweep(
             encoder->cogging * sin(84.0 * (double)reference + 0.2);
         const double measured = truth + error_at(encoder, truth) + noise(encoder);
         foc_board_cogging_sample(
-            bins,
+            cogging,
             direction,
             t,
             (float)measured,
             (float)((double)reference - measured)
         );
     }
-    return foc_board_encoder_lut_fit(table, bins, pole_pairs, CPR);
+    return foc_board_encoder_lut_fit(table, cogging->bins, pole_pairs, CPR);
 }
 
 static double worst_knot(const struct foc_board_encoder_lut *table, const struct encoder *encoder)
@@ -105,11 +105,12 @@ static double worst_knot(const struct foc_board_encoder_lut *table, const struct
 
 static int test_fit(void)
 {
-    static struct foc_board_cogging bins;
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
     static struct foc_board_encoder_lut table;
     struct encoder encoder = {0.01, 0.004, 0.002, 0.003, 0.002, 0.0005, 1U};
-    foc_board_cogging_init(&bins);
-    CHECK(sweep(&table, &bins, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_VALID);
+    foc_board_cogging_init(&cogging);
+    CHECK(sweep(&table, &cogging, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_VALID);
     /* 0.01 rad is 104 counts: within 3 counts despite the lags and the noise (the encoder
      * error read at the reading instead of the true angle and rounding leave about 2). */
     CHECK(worst_knot(&table, &encoder) < 3.0);
@@ -127,30 +128,32 @@ static int test_fit(void)
 
 static int test_refusals(void)
 {
-    static struct foc_board_cogging bins;
+    static struct foc_board_cal_bins bins;
+    static struct foc_board_cogging cogging = {.bins = &bins};
     static struct foc_board_encoder_lut table;
-    foc_board_cogging_init(&bins);
+    foc_board_cogging_init(&cogging);
     struct encoder encoder = {0.01, 0.0, 0.0, 0.003, 0.0, 0.0, 1U};
-    CHECK(sweep(&table, &bins, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_VALID);
+    CHECK(sweep(&table, &cogging, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_VALID);
     const int16_t first = table.offsets[0];
     table.dirty = false;
 
     /* Noise only: inconsistent, the table stays. */
     encoder = (struct encoder){0.0, 0.0, 0.0, 0.003, 0.0, 0.01, 9U};
-    CHECK(sweep(&table, &bins, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_INCONSISTENT);
+    CHECK(sweep(&table, &cogging, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_INCONSISTENT);
     CHECK(table.offsets[0] == first && !table.dirty);
 
     /* A correction steeper than the sensor contract allows. */
     encoder = (struct encoder){0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 1U};
-    CHECK(sweep(&table, &bins, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_RANGE);
+    CHECK(sweep(&table, &cogging, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_RANGE);
 
     /* One pole pair would remove every harmonic. */
     encoder = (struct encoder){0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 1U};
-    CHECK(sweep(&table, &bins, &encoder, 1U) == FOC_BOARD_ENCODER_LUT_FAILED);
+    CHECK(sweep(&table, &cogging, &encoder, 1U) == FOC_BOARD_ENCODER_LUT_FAILED);
+    CHECK(foc_board_encoder_lut_fit(&table, NULL, 7U, CPR) == FOC_BOARD_ENCODER_LUT_FAILED);
 
     /* A linear encoder: negligible, the table is cleared. */
     encoder = (struct encoder){0.0, 0.0, 0.0, 0.003, 0.002, 0.0, 1U};
-    CHECK(sweep(&table, &bins, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_NEGLIGIBLE);
+    CHECK(sweep(&table, &cogging, &encoder, 7U) == FOC_BOARD_ENCODER_LUT_NEGLIGIBLE);
     CHECK(table.counts_per_revolution == 0U && table.dirty);
     return 0;
 }

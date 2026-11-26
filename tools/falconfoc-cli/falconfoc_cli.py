@@ -2654,8 +2654,9 @@ def run_sil_encoder_lut(simulator, base_arguments, flash_path, json_path=None):
     """CAL-9 encoder linearization (parameter contract section 29) on a SIL encoder with a
     0.01 rad 1st and 0.004 rad 2nd harmonic error in its raw angle and a plant with 84-cycle
     cogging (12 x 7 pole pairs): the field sweep fits the negative error, ignores the
-    cogging lag, the position error against the plant drops, and the table survives a power
-    cycle. Nothing here is physical evidence."""
+    cogging lag, the position error against the plant drops; CAL-8 then runs in the same boot
+    on the shared sweep bins, and both tables survive a power cycle. Nothing here is physical
+    evidence."""
 
     flash_path = pathlib.Path(flash_path)
     checks, metrics = {}, {}
@@ -2753,16 +2754,47 @@ def run_sil_encoder_lut(simulator, base_arguments, flash_path, json_path=None):
     active = encoder_lut_table(session.client)["active"]
     metrics["switch"] = {"off": off, "inactive": inactive, "on": on, "active": active}
     checks["switch_applies"] = off == "APPLIED" and inactive and on == "APPLIED" and active
+
+    # 4. CAL-8 in the same boot: its sweep bins reuse the storage CAL-9 (and CAL-2 before
+    # it) used, so both tables must come out valid and the CAL-9 table untouched. VALID
+    # already requires the firmware's consistency floor (0.5); the 84-cycle cogging of this
+    # plant is lagged differently in each direction, so its consistency stays well below
+    # the 24-cycle cogging scenario's.
+    gains = [session.tune("velocity-kp", 1.5), session.tune("velocity-ki", 30.0),
+             session.tune("position-kp", 8.0)]
+    speed = describe(session.client.call(
+        "param-write", parameter_write(PARAMETERS["cogging-speed"], "f32", 0.5)))["result"]
+    _wait_still(session)
+    started = session.call("calibrate", bytes([16]))["result"]
+    for _ in range(400000):
+        view = session.call("calibrate-read", quiet=True)
+        if view["calibration_state"] in ("DONE", "FAILED"):
+            break
+    cogging = {name: session.read(name) for name in (
+        "cogging-status", "cogging-enable", "cogging-consistency")}
+    kept = encoder_lut_table(session.client)
+    metrics["cogging_after_cal9"] = {"gains": gains, "speed": speed, "started": started,
+                                     "state": view["calibration_state"],
+                                     "failure": view["calibration_failure"], **cogging,
+                                     "encoder_active": kept["active"],
+                                     "encoder_table_kept": kept["offsets"] == table["offsets"]}
+    checks["cogging_after_encoder"] = (started == "ACCEPTED" and view["calibration_state"] == "DONE"
+                                       and cogging["cogging-status"] == 1
+                                       and cogging["cogging-enable"] == 1
+                                       and kept["active"] and kept["offsets"] == table["offsets"])
     saved = session.call("save")["result"]
     transport.__exit__()
 
-    # 4. Power cycle.
+    # 5. Power cycle: both tables come back from the shared page.
     transport, session = boot(False)
     restored = encoder_lut_table(session.client)
+    restored_cogging = session.read("cogging-enable")
     metrics["power_cycle"] = {"save": saved, "active": restored["active"],
-                              "same_table": restored["offsets"] == table["offsets"]}
+                              "same_table": restored["offsets"] == table["offsets"],
+                              "cogging-enable": restored_cogging}
     checks["survives_power_cycle"] = (saved == "APPLIED" and restored["active"]
-                                      and restored["offsets"] == table["offsets"])
+                                      and restored["offsets"] == table["offsets"]
+                                      and restored_cogging == 1)
     transport.__exit__()
 
     passed = all(checks.values())

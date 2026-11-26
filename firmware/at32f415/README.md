@@ -48,7 +48,12 @@ A clock-tree change must update both together.
 The program must stay below the cogging page at `0x0801E800` (122 KB usable; the settings
 slots follow at `0x0801F000`; `store-reserve.ld` asserts it). After ROM-01 the default image was 97,156 B and
 the persistent-settings image 101,972 B; after THERMAL-01 102,976 B and 107,048 B; after
-COG-01 106,976 B and 111,968 B; after ENC-01 they are 109,916 B and 115,532 B. AT32F415 has no FPU, so every libm call
+COG-01 106,976 B and 111,968 B; after ENC-01 109,916 B and 115,532 B. Since RES-01 the ARM images
+use link-time optimization (`-flto`, set in this CMakeLists for cross builds; the toolchain
+file selects `gcc-ar`/`gcc-ranlib`) except for the files fwinteg's static checks anchor on
+(`main.c`, `foc_board.c`, `foc_board_boot.c` and the supply files), and are 103,920 B and
+109,264 B; static RAM is 14,036 B and 14,180 B
+([RES-01](../../docs/evidence/2026-11-25-res-01.md)). AT32F415 has no FPU, so every libm call
 is soft-float code: image sources use `foc_sincosf()` (`core/include/foc_trig.h`)
 instead of `sinf`/`cosf`, `sqrtf(x*x + y*y)` instead of `hypotf`, and the
 calibration helpers in `calibration/src/foc_calibration_math.h` instead of double
@@ -421,7 +426,9 @@ of the settings record.
 `foc_board_cogging` holds the table every Board1 Runtime configuration points at
 (`motion.cogging_table`, frame `FOC_BOARD_MECHANICAL_FRAME`) and the CAL-8 sweep, bins and
 fit; the calibration manager runs it for stage mask 16 (states 18–22) in POSITION mode.
-The bins (5 KB) are only used during a run; the table is 1 KB. Runtime H1 adds the table
+The table is 1 KB. The bins (5 KB, `foc_board_cal_bins`) are not part of it: attaching
+the acquisition lends it the calibration manager's work area, a union shared with the CAL-2
+sweep and the CAL-3/4/7 record ring and contexts, which never run together with CAL-8/9. Runtime H1 adds the table
 current when tuning `cogging_enabled` (ID 149) is 1. The page below the settings slots
 (driver slot 2, 0x0801E800) stores it with the image built with persistence, so the
 program limit is 0x0801E800 (122 KB). `sil-demo --sil-scenario cogging` runs it against a

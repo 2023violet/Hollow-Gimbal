@@ -1,0 +1,43 @@
+Base    falconfoc-v2-at32f415.elf  389807eb2c66
+Target  falconfoc-v2-at32f415.elf  0c519fc244f8
+
+Memory
+  Nonvolatile / load image: 109916 bytes → 103920 bytes   delta -5996 [exact]
+  Runtime RAM:              22132 bytes → 14036 bytes   delta -8096 [exact]
+  Comparability:            exact
+  Base side states:         nonvolatile exact / RAM exact
+  Target side states:       nonvolatile exact / RAM exact
+
+Counts
+  Sections  +0 -0 ~18 (0 rows whose name repeats)
+  Symbols   +821 -1091 ~389 (1616 rows whose key repeats)
+  Identical, so left out of the tables: 1 section(s), 153 symbol(s)
+
+Top section growth (Changed rows)
+        +64  .rodata                      3312 bytes  [Changed]
+
+Largest added sections (absence, never 0)
+  none
+
+Top symbol growth (Changed rows)
+      +5416  foc_board_calibration_poll   12772 bytes  [Changed]
+      +3128  cal_record_estimate          4304 bytes  [Changed]
+      +2928  foc_runtime_control          5496 bytes  [Changed]
+      +2020  foc_runtime_h1_step          4428 bytes  [Changed]
+       +892  foc_board_profile_refresh    1108 bytes  [Changed]
+
+Largest added symbols (absence, never 0)
+          -  foc_parameter_table          2260 bytes  [Added]
+          -  cal_apply                    2064 bytes  [Added]
+          -  foc_current_step_internal.lto_priv.0 1360 bytes  [Added]
+          -  cal_coast                    1356 bytes  [Added]
+          -  foc_board_calibration_start  1320 bytes  [Added]
+
+Object / module attribution
+  unavailable
+
+Warnings
+  [SYMBOL-AMBIGUOUS] 1616 symbol row(s) repeat a name, kind and binding combination on one or both sides and were left unpaired; a row position is not an identity
+diagnostics: old map parsed with the gnu_ld adapter
+diagnostics: new map parsed with the gnu_ld adapter
+diagnostics: operation op-80a8-18eb79e6d28f0a84

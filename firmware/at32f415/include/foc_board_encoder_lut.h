@@ -96,7 +96,7 @@ bool foc_board_encoder_lut_descriptor(const struct foc_board_encoder_lut *table,
  * @param counts_per_revolution Raw counts per turn.
  */
 enum foc_board_encoder_lut_status foc_board_encoder_lut_fit(struct foc_board_encoder_lut *table,
-                                                            struct foc_board_cogging *bins,
+                                                            struct foc_board_cal_bins *bins,
                                                             uint32_t pole_pairs,
                                                             uint32_t counts_per_revolution);
 

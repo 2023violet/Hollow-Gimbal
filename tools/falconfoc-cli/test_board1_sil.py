@@ -281,8 +281,8 @@ class Board1SilTest(unittest.TestCase):
 
     def test_encoder_linearization(self):
         """CAL-9 on an encoder with 1st and 2nd harmonic errors and a cogging plant: the
-        table matches the injected error, the position error drops, ID 157 switches it, and
-        it survives a power cycle."""
+        table matches the injected error, the position error drops, ID 157 switches it, CAL-8
+        then fits on the shared bins in the same boot, and both tables survive a power cycle."""
         import tempfile
         with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
             summary = cli.run_sil_encoder_lut(SIL, ["--lockstep-us", "500"], Path(folder) / "flash.bin")

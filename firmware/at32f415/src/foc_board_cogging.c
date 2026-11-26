@@ -54,12 +54,13 @@ static unsigned int cogging_bin(float mechanical_rad)
     return (unsigned int)(fraction * (float)COGGING_BINS + 0.5f) % COGGING_BINS;
 }
 
-static void cogging_clear_bins(struct foc_board_cogging *cogging, unsigned int direction)
+static void cogging_clear_bins(struct foc_board_cal_bins *bins)
 {
     for (unsigned int bin = 0U; bin < COGGING_BINS; ++bin) {
-        cogging->mean[direction][bin] = COGGING_EMPTY;
+        bins->mean[0][bin] = COGGING_EMPTY;
+        bins->mean[1][bin] = COGGING_EMPTY;
     }
-    memset(cogging->count, 0, sizeof cogging->count);
+    memset(bins->count, 0, sizeof bins->count);
 }
 
 uint32_t foc_board_cogging_empty_bins(const int16_t *bins)
@@ -116,15 +117,16 @@ static float cogging_mean(const int16_t *bins)
 
 void foc_board_cogging_init(struct foc_board_cogging *cogging)
 {
+    struct foc_board_cal_bins *const bins = cogging->bins;
     memset(cogging, 0, sizeof *cogging);
-    cogging_clear_bins(cogging, 0U);
-    cogging_clear_bins(cogging, 1U);
+    cogging->bins = bins;
 }
 
 void foc_board_cogging_begin(struct foc_board_cogging *cogging, float origin_rad, float speed_rad_s)
 {
-    cogging_clear_bins(cogging, 0U);
-    cogging_clear_bins(cogging, 1U);
+    if (cogging->bins != NULL) {
+        cogging_clear_bins(cogging->bins);
+    }
     cogging->empty[0] = 0U;
     cogging->empty[1] = 0U;
     cogging->phase = FOC_BOARD_COGGING_LEAD;
@@ -177,12 +179,15 @@ int foc_board_cogging_step(
         cogging->phase = FOC_BOARD_COGGING_END;
         offset = lead;
     }
-    if (previous == FOC_BOARD_COGGING_FORWARD && cogging->phase != FOC_BOARD_COGGING_FORWARD) {
-        cogging->empty[0] = foc_board_cogging_empty_bins(cogging->mean[0]);
-        memset(cogging->count, 0, sizeof cogging->count);
+    struct foc_board_cal_bins *const bins = cogging->bins;
+    if (bins != NULL && previous == FOC_BOARD_COGGING_FORWARD &&
+        cogging->phase != FOC_BOARD_COGGING_FORWARD) {
+        cogging->empty[0] = foc_board_cogging_empty_bins(bins->mean[0]);
+        memset(bins->count, 0, sizeof bins->count);
     }
-    if (previous == FOC_BOARD_COGGING_BACKWARD && cogging->phase == FOC_BOARD_COGGING_END) {
-        cogging->empty[1] = foc_board_cogging_empty_bins(cogging->mean[1]);
+    if (bins != NULL && previous == FOC_BOARD_COGGING_BACKWARD &&
+        cogging->phase == FOC_BOARD_COGGING_END) {
+        cogging->empty[1] = foc_board_cogging_empty_bins(bins->mean[1]);
     }
     *reference_rad = cogging->origin_rad + offset;
     return direction;
@@ -196,22 +201,23 @@ void foc_board_cogging_sample(
     float iq_a
 )
 {
-    if ((direction != 0 && direction != 1) || !isfinite(mechanical_rad) || !isfinite(iq_a) ||
-        (cogging->sensor_seen && sensor_us == cogging->last_sensor_us)) {
+    struct foc_board_cal_bins *const bins = cogging->bins;
+    if (bins == NULL || (direction != 0 && direction != 1) || !isfinite(mechanical_rad) ||
+        !isfinite(iq_a) || (cogging->sensor_seen && sensor_us == cogging->last_sensor_us)) {
         return;
     }
     cogging->sensor_seen = true;
     cogging->last_sensor_us = sensor_us;
     const unsigned int bin = cogging_bin(mechanical_rad);
     const float scaled = fmaxf(-32767.0f, fminf(32767.0f, iq_a / COGGING_UNIT_A));
-    int16_t *mean = &cogging->mean[direction][bin];
-    if (cogging->count[bin] < UINT8_MAX) {
-        cogging->count[bin]++;
+    int16_t *mean = &bins->mean[direction][bin];
+    if (bins->count[bin] < UINT8_MAX) {
+        bins->count[bin]++;
     }
     if (*mean == COGGING_EMPTY) {
         *mean = (int16_t)cogging_round(scaled);
     } else {
-        const float updated = (float)*mean + (scaled - (float)*mean) / (float)cogging->count[bin];
+        const float updated = (float)*mean + (scaled - (float)*mean) / (float)bins->count[bin];
         *mean = (int16_t)cogging_round(updated);
     }
 }
@@ -222,8 +228,12 @@ enum foc_board_cogging_status foc_board_cogging_finish(
     float iq_limit_a
 )
 {
-    int16_t *forward = cogging->mean[0];
-    int16_t *backward = cogging->mean[1];
+    if (cogging->bins == NULL) {
+        cogging->status = FOC_BOARD_COGGING_FAILED;
+        return cogging->status;
+    }
+    int16_t *forward = cogging->bins->mean[0];
+    int16_t *backward = cogging->bins->mean[1];
     const uint32_t limit = (uint32_t)(FOC_BOARD_COGGING_MAX_EMPTY * (float)COGGING_BINS);
     cogging->empty[0] = foc_board_cogging_empty_bins(forward);
     cogging->empty[1] = foc_board_cogging_empty_bins(backward);

@@ -3289,3 +3289,10 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 2026-08 实电机调试的结论（电流链秩/相位与符号、原理图 A/C 门极对调、实测 Rs 约 3.5 Ω、1 A 电源塌压、高占空比采样死区、开环 I-f 9 圈）摘入 firmware README 的 "Bench history"。
 - `Themis_代码规范指南.md` 按 V2 重写（依赖方向、热路径直写与薄端口、无 FPU 数值约束、执行域单写者、结构体末尾追加、参数单一来源、验证与文档同步、自检清单），去掉 Legacy 的 applications/bsp/subsys、RTOS 与 ops 句柄规则。
 - 同日补充：删除 `docs/superpowers/specs/2026-08-27-at32f415-code-wiki-design.md`（code-wiki 的设计规格，目标目录已删除），保留在 Git 历史。
+
+## 2026-11-25 · RES-01：标定工作区合并与 ARM 部分 LTO（不加功能）
+
+- RAM：CAL-8/9 分桶独立成 `foc_board_cal_bins`，`foc_board_cogging` 改用指针（init 保留指针、不碰分桶）。`struct foc_board_calibration` 末尾的匿名联合体让 CAL-2 扫描与估计器、CAL-3/4/7 记录环与上下文、CAL-8/9 分桶共用一块存储（`_Static_assert` 检查重叠；CAL-8/9 启动时清 `record_active`）。RAM −8,096 B（带存储 22,276 → 14,180 B）。
+- ROM：交叉编译加 `-flto`（链接 `-flto -Os`），fwinteg 静态检查锚定的 main/boot/输出适配器/supply 文件保持 `-fno-lto`；工具链改用 `gcc-ar`/`gcc-ranlib`。默认镜像 109,916 → 103,920 B，带存储 115,532 → 109,264 B，距 122 KB 上限约 15.3 KB。
+- fwinteg `arm_static.py`：`no_unexplained_symbols_removed` 换成 `protected_symbols_present`（启动选择链、输出适配器、标定准入与初始化、停机与监督入口）；LTO 内联造成的符号消失只列出。`stack-usage.su` 只覆盖非 LTO 文件。
+- SIL `encoder-lut` 增加同一次上电 CAL-9 → CAL-8 并要求两表 VALID、编码器表不变、断电后两表恢复。UART 录制 6,365 条与 ENC-01 逐字节相同。firmware README（Flash 预算、CAL-8 分桶）、scripts README、契约 28.7 已同步。fwinteg `run1` VERDICT PASS，0 findings，三套工具链各 133 项全过；SDK 技术门禁 PASS。证据：[RES-01](../evidence/2026-11-25-res-01.md)。

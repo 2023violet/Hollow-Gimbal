@@ -503,6 +503,30 @@ timing, CSA validity, IRQ latency, execution budgets and stack high-water
 measurements remain open. The Board1 Break, `nFAULT`, `nSLEEP`, R7 and independent
 watchdog questions remain governed by the separate hardware safety gate.
 
+## Bench history (Legacy firmware, 2026-08)
+
+The only powered-motor runs so far used the removed Legacy firmware on the first
+Board1 revision with a 2804 gimbal motor at 12 V (2026-08-27 to 2026-08-31; full notes
+in Git history, tag `legacy-final`, `docs/code-wiki/`). V2 has not run on a motor.
+Findings that still matter for the first V2 bench session:
+
+- The Legacy ADC rank-to-phase pairing (A and C swapped) and the global current sign
+  were wrong; after the fix the current loop tracked 0.2–0.4 A within 1 %. V2 maps
+  ranks and phases through `foc_device` and the Board1 pinout; verify both with a
+  fixed voltage vector before closing any loop.
+- On that board revision the schematic swaps the A and C gate pairs (INHA/INLA with
+  INHC/INLC). Each half bridge still receives a complementary pair (no shoot-through),
+  but the phase order is reversed; CAL-2 absorbs it as the encoder direction.
+- The measured winding resistance was about 3.5 Ω against 2.55 Ω in the motor's
+  datasheet: identify the motor (CAL-3) instead of trusting datasheet values.
+- A 12 V / 1 A adapter folded the bus to 2.7 V on current transients and tripped
+  under-voltage; use a supply of at least 2 A.
+- With the phase-A duty above about 0.53 its current sample fell into the switching
+  window, producing a torque jerk once per electrical period; check the ADC sampling
+  instant against high duty cycles.
+- Open-loop I-f drive reached about 19–20 rpm in both directions for 28 s (9 turns)
+  without faults, limited by cogging and friction, not by the electrical chain.
+
 References for the peripheral and encoder contracts
 
 - [AT32F415 reference manual](https://www.arterytek.com/download/RM/RM_AT32F415_V2.05_EN.pdf)

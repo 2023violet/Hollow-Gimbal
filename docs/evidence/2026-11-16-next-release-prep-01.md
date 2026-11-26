@@ -53,7 +53,7 @@ AT32F415 是第一个参考目标，不是所有 MCU 的永久实现边界。当
 - [Runtime README](../../runtime/README.md)
 - [Simulation README](../../simulation/README.md)
 - [Protocol README](../../protocol/README.md)
-- [Host Virtual Quickstart](../code-wiki/FalconFOC_VM_virtual_quickstart.md)
+- [Host Virtual Quickstart](../host-virtual-quickstart.md)
 
 ## 3. 外部 Core 消费者验证
 

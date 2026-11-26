@@ -76,7 +76,7 @@ not written to Board1 defaults.
 - [Runtime README](runtime/README.md)
 - [Simulation README](simulation/README.md)
 - [Protocol README](protocol/README.md)
-- [Host Virtual Quickstart](docs/code-wiki/FalconFOC_VM_virtual_quickstart.md)
+- [Host Virtual Quickstart](docs/host-virtual-quickstart.md)
 - [Servo Quickstart](docs/servo/quickstart.md)
 - [Release-preparation evidence](docs/evidence/2026-11-16-next-release-prep-01.md)
 - [Board1 firmware README](firmware/at32f415/README.md)

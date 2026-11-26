@@ -3282,3 +3282,9 @@ RUNNING、`CTRL_MODE_VEL`、PASSTHROUGH 输入和已完成 I-f→VEL 交接；�
 - 治理文档：删除对不存在的 Utils 指南、工程宪章、注释补强基线和 prompts 模板的引用（改指 AGENTS.md、项目章程、ADR）；章程中平台设计文档改为实际路径。
 - 代码注释：Park/逆 Park 写明公式（不再称 Legacy 约定），CAN 设置 ID 范围、IDs 1–3 不再标 RAM-only。仅注释，ARM 镜像不变。
 - 静态审计剩余失效链接均在历史资料（`docs/code-wiki`、`docs/evidence`、本日志早期条目）、SDK 包内生成文件与 AGENTS.md 的禁止清单中。
+
+## 2026-11-25 · 删除 Legacy 代码百科与过期计划，代码规范按 V2 重写
+
+- 用户确认后删除 `docs/code-wiki/`（Legacy 时代源码地图、台架调试记录与 AI 交接，134 条失效链接）和 `docs/superpowers/plans/`（16 份已完成的执行计划）；两者保留在 Git 历史（tag `legacy-final`、提交 `766bf95`）。仍在使用的 Host 虚拟快速入门移到 `docs/host-virtual-quickstart.md`，README 与 docs/README 链接已更新。
+- 2026-08 实电机调试的结论（电流链秩/相位与符号、原理图 A/C 门极对调、实测 Rs 约 3.5 Ω、1 A 电源塌压、高占空比采样死区、开环 I-f 9 圈）摘入 firmware README 的 "Bench history"。
+- `Themis_代码规范指南.md` 按 V2 重写（依赖方向、热路径直写与薄端口、无 FPU 数值约束、执行域单写者、结构体末尾追加、参数单一来源、验证与文档同步、自检清单），去掉 Legacy 的 applications/bsp/subsys、RTOS 与 ops 句柄规则。

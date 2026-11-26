@@ -13,7 +13,7 @@ firmware and its docs were removed on 2026-11-24 and remain only at the Git tag
    - [Parameter table](./parameters.md) — every UART/CAN parameter, generated from `firmware/at32f415/parameters.json`
 5. [Wire protocols](../protocol/README.md) — UART V1, CANSimple and CAN MIT
 6. [Python CLI](../tools/falconfoc-cli/README.md) — commands and SIL scenarios
-7. [Servo quickstart](./servo/quickstart.md) and [Host Virtual quickstart](./code-wiki/FalconFOC_VM_virtual_quickstart.md)
+7. [Servo quickstart](./servo/quickstart.md) and [Host Virtual quickstart](./host-virtual-quickstart.md)
 8. [Control-plane docs](./control-plane/quickstart.md) — Host configuration store and diagnostics
 9. [Maintenance log](./governance/Themis_工程维护日志.md) — every change, newest at the end
 
@@ -26,11 +26,10 @@ Coding rules: [code style](./governance/Themis_代码规范指南.md),
 These record how the project got here. They are not current-state pointers and
 may cite removed Legacy paths.
 
-- `code-wiki/` — Legacy-era source maps, Board1 bring-up and the 2026-08/09
-  open-loop bench debugging (the only powered-motor evidence so far). The Board1
-  pinout in `hardware-and-drv8311h.md` predates the new pinout (`d4aafff`); the
-  firmware README is authoritative.
 - `evidence/` — dated acceptance reports and raw evidence.
-- `superpowers/plans/` and `superpowers/specs/` — dated plans and designs.
+- `superpowers/specs/` — dated designs; the parameter contract is the live one.
+- The Legacy-era code wiki and the dated execution plans were removed on
+  2026-11-25; they remain in Git history (tag `legacy-final`, commit `766bf95`).
+  The bench findings they held are summarized in the firmware README (Bench history).
 - `release/` — SDK 0.1.0-rc.1 release-preparation records.
 - `pcb docs/` — Board1 schematics and datasheets.
